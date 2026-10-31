@@ -7,6 +7,17 @@
 libwayland 1.26、mesa 26.2.5（沙箱无 /dev/dri，故 LIBGL_ALWAYS_SOFTWARE=1 → llvmpipe）、Emacs 31.1（基准导出）。
 驱动方式：`scripts/run.sh <case>` 启动私有 sway → 跑 lab → wtype 注入 → 收集日志 / 截图。
 
+## 门禁结论（2026-10-31，commit `ccc6976`）
+
+S1–S5 的强制门禁项已完成并通过：interceptor 边界、前缀 / undefined / C-g、自建 undo 分组 / 保存点 /
+redo point、平台输入与 IME 观测、mark marker、鼠标导入、多 buffer 隔离、真实键位分类、IME 命令屏障、
+关闭 / 失焦取消、真实 fcitx5 提交后的 mark。
+
+- 11 个单测、26 个 headless case、6 个真实会话 case 全绿。
+- 产品级结论已写入 `docs/decisions.md`（D16–D19）、`docs/architecture.md`、`docs/plan.md`。
+- 可选剩余：真实硬件键盘、WM 系统保留键、WM 强退 / 崩溃、性能基线；不阻塞 M0。
+- 本文件自此作为 S1–S5 的历史证据冻结；M1 之后的新证据进入正式测试 / PR，不回写这里。
+
 ## S1（2026-xx，layer 2 实测）
 1. `intercept_keystrokes` 收到 `KeystrokeEvent { keystroke, input_preference }`；`cx.stop_propagation()` 后：
    底座 action 不派发、不插字符、元素的 on_key_down 不触发。用例 `s1-consume`：
@@ -238,6 +249,8 @@ undo 后立即输入：开新组并清空 redo，见 `cases/s3-undo-then-input.*
   同一命令保存 `0 chars`。
 
 ### D17 非命令入口：窗口关闭 / 焦点切走（2026，真实会话已验证）
+
+决策归属：非命令入口由 D19 修订（D17 只保留命令入口部分）。
 
 用户确认的语义：**未提交的预编辑不是输入**。关闭或失焦时，组合按取消处理（不写入 buffer、
 不 dirty、不保存），而不是保留组合或等用户回来。命令入口仍按 D17 拒绝。

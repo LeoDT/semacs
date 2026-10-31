@@ -1,8 +1,8 @@
 # 架构设计
 
-状态：方案 B 为候选实现路径。S1–S5 的机制验证见 `spikes/EVIDENCE.md`；D16 自建 undo 与 D17 IME 组合屏障已获批准。
-mark 已按 marker 语义验证；D17 的窗口关闭入口已验证，真实焦点切换路径仍待按第 6 节要求复核。
-若公开 API 无法满足约束，暂停正式实现，按 D14 重新决策，不默认增加保真度差异。
+状态：方案 B 已通过 S1–S5 强制门禁（commit `ccc6976`），进入 M0；逐项证据见 `spikes/EVIDENCE.md`。
+D16 自建 undo、D17 命令入口屏障、D19 关闭 / 失焦取消、D18 mark marker 均已获批准并实测。
+若实施中发现公开 API 无法满足约束，暂停并按 D14 重新决策，不默认增加保真度差异。
 
 ## 1. 分层
 
@@ -243,17 +243,17 @@ struct BufferView {
 ### 组合输入与命令的串行化
 
 - 平台 / IME 自己消费的候选操作不作为编辑器命令执行。当前公开 API 没有“主动提交组合并等待完成”的入口，
-  因此按 [D17](decisions.md#d17-ime-组合屏障命令拒绝关闭--失焦取消)：`marked_text_range()` 非空时，
+  因此按 [D17](decisions.md#d17-ime-组合屏障未提交时拒绝命令)：`marked_text_range()` 非空时，
   命令、前缀启动、保存、切换 buffer、进入 / 退出 minibuffer、kill / quit 一律拒绝并回显
   `Input method composition is active; finish it first`，组合与 buffer 保持原样。
-- 关闭 / 失焦不是命令入口：未提交的预编辑不是输入，按取消处理。
+- 关闭 / 失焦不是命令入口：未提交的预编辑不是输入，按取消处理（[D19](decisions.md#d19-d17-非命令入口修订关闭--失焦取消未提交预编辑)）。
   `Window::on_window_should_close` 先取消组合再允许关闭；内部 `Window::remove_window()` 同样接入。
   焦点被切走时以平台在 text-input leave 的取消为准，保留主动取消兜底；不回写 buffer、不变 dirty。
 - 所有回调绑定原目标 / 会话代次，迟到提交不得按当前焦点重新解释，也不能借焦点变化推定输入已完成。
   若将来上游提供公开的 commit / cancel + 完成通知，可升级为“先收敛再执行”。
 - 事件必须关联原目标；目标销毁前拒绝或取消组合；已结束会话的迟到回调不得修改另一个 buffer 或新的 minibuffer 会话。
 - 保存只读取已提交文本，不能把临时预编辑落盘；取消后验证内存、磁盘与保存点没有误变更。
-- pending 前缀期间直接到达 handler 的文本不能无条件自插入。前缀启动前的组合输入先按 D17 处理；
+- pending 前缀期间直接到达 handler 的文本不能无条件自插入。前缀启动前的组合输入按 D17 / D19 处理；
   前缀期间新到达的文本走受前缀约束的输入解析，按基准完成绑定或报 undefined，不绕过键位引擎修改文本。
 
 ## 7. undo
@@ -341,8 +341,8 @@ struct BufferView {
 | `undo` / `redo` / 事务控制与编辑意图非公开 API | 已由 D16 绕过：自有 change 记录，编辑经 `EntityInputHandler` 应用；不依赖 action 与 EditIntent |
 | point / scroll / focus 绑在 state 上 | 同 buffer 多窗口推迟（D9） |
 | 没有通用 marker / 外部变更流 | mark 在我们这里维护（D18）；所有文本变更经 `EditTarget` 同一入口。空 `RangeDecoration` 会被过滤，不能兜底 |
-| 窗口关闭没有专用 hook | `Window::on_window_should_close` 可在关闭前执行取消逻辑并允许关闭（D17）；内部 `remove_window` 仍需自己接入 |
-| 焦点切走没有 veto | 只能观察 activation；回调必须绑定原目标 / 会话代次，不能按当前焦点重解释 |
+| 窗口关闭没有专用 hook | `Window::on_window_should_close` 可在关闭前执行取消逻辑并允许关闭（D19）；内部 `remove_window` 仍需自己接入 |
+| 焦点切走没有 veto | 只能观察 activation；回调必须绑定原目标 / 会话代次，不能按当前焦点重解释（D19） |
 | 没有 narrowing / indirect buffer / text property | 明确非目标 |
 
 ## 12. 未来替换文本引擎的成本

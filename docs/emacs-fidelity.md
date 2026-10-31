@@ -44,7 +44,7 @@ isearch、`C-u`、mark ring 等即使列为 F2，也在 v1 之后评估。新增
 
 - 词边界与段落边界的精确规则（Emacs 用 syntax table；我们用简化规则）。
 - `C-n` / `C-p` 的 goal column 与软换行下的行为。
-- IME 组合未提交时拒绝命令与前缀；关闭 / 失焦则取消未提交预编辑后继续（D17，用户批准的有意策略）；
+- IME 组合未提交时拒绝命令与前缀；关闭 / 失焦则取消未提交预编辑后继续（D17 / D19，用户批准的有意策略）；
   需在用户可见说明中登记。
 - 滚动行为：`C-v` / `M-v` / `C-l` 的定位细节。
 - mark ring、`C-x C-x`（exchange-point-and-mark）、`C-u` 数字参数、按键重复。
@@ -164,7 +164,7 @@ headless sway + 真实 fcitx5 的 real-cases）。旧“底座原生 action 等�
 | 连按 undo；undo 后立即输入 / 切换 buffer / 进入 minibuffer | 记录操作序列及目标 | 完成顺序、焦点、文本与 caret 一致 |
 | 保存 → 编辑 → undo；保存 → undo / redo | 固定保存点与 dirty 的可观察结果 | dirty 与保存内容一致，保存失败不更新保存点 |
 | IME 更新 → 提交 / 取消 → undo | 记录预编辑替换范围与最终状态 | 取消不留下净文本 / mark 偏移或错误 dirty；提交按插入调整 mark（合成路径 `s4-mark-ime`，真实 IME 待复核） |
-| 预编辑中编辑 / 保存 / 切换 buffer / 进入或退出 minibuffer / 关闭 | 固定 IME、平台、提交 / 取消选择与操作顺序 | 命令按 D17 拒绝并提示；关闭 / 失焦取消预编辑后继续，不保存、不变 dirty（真实 `s4-ime-close` / `s4-ime-focus`） |
+| 预编辑中编辑 / 保存 / 切换 buffer / 进入或退出 minibuffer / 关闭 | 固定 IME、平台、提交 / 取消选择与操作顺序 | 命令按 D17 拒绝并提示；关闭 / 失焦按 D19 取消预编辑后继续，不保存、不变 dirty（真实 `s4-ime-close` / `s4-ime-focus`） |
 | pending 前缀期间文本提交；旧目标迟到 IME 回调 | 区分前缀前组合输入与前缀后的新输入 | 不绕过前缀自插入，不污染另一个 buffer 或新的 minibuffer 会话 |
 | A 设置 point / mark → B 编辑 → A | 分别固定 point、mark、激活状态及滚动位置的预期 | 状态按 buffer 保留、无串用；kill 后释放，事件不越界 |
 | 正文与 minibuffer 的 motion / kill / yank / undo | 同一命令在不同输入目标执行；prompt 不可编辑 | 共用编辑语义与 kill ring，undo 历史独立，补全通过编辑入口 |

@@ -88,7 +88,7 @@ FAKE-PREEDIT OWNEDIT OWNUNDO REDO REPLAY MINI PREEDIT PREFIX TARGET`，
 | `s4-observe` | 平台文本输入经适配器可见（范围 + 内容）；预编辑；pending 前缀期间字符按序列解析、不插入 | S4 |
 | `s4-mark-ime` | IME 提交按插入调整 mark，undo 恢复；重复预编辑 / 提交由适配器同一入口处理 | S4 |
 | `s4-ime-barrier` | D17 策略分支：组合中 save / 前缀 / 切换被拒绝，组合结束后恢复 | S4 |
-| `s4-ime-close` | D17 非命令入口：组合中关闭先取消预编辑再允许关闭，不保存、不变 dirty | S4 |
+| `s4-ime-close` | D17 / D19 非命令入口：组合中关闭先取消预编辑再允许关闭，不保存、不变 dirty | S4 |
 | `s4-mouse` | 虚拟指针正反向拖选 → point / mark / active 导入；单击保留 mark | S4 |
 | `s4-readonly` | 只读目标拒绝输入并回显 `Buffer is read-only`，motion 仍工作 | S1/S4 |
 | `s5-raw` | 原始键名与 `key_char` 分类：RET/`C-m`、TAB/`C-i`、DEL、ESC、箭头、M-f、AltGr、死键 | S5 |
@@ -118,8 +118,8 @@ SPIKE_REAL=1 scripts/check-real.sh --all    # 与 real-cases/*.expected 对比
 |---|---|
 | `s4-ime` | 真实 fcitx5 预编辑 / 空格提交 / Escape 取消 / 提交后 undo（不再 panic）/ 预编辑不 dirty |
 | `s4-ime-save` | D17：组合中保存被拒绝且组合保留；取消后同一命令保存已完成文本 |
-| `s4-ime-close` | D17 非命令入口：组合中关闭先取消预编辑再关闭，不保存、不变 dirty |
-| `s4-ime-focus` | D17 非命令入口：组合中切 workspace，平台取消组合，文本 / undo / dirty 不变；恢复后无迟到污染 |
+| `s4-ime-close` | D17 / D19 非命令入口：组合中关闭先取消预编辑再关闭，不保存、不变 dirty |
+| `s4-ime-focus` | D17 / D19 非命令入口：组合中切 workspace，平台取消组合，文本 / undo / dirty 不变；恢复后无迟到污染 |
 | `s4-ime-mark` | 真实 fcitx5 空格提交后 mark 跟随，undo 恢复（F7 probe 避开 `Ctrl-SPC`） |
 | `s5-real-keymap` | 真实 Hyprland 下的 Shift / `C-?` / 死键 / AltGr 分类（与 headless 结果对照） |
 
@@ -150,7 +150,7 @@ emacs -Q --batch -l export-keys.el         # 导出 v1 默认键位的命令名�
   `real-cases/s4-ime*` 验证，且依赖本机环境。
 - **鼠标**：`vptr` 是 wlr virtual pointer（协议等价于物理指针），不是物理鼠标；与 IME / caret 同步的交错未测。
 - **Shift / `C-?` / 死键**：`s5-keymap` 上传与合成器相同的 keymap，协议层等价；不是字面硬件键盘。
-- **D17 非命令入口**：关闭与焦点切走已在真实 Hyprland + fcitx5 验证：未提交预编辑按取消处理，
+- **D17 / D19 非命令入口**：关闭与焦点切走已在真实 Hyprland + fcitx5 验证：未提交预编辑按取消处理，
   关闭 / 失焦不保存、不变 dirty。WM 强退与进程崩溃未测。
 - **mark 跟随**：`s3-mark-*` 已与 Emacs 31.1 对照；`s4-mark-ime` 是适配器驱动的合成提交，
   真实 fcitx5 路径由 `real-cases/s4-ime-mark` 验证。

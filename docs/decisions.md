@@ -1,7 +1,7 @@
 # 决策记录
 
-状态：D1–D13 保留原始决策记录；D14 修正实施门禁，D15 补齐交互边界与状态归属，D16 / D17 / D18 记录 spike 实测后批准的自建 undo、IME 组合屏障与 mark marker 语义，优先于其中冲突的旧假设。
-方案 B 只获准进入 spike，尚未获证实可满足全部行为要求。新增事实通过追加决策记录，不改写历史。
+状态：D1–D13 保留原始决策记录；D14 修正实施门禁，D15 补齐交互边界与状态归属，D16 / D17 / D18 记录 spike 实测后批准的自建 undo、IME 组合屏障与 mark marker 语义，D19 修订 D17 的非命令入口。
+方案 B 已通过 S1–S5 强制门禁，进入 M0。新增事实通过追加决策记录，不改写历史。
 
 | ID | 决策 | 状态 |
 |---|---|---|
@@ -21,8 +21,9 @@
 | D14 | 修正输入 / mark / undo 假设；spike 门禁；v1 截止 M3 | 已决定，API 缺口的处理选项仍待确认 |
 | D15 | IME 命令屏障、buffer-local 状态、公共编辑目标与命令名修正 | 已决定，适配可行性及 IME 收敛策略须经 spike 验证 |
 | D16 | 自建 undo，不派发底座 Undo / Redo；分组、保存点与每目标历史归我们 | 已决定（用户批准，spike 实测通过） |
-| D17 | IME 组合未提交时拒绝执行命令与启动前缀，先让用户完成输入 | 已决定（用户批准，spike 实测通过；真实焦点路径待复核） |
+| D17 | IME 组合未提交时拒绝执行命令与启动前缀，先让用户完成输入 | 命令入口仍有效；非命令入口由 D19 修订 |
 | D18 | mark 使用自维护 marker：insertion type nil，删除塌缩，undo 按 change 恢复；由 EditTarget 单点更新 | 已决定（Emacs 31.1 对照通过） |
+| D19 | D17 非命令入口修订：关闭 / 失焦取消未提交预编辑后继续，不保存、不变 dirty | 已决定（用户批准，真实 fcitx5 验证） |
 
 ---
 
@@ -257,38 +258,29 @@ InputState 公共适配尚未经过 crates.io 依赖构建或 Wayland 验证，�
 
 ---
 
-## D17 IME 组合屏障：命令拒绝，关闭 / 失焦取消
+## D17 IME 组合屏障：未提交时拒绝命令
+
+> 状态：命令入口部分仍有效；关闭 / 失焦等非命令入口由 D19 修订。
 
 **决策**：当当前编辑目标存在未提交的 IME 组合（`marked_text_range()` 为 `Some`）时：
 
-- **命令入口**：不执行任何命令（保存、切换 buffer、进入 minibuffer、kill / quit、编辑命令等）；
-  不启动前缀键（`C-x` 等），避免平台因 `accepts_text_input=false` 直接取消组合；
-  回显固定提示 `Input method composition is active; finish it first`，保持组合与 buffer 原样；
-  观察 / 组合探针（dump、同步选区、取消组合）例外，仅用于 spike 取证。
-- **非命令入口（关闭 / 失焦）**：未提交的预编辑不是输入，按取消处理；
-  窗口关闭时先取消组合再允许关闭，不保存、不变 dirty；焦点被切走时以平台取消为准，
-  我们保留主动取消的兜底。迟到回调必须绑定原目标 / 会话代次，不得污染新目标。
+- 不执行任何命令（保存、切换 buffer、进入 minibuffer、kill / quit、编辑命令等）；
+- 不启动前缀键（`C-x` 等），避免平台因 `accepts_text_input=false` 直接取消组合；
+- 回显固定提示 `Input method composition is active; finish it first`，保持组合与 buffer 原样；
+- 观察 / 组合探针（dump、同步选区、取消组合）例外，仅用于 spike 取证。
 
 **理由**：预编辑文本会临时进入底座正文；公开 API 没有“主动提交平台 IME 组合并等待完成”的入口。
 实测在真实 fcitx5 下，保存会把 `ni hao` 当正文（`Saving file (spike): 6 chars`），随后 Escape 取消组合、
-buffer 变回空且仍 clean；真实文件场景会写坏文件。用户确认：字没打完就不应该保存，因此命令按拒绝处理；
-而关闭 / 失焦时未提交内容本来就不应算输入，直接取消更符合用户预期（alacritty 实测 + 真实 spike 复核）。
+buffer 变回空且仍 clean；真实文件场景会写坏文件。用户确认：字没打完就不应该保存，因此按拒绝处理。
 
-**证据**：
-
-- `spikes/lab/cases/s4-ime-barrier.*` / `real-cases/s4-ime-save.*`：命令拒绝与组合保留。
-- `spikes/lab/cases/s4-ime-close.*` / `real-cases/s4-ime-close.*`：组合中关闭 →
-  `CANCEL close preedit=0..6` → 取消后 `CLOSE allow preedit_after=None`，无保存、无 dirty。
-- `real-cases/s4-ime-focus.*`：组合中切 workspace，平台在 text-input leave 时先取消组合
-  （`replace_text_in_range marked=0..6 text=""`），随后 `ACTIVATION active=false ... preedit=None`；
-  返回后文本 / undo / dirty 不变，无迟到提交。
+**证据**：`spikes/lab/cases/s4-ime-barrier.*`（策略分支）与
+`spikes/lab/real-cases/s4-ime-save.*`（真实 fcitx5：`REFUSE save-buffer preedit=0..6`，组合保留；
+取消后同一命令保存已完成的文本）。
 
 **边界 / M1 要求**：
 
-- 窗口关闭使用 `Window::on_window_should_close`：取消组合后返回 true；
-  内部 `Window::remove_window()` 路径在 M1 也必须接入同一处理。
-- 焦点切走没有 veto API：观察 activation 并绑定目标 / 会话代次；平台已取消的组合不能再被迟到回调解释成文本。
-- 若将来上游提供公开的 commit / cancel + 完成通知，可升级为“先收敛再执行”；当前非命令入口已是“取消后继续”。
+- 窗口关闭、点击其它窗口、焦点被系统切走不经过命令入口，仍需在 close / focus 路径做同样检查并保留窗口与组合；
+- 若将来上游提供公开的 commit / cancel + 完成通知，可升级为“先收敛再执行”，但当前按 D17 拒绝；
 - 该策略是用户批准的有意差异，不是把失败的 spike 降级为 F3；需在用户文档中说明。
 
 ---
@@ -318,9 +310,39 @@ buffer 变回空且仍 clean；真实文件场景会写坏文件。用户确认�
 **遗留**：真实 fcitx5 提交后的 mark 跟随已由 `real-cases/s4-ime-mark` 验证；redo point 已按 Emacs 对齐，
 不再属于 mark 遗留。
 
+## D19 D17 非命令入口修订：关闭 / 失焦取消未提交预编辑
+
+**背景**：D17 只固化了命令入口的拒绝策略，并把窗口关闭 / 焦点切走列为“同样检查并保留窗口与组合”。
+真实环境验证与用户确认后，语义应改为：**未提交的预编辑不是输入**；关闭 / 失焦时取消组合并继续，
+而不是保留组合或保存预编辑。
+
+**决策**（修订 D17 的非命令入口部分）：
+
+- 窗口关闭：`Window::on_window_should_close` 中先取消组合，再允许关闭；不保存、不变 dirty；
+  内部 `Window::remove_window()` 路径在 M1 也必须接入同一处理。
+- 焦点切走：平台在 text-input leave 时已自动取消组合（真实 fcitx5 的取消早于 GPUI activation 回调）；
+  我们保留主动取消的兜底。所有回调绑定原目标 / 会话代次，迟到提交不得按当前焦点解释成文本。
+- 命令入口仍按 D17：组合未提交时拒绝执行命令与前缀并提示，不把预编辑当正文保存。
+
+**理由 / 用户语义**：字没打完时命令不应保存；但关闭或失焦时用户已经离开，未提交内容不应算输入。
+用户在 alacritty 观察到失焦 / 关闭会取消组合、不保留未提交文字；真实 fcitx5 spike 复核了同一行为。
+
+**证据**：
+
+- `spikes/lab/cases/s4-ime-close.*` + `real-cases/s4-ime-close.*`：
+  `CANCEL close preedit=0..6` → `CLOSE allow preedit_after=None` → 进程退出，无保存、无 dirty。
+- `real-cases/s4-ime-focus.*`：
+  `replace_text_in_range marked=0..6 text=""`（平台取消）→ `ACTIVATION active=false ... preedit=None`；
+  返回后 text / undo / dirty 不变，无迟到提交。
+- `docs/architecture.md` 的“组合输入与命令的串行化”、`spikes/EVIDENCE.md` 的 D17 非命令入口章节同步。
+
+**后果**：D17 的命令入口部分继续有效，非命令入口由本条取代；这不是 F3 降级，而是用户批准的有意策略。
+
+---
+
 ## 待决事项
 
-- IME 收敛：命令与前缀已按 D17 拒绝；关闭 / 失焦按取消处理（真实 fcitx5 已验证）；
+- IME 收敛：命令与前缀按 D17 拒绝；关闭 / 失焦按 D19 取消后继续（真实 fcitx5 已验证）；
   真实 IME 提交后的 mark 已由 `real-cases/s4-ime-mark` 验证。
 - 文件层：v1 保证 UTF-8 / LF；CRLF / BOM 等输入的拒绝或保留策略须在 M2 明确，禁止静默有损转换。
   自动保存、备份文件属后续增强；确认文案在 M2 固定。
