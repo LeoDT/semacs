@@ -30,11 +30,13 @@ isearch、`C-u`、mark ring 等即使列为 F2，也在 v1 之后评估。新增
 - point / mark / region 的基本语义：`C-SPC` 设 mark；mark 位置与 region 激活状态独立；
   移动、编辑、取消和 undo 后的状态有独立断言；`C-w` / `M-w` 作用于 region。
 - motion 的语义类别：字符、词、行首 / 行尾、buffer 首 / 尾、前 / 后行、翻页。
-- kill ring 的基本行为：`C-k` / `C-w` / `M-w` / `C-y`；连续 kill 的追加规则。
+- kill ring 的基本行为：`C-k` / `C-w` / `M-w` / `C-y`；连续 kill 的追加规则；正文各 buffer 与 minibuffer 共享 kill ring。
 - undo 的命令边界：原子编辑按命令撤销，连续自插入与删除的合并规则按第 5 节固定脚本复核；
   移动 / 其它命令打断合并，不能把“每条命令一个边界”解释成无条件阻止所有合并；undo / redo 键位一致。
-- buffer 模型：buffer 名、当前 buffer、dirty 标记、`C-x b` / `C-x k`。
-- minibuffer：`M-x` 读取命令名，`C-g` 取消，`RET` 确认。
+- buffer 模型：buffer 名、当前 buffer、dirty 标记、`C-x b` / `C-x k`；A → B → A 时 point / mark 不丢失、不串用，激活状态按切换命令的基准结果断言。
+- minibuffer：`M-x` 读取命令名，`C-g` 取消，`RET` 确认；基础 motion / 编辑 / mark / kill / yank 共用正文语义，undo 历史独立，prompt 不可编辑。
+- IME 与命令交错：保存、切换目标、关闭前须收敛组合输入；不保存临时预编辑，不把迟到输入投递到新目标；
+  pending 前缀期间的文本提交不绕过解析自插入。具体提交 / 取消策略先按固定平台与 Emacs 基准验证，不默许新增差异。
 - 文件安全与退出：保存失败不清 dirty；保存后 undo 正确反映是否偏离保存内容；
   kill dirty buffer、`C-x C-c` 与窗口关闭均防止静默丢失未保存内容，取消后保留 buffer 与焦点。
 
@@ -91,7 +93,7 @@ isearch、`C-u`、mark ring 等即使列为 F2，也在 v1 之后评估。新增
 | 键 | 命令 | v1 |
 |---|---|---|
 | `C-f` / `C-b` / `C-p` / `C-n` | forward-char / backward-char / previous-line / next-line | 是 |
-| `C-a` / `C-e` | beginning-of-line / end-of-line | 是 |
+| `C-a` / `C-e` | move-beginning-of-line / move-end-of-line | 是 |
 | `M-f` / `M-b` | forward-word / backward-word | 是 |
 | `M-<` / `M->` | beginning-of-buffer / end-of-buffer | 是 |
 | `C-v` / `M-v` | scroll-up-command / scroll-down-command | 是 |
@@ -108,10 +110,13 @@ isearch、`C-u`、mark ring 等即使列为 F2，也在 v1 之后评估。新增
 | `M-x` | execute-extended-command | 是 |
 | `C-x C-f` / `C-x C-s` / `C-x C-w` | find-file / save-buffer / write-file | 是 |
 | `C-x b` / `C-x k` | switch-to-buffer / kill-buffer | 是 |
-| `C-x C-c` | save-buffers-kill-emacs | 是 |
+| `C-x C-c` | save-buffers-kill-terminal | 是 |
 | `C-s` / `C-r` | isearch-forward / isearch-backward | 延后 |
 | `C-u` | universal-argument | v1 后评估 |
 | `C-x 1/2/3/o` | window 管理 | 延后 |
+
+`C-a` / `C-e` / `C-x C-c` 的命令名已用本机 Emacs 31.1 `-Q`、`fundamental-mode` 的
+`key-binding` 核对；这不代表完整绑定表或命令行为已通过对照。S1–S5 期间须导出全部 v1 绑定并核对注册表。
 
 ## 5. 对照基准与 undo 验收矩阵
 
@@ -122,7 +127,8 @@ isearch、`C-u`、mark ring 等即使列为 F2，也在 v1 之后评估。新增
   涉及按键时记录 GUI / batch 驱动方式，不能把直接调用函数等同于真实 command loop。
 - 测试脚本与预期结果在 spike 阶段固化到验证工程；记录 Emacs 版本、依赖解析版本与 `Cargo.lock`、
   平台、运行命令和实际结果。临时脚本放 `.pi/tmp/`，验证通过的回归用例随正式工程迁移。
-- semacs 必须经 interceptor → 命令 → Buffer 真实路径验证，不能拿底座原生 action 的结果代替。
+- semacs 必须经 interceptor → 命令 → EditTarget（正文为 Buffer，minibuffer 为独立目标）真实路径验证，不能拿底座原生 action 的结果代替。
+  IME 直接 handler 路径单独驱动，验证它也受相同目标归属、输入完成屏障及 pending 前缀约束。
 - undefined 用例先断言双方均无绑定；模式特定绑定另设用例。IME 还需 Wayland 手工验证。
 
 ### 当前证据边界
@@ -148,6 +154,10 @@ isearch、`C-u`、mark ring 等即使列为 F2，也在 v1 之后评估。新增
 | 连按 undo；undo 后立即输入 / 切换 buffer / 进入 minibuffer | 记录操作序列及目标 | 完成顺序、焦点、文本与 caret 一致 |
 | 保存 → 编辑 → undo；保存 → undo / redo | 固定保存点与 dirty 的可观察结果 | dirty 与保存内容一致，保存失败不更新保存点 |
 | IME 更新 → 提交 / 取消 → undo | 记录预编辑替换范围与最终状态 | 取消不留下净文本 / mark 偏移或错误 dirty |
+| 预编辑中编辑 / 保存 / 切换 buffer / 进入或退出 minibuffer / 关闭 | 固定 IME、平台、提交 / 取消选择与操作顺序 | 先完成原目标输入，再执行命令；不保存临时文本，文本 / mark / dirty / undo 与磁盘一致 |
+| pending 前缀期间文本提交；旧目标迟到 IME 回调 | 区分前缀前组合输入与前缀后的新输入 | 不绕过前缀自插入，不污染另一个 buffer 或新的 minibuffer 会话 |
+| A 设置 point / mark → B 编辑 → A | 分别固定 point、mark、激活状态及滚动位置的预期 | 状态按 buffer 保留、无串用；kill 后释放，事件不越界 |
+| 正文与 minibuffer 的 motion / kill / yank / undo | 同一命令在不同输入目标执行；prompt 不可编辑 | 共用编辑语义与 kill ring，undo 历史独立，补全通过编辑入口 |
 | 历史容量 | Emacs 受 undo 限额与清理影响，并非无上限 | 记录底座实际限额；依赖升级时复核，不以此声称等价 |
 
 S3 / S4 未通过时，不将对应行改为 F3 以绕过验收；处理流程见 D14。

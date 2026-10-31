@@ -20,12 +20,12 @@
                         │ 拦截/消费                  │
         ┌───────────────▼────────────────────────────▼───────────┐
         │ BufferView（每个 Emacs window 一个）                    │
-        │ point / mark / goal column / region / caret 同步       │
+        │ region 渲染 / caret 同步 / 当前 buffer 绑定           │
         └───────────────┬────────────────────────────────────────┘
                         │
         ┌───────────────▼────────────────────────────┐
         │ Buffer（文本、文件、dirty、模式、undo 入口） │
-        │  - 只暴露 Emacs 级编辑 API                  │
+        │  - 持有编辑状态，暴露 Emacs 级编辑 API       │
         └───────────────┬────────────────────────────┘
                         │
         ┌───────────────▼────────────────────────────┐
@@ -37,9 +37,10 @@
 职责边界：
 
 - **keys / command / buffer 的 API 不依赖 GPUI 的具体 widget**，方便单测。
-- **只有 `buffer/` 内部的适配层**可以接触 `Entity<EditorState>`。命令层不得直接操作它。
-- **BufferView** 持有 Emacs 的 point / mark / goal column 与渲染入口；`EditorState` 的 cursor 承载 caret 与平台交互状态，
-  来源与完成时机按第 6 节同步协议区分，不能假定它只是无副作用的绘制字段。
+- **只有 `buffer/` 内部的适配层**可以接触 `Entity<EditorState>` / `Entity<InputState>`。命令层不得直接操作它们。
+- **Buffer** 持有 v1 每个正文 buffer 的编辑状态（point / mark / 激活状态 / goal column）；**BufferView** 绑定当前 buffer 并负责渲染与同步，不另存一份语义状态。
+- 正文与 minibuffer 通过同一 **EditTarget** 窄接口执行编辑命令；minibuffer 的输入控件也封装在适配层内。
+  `EditorState` / `InputState` 的 cursor 承载 caret 与平台交互状态，来源与完成时机按第 6 节同步协议区分，不能假定它只是无副作用的绘制字段。
 
 ## 2. 预期目录结构
 
@@ -47,17 +48,18 @@
 Cargo.toml
 src/
   main.rs           bootstrap：application / init / open_window
-  app.rs            AppShell：当前 view、命令执行出口、focus 路由
+  app.rs            AppShell：当前 view、命令执行出口、focus 路由、全局 kill ring / 命令链
   platform.rs       键名规范化、可打印字符判定、平台差异
   keys/
     mod.rs          KeyStroke / KeySeq / Keymap / 解析 / 匹配 / 单测
     emacs.rs        默认 global keymap
   command.rs        CommandSpec 注册表（M-x 与将来的 C-h 数据源）
   buffer/
-    mod.rs          Buffer：文本编辑 API、文件、dirty、undo 委托
-    view.rs         BufferView：point / mark / region / 渲染 / caret 同步
+    mod.rs          Buffer：编辑状态、文件、dirty、undo 委托
+    view.rs         BufferView：当前 buffer 绑定、region 渲染 / caret 同步
+    target.rs       EditTarget、EditingState、正文 / minibuffer 底座适配
     edit.rs         Edit 计算（kill / motion / 缩进等纯函数）
-    kill_ring.rs    kill ring
+    kill_ring.rs    kill ring 数据结构（由 AppShell 持有）
   mode.rs           MajorMode trait 与模式注册
   frame.rs          Emacs window（v1 只有 Leaf）与 mode line
   minibuffer.rs     read-from-minibuffer（M-x / find-file）与补全
@@ -156,9 +158,23 @@ struct CommandSpec {
 
 - 静态注册表 + 按名字查找；`M-x`、将来的 `C-h k` / `C-h f` 共用这一份数据。
 - 命令操作 `AppShell`（对应 Emacs 的 selected window / current buffer），不直接持有某个 view。
-- 命令实现只调用 `Buffer` / `BufferView` 的窄接口。
+- motion / 编辑 / kill / yank / undo 命令只调用当前 `EditTarget` 的窄接口，正文与 minibuffer 共用命令实现。
+- 文件与 buffer 管理命令调用 `Buffer` / AppShell 的专用接口，不把文件能力强加给 minibuffer。
+- AppShell 持有全局 kill ring 与连续命令链状态；正文各 buffer 和 minibuffer 共享 kill ring，undo 历史则各自独立。
 
-## 6. Buffer 与 BufferView
+## 6. Buffer、BufferView 与公共编辑目标
+
+`EditTarget` 是语义接口而非 widget 抽象，最小能力为：稳定目标标识、读取文本与编辑状态、
+设置 point / mark、应用 `Edit`、请求 undo / redo、取得编辑完成结果及组合输入状态。
+底座事件归一化为携带目标标识、来源、替换范围 / 内容和完成状态的结果，再交给公共语义层处理。
+接口不暴露 `EditorState` / `InputState` 或 GPUI action；具体 Rust 签名由 S3 / S4 验证后确定。
+
+- 正文目标由 `Buffer` 实现，内部适配 `EditorState`；minibuffer 目标由 `MinibufferTarget` 实现，内部适配 `InputState`。
+- 两者共用 `EditingState` 和纯文本编辑算法。adapter 只处理控件差异，不复制 kill / motion / mark 的语义实现。
+- prompt / 补全属于 minibuffer 会话；prompt 不属于可编辑文本。文件身份、保存点属于正文 Buffer。
+- minibuffer 的 `RET` 确认与 `TAB` 补全由其 keymap / 会话处理；不借此放行底座默认 CUA 编辑命令。
+
+下面是状态归属示意，不是已验证可编译的底座接口：
 
 ```
 impl Buffer {
@@ -172,18 +188,32 @@ impl Buffer {
     fn save(&mut self, window, cx) -> io::Result<()>;
 }
 
-struct BufferView {
-    buffer: Entity<Buffer>,
+struct EditingState {
     point: usize,
     mark: Option<usize>,
     mark_active: bool,
     goal_column: Option<usize>,
+}
+
+struct Buffer {
+    editing: EditingState,
+    // 其余文本适配、文件、dirty 与历史字段省略。
+}
+
+struct BufferView {
+    buffer: Entity<Buffer>,
     region: RangeDecorationCollection,
     _subs: Vec<Subscription>,
 }
 ```
 
-- point / mark 是**我们自己的模型**，不依赖 `EditorState` 的 selection 表示。
+- point / mark 是**我们自己的模型**，不依赖底座的 selection 表示。
+- v1 每个正文 Buffer 保存自己的 `EditingState`；切换 A → B → A 不重置 A 的 point / mark，也不把 A 的状态复制给 B。
+  mark 与激活状态是 buffer-local；切换命令引起的激活状态变化、goal column 重置按固定 Emacs 基准处理，不等于无条件恢复旧激活状态。
+- 切换前先完成旧目标的输入 / 编辑，解除 view 对旧 Buffer 的高亮与渲染订阅，保留 Buffer 自身的变更观测；
+  再绑定新 Buffer、从其状态同步 caret 并重建高亮。
+  每个 Buffer 的底座实例及滚动位置保留；只有 kill-buffer 才释放其编辑状态和历史，迟到事件不得写入新目标。
+  未来 split 的 window-point 另行设计；当前 buffer-local point 只覆盖单正文 view，不宣称解决了多视图问题。
 - region 高亮用 `RangeDecoration`（Fill），其 range 会随编辑自动调整；不把 EditorState
   的 selection 当作 region，因为公开 API 无法表达"point 在 mark 之前"的反向 region
   （`set_selected_range` 强制 caret 落在末端）。
@@ -195,6 +225,7 @@ struct BufferView {
   - 平台输入和历史回放也必须取得足够的替换范围 / 替换内容信息，才能更新 mark。
     IME 可指定替换范围；禁止用“旧 point + 新 cursor + 字节长度差”推断一般编辑。
   - 预编辑、提交、取消分别处理；取消后文本、mark 和 dirty 状态应恢复到相应状态。
+    底座文本可能包含临时预编辑，不得因它是显示权威就直接把它当作可保存的已提交文本。
   - 鼠标拖选结束后，适配层按 cursor 与 selection 的方向导入 point / mark / 激活状态，再转换为 region 高亮。
     不在每次 `cx.observe` 通知中无条件清 selection，以免破坏拖选锚点或 IME selection。
   - 自有同步不应反向触发第二次语义更新；通用 `Change` / observe 通知本身不足以证明来源、范围或操作完成。
@@ -202,7 +233,22 @@ struct BufferView {
 - S4 必须验证外部变更的观测机制与完成时机，产出覆盖鼠标、IME、自有命令和历史回放的同步方案；
   当前不预设公开 API 已满足这些要求。
 - `RangeDecoration` 仅用于非空高亮；参考源码会过滤空范围，不能用空 decoration 充当通用 marker。
-- 命令层禁止直接接触 `Entity<EditorState>`，为将来的 model/view 拆分留缝。
+- 命令层禁止直接接触 `Entity<EditorState>` / `Entity<InputState>`，为将来的 model/view 拆分留缝。
+
+### 组合输入与命令的串行化
+
+- 平台 / IME 自己消费的候选操作不作为编辑器命令执行。AppShell 在目标适配层前设置输入完成屏障：
+  预编辑期间实际交给编辑器的编辑命令、保存、前缀启动、切换 buffer、
+  进入 / 退出 minibuffer、kill / close 必须先收敛原目标的组合输入，再执行后续操作。
+  提交还是取消，以及 `C-g` 的处理，须在 S1 / S4 按固定平台与 Emacs 对照确定并记录；不在实现中隐式选择。
+- 收敛完成意味着已收到可验证的提交 / 取消结果，并完成文本、mark、dirty 与 undo 状态更新；
+  请求提交、改变焦点或派发 action 的返回都不是完成证明。无法可靠完成或观测即为 spike 阻断。
+- 等待中的命令绑定原目标标识及会话代次，按序执行；事件也必须关联原目标，不能按回调发生时的当前焦点重新解释。
+  目标销毁前先收敛输入；已结束会话的迟到回调不得修改另一个 buffer 或新的 minibuffer 会话。
+- 保存只读取屏障完成后的已提交文本，不能把临时预编辑落盘；取消后验证内存、磁盘与保存点没有误变更。
+- pending 前缀期间直接到达 handler 的文本不能无条件自插入。前缀启动前的组合输入先收敛；
+  前缀期间新到达的文本走受前缀约束的输入解析，按基准完成绑定或报 undefined，不绕过键位引擎修改文本。
+  这需要验证输入 handler 的控制能力，不能用事后观察文本变化替代拦截。
 
 ## 7. undo
 
@@ -218,13 +264,16 @@ struct BufferView {
 ## 8. minibuffer 与 echo area
 
 - 底部一条：mode line + echo area；minibuffer 激活时占用 echo area 的位置。
-- `MinibufferState { prompt, kind, input: Entity<InputState>, candidates }`。
+- `MinibufferState { prompt, kind, target: MinibufferTarget, candidates }`；`MinibufferTarget` 在 `buffer/` 适配层封装 `InputState`、独立 `EditingState` 与历史。
 - v1 读取函数：`M-x`（命令名补全）、`C-x C-f` / `C-x C-w`（路径读取）、`C-x b` / `C-x k`（buffer 名补全）。
 - `RET` 确认、`TAB` 补全、`C-g` 取消；更完整的补全交互在 M3 打磨。
 - 键位分发在 minibuffer 激活时切换到 minibuffer 自己的 keymap，但 `C-g` / 前缀显示沿用全局行为。
 - minibuffer 激活时是当前输入目标；正文 point / region 保留，不能把 minibuffer 的输入、删除或 undo 路由到正文。
   确认后执行待完成命令，取消则不执行；两种路径都恢复原焦点并清理 pending。
-- `M-x` 与上述读取 / 补全流程在 M2 明确实现和验收。
+- S2–S4 先用最小会话验证公共 `EditTarget`：`C-a` / `C-e`、删除、`C-k` / `C-y`、mark 与 undo；
+  正文 → minibuffer → 正文的 kill / yank 共用 kill ring，undo 不跨目标，prompt 不可被编辑。
+- `M-x` 与上述读取 / 补全流程在 M2 明确实现和验收；补全替换也通过目标编辑入口，不直接改 widget。
+  会话确认 / 取消必须经过第 6 节的输入完成屏障，之后才能执行待完成命令或销毁目标。
 
 ## 9. 平台适配
 
@@ -248,7 +297,7 @@ struct BufferView {
 | 输入 | EditorState + 平台 | IME / 预编辑、剪贴板、无障碍 |
 | 装饰 | EditorState | RangeDecoration / TextDecoration / gutter，随编辑自动跟踪 |
 | 键位 / 前缀 / 命令 | 我们 | keys + command |
-| point / mark / region | 我们 | BufferView + RangeDecoration |
+| point / mark / region | 我们 | EditingState（正文归 Buffer、minibuffer 归会话目标）+ view 高亮 |
 | motion / kill / yank / minibuffer | 我们 | buffer/edit.rs、kill_ring、minibuffer |
 | buffer / mode / window / 文件 | 我们 | frame、mode、files |
 
@@ -303,7 +352,8 @@ struct BufferView {
 ## 13. 待 spike 验证
 
 以 [实施计划的 S1–S5](plan.md#1-先做-spike不写正式代码) 为唯一验收清单，包含真实命令入口、
-IME 生命周期、外部变更观测、异步完成顺序及 minibuffer 焦点切换。源码检查不能替代运行验证。
+IME 与命令交错、外部变更观测、异步完成顺序、跨 buffer 状态恢复及正文 / minibuffer 公共编辑目标。
+源码检查不能替代运行验证；细化约束见 D15。
 S3 / S4 无法满足 F1 时，按 D14 暂停并确认，不自动接受新差异或启动自研 view。
 
 ## 14. 测试策略

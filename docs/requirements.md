@@ -76,6 +76,8 @@ v1 对应实施计划 M0–M3，前置 S1–S5 必须通过；M4 起为后续阶
 - 不碰鼠标可以完成：打开文件 → 编辑 → 保存 → 切换 buffer → 退出；每个操作都有 Emacs 键位。
 - `C-x` / `M-` 前缀与 `C-g` 取消行为正确；未定义键不插入字符，并在 echo area 报错。
 - 中文 / IME 输入正常；mark / region 与 kill ring 行为符合 [保真度清单](emacs-fidelity.md)。
+- 预编辑期间保存、切换输入目标或关闭，先收敛组合输入再执行命令；不保存临时文本，不把迟到回调投递到新目标；pending 前缀不可被直接文本输入绕过。
+- A → B → A 保留各 buffer 的 point / mark，激活状态按命令语义变化；正文与 minibuffer 共用基础编辑语义及 kill ring，undo 历史独立，prompt 不可编辑。
 - 关键行为有测试：键序列解析、命令执行后的 point / mark / 激活状态 / 文本、undo 分组、退出脏检查。
 - 保存失败不得清 dirty 或破坏原文件；保存后 undo 的 dirty 判定、kill dirty buffer、窗口关闭与取消退出均有验收。
 - 已记录大文件打开、滚动与按键延迟的可复现基线；不得等到引入 split 才检查底座性能。

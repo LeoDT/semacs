@@ -1,6 +1,6 @@
 # 决策记录
 
-状态：D1–D13 保留原始决策记录；D14 是本次方案评估后的现行修正，优先于其中冲突的旧假设。
+状态：D1–D13 保留原始决策记录；D14 修正实施门禁，D15 补齐交互边界与状态归属，优先于其中冲突的旧假设。
 方案 B 只获准进入 spike，尚未获证实可满足全部行为要求。新增事实通过追加决策记录，不改写历史。
 
 | ID | 决策 | 状态 |
@@ -19,6 +19,7 @@
 | D12 | 不模仿 Emacs 外观，视觉用 gpui-kit | 已决定 |
 | D13 | v1 键位写在 Rust 代码里，用户配置格式待定 | 已决定 |
 | D14 | 修正输入 / mark / undo 假设；spike 门禁；v1 截止 M3 | 已决定，API 缺口的处理选项仍待确认 |
+| D15 | IME 命令屏障、buffer-local 状态、公共编辑目标与命令名修正 | 已决定，适配可行性及 IME 收敛策略须经 spike 验证 |
 
 ---
 
@@ -203,8 +204,38 @@ API 缺口、受影响的保真度项与候选路径。是否接受新差异、�
 
 ---
 
+## D15 交互边界与状态归属
+
+**决策**：经 review 确认，补齐以下四项，纳入 S1–S5 前置验收；不扩大 v1 功能范围，也不放宽 D14 的失败门禁。
+
+1. **IME 与命令串行化**：预编辑会影响底座文本，不能只验证最终提交 / 取消。
+   在保存、编辑命令、前缀启动、焦点切换及目标销毁前设置可观测的输入完成屏障；
+   命令与回调绑定目标及会话代次，不保存临时文本、不污染新目标。
+   pending 前缀期间的直接文本输入不得绕过解析自插入。
+   提交还是取消须在 spike 按平台和 Emacs 基准固化；若无法可靠控制或观测，仍按 D14 暂停。
+2. **状态归属**：v1 的正文 Buffer 持有 EditingState（point / mark / 激活状态 / goal column），
+   BufferView 只绑定当前 Buffer 并负责渲染同步；切换不销毁状态，kill-buffer 才释放。
+   mark 是 buffer-local；切换命令的 deactivate 等副作用按基准处理，不无条件恢复旧激活状态。
+   这是单正文 view 的方案，不提前解决 split 的 window-point。
+3. **公共编辑目标**：正文 Buffer 与封装 InputState 的 MinibufferTarget 适配同一 EditTarget 窄接口，
+   共用编辑状态结构和命令算法，不直接暴露 widget 或复制一套编辑语义。
+   AppShell 持有全局 kill ring / 命令链；各目标的 undo 历史独立，prompt 不参与编辑。
+   文件操作与 minibuffer 读取 / 补全仍为各自专用能力，不做万能控件框架。
+4. **命令名**：`C-a` / `C-e` 改为 `move-beginning-of-line` / `move-end-of-line`，
+   `C-x C-c` 改为 `save-buffers-kill-terminal`；spike 导出全部 v1 默认绑定并核对命令注册表。
+
+**证据边界**：以上三项绑定已用本机 Emacs 31.1、`-Q --batch`、`fundamental-mode` 下的
+`key-binding` 查询核对；这不是完整 command loop 行为对照。输入屏障、跨 buffer 状态及
+InputState 公共适配尚未经过 crates.io 依赖构建或 Wayland 验证，不能记为 spike 通过。
+
+**后果**：架构、保真度矩阵与计划同步更新；minibuffer 的最小编辑适配提前在 spike 验证，
+完整读取与补全仍在 M2。diff / magit 仍为后续阶段，不因公共编辑接口获准而视为领域模型或 Git 操作已设计完成。
+
+---
+
 ## 待决事项
 
+- IME 收敛：各交错场景的提交 / 取消策略、完成信号与前缀期间 handler 控制机制，须在 S1 / S4 固化；不得仅凭焦点切换推定完成。
 - 阻断性 API 缺口：S3 / S4 的实际可行机制；失败时在新增差异、补上游 API、依赖 patch 或更换底座之间另行确认。
 - 文件层：v1 保证 UTF-8 / LF；CRLF / BOM 等输入的拒绝或保留策略须在 M2 明确，禁止静默有损转换。
   自动保存、备份文件属后续增强；确认文案在 M2 固定。
