@@ -28,6 +28,16 @@ impl BufferView {
     }
 }
 
+/// gpui-base adds the scroll offset to the editor's own input bounds because
+/// that origin is also used for painting content. The overlay starts at the
+/// viewport origin, so it has to apply the same offset exactly once.
+fn input_element_bounds(viewport: Bounds<Pixels>, scroll_offset: Point<Pixels>) -> Bounds<Pixels> {
+    Bounds {
+        origin: viewport.origin + scroll_offset,
+        size: viewport.size,
+    }
+}
+
 impl Render for BufferView {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let editor = self.buffer.read(cx).editor();
@@ -43,9 +53,15 @@ impl Render for BufferView {
                 canvas(
                     |_, _, _| (),
                     move |bounds, _, window, cx| {
+                        // Editor prepaint adds the scroll offset to its own input
+                        // bounds (gpui-base element.rs). This overlay sits at the
+                        // viewport origin, so apply the same adjustment or IME
+                        // candidate placement drifts by exactly the scroll amount.
+                        let scroll = target.read(cx).scroll_offset(cx);
+                        let input_bounds = input_element_bounds(bounds, scroll);
                         window.handle_input(
                             &focus,
-                            ElementInputHandler::new(bounds, target.clone()),
+                            ElementInputHandler::new(input_bounds, target.clone()),
                             cx,
                         );
                     },
@@ -53,5 +69,22 @@ impl Render for BufferView {
                 .absolute()
                 .inset_0(),
             )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::input_element_bounds;
+    use gpui_kit::{Bounds, point, px, size};
+
+    #[test]
+    fn input_bounds_apply_the_scroll_offset_once() {
+        let viewport = Bounds {
+            origin: point(px(10.), px(20.)),
+            size: size(px(300.), px(200.)),
+        };
+        let adjusted = input_element_bounds(viewport, point(px(-5.), px(-4000.)));
+        assert_eq!(adjusted.origin, point(px(5.), px(-3980.)));
+        assert_eq!(adjusted.size, viewport.size);
     }
 }

@@ -9,7 +9,8 @@ M0 已落地 cargo 工程、启动 / 窗口 / 主题、命令行文件或 scratc
 mode line / echo area、关闭时取消 IME 预编辑与 dirty 丢弃确认，以及 D20 文件层读取与
 UTF-8 BOM / LF / CRLF 编解码单测；headless 交互测试覆盖平台输入、预编辑临时性、
 native Escape 终止预编辑、失焦取消、关闭 / 丢弃确认与首帧渲染。真实 Wayland 下的中文 IME、
-GPU 首帧 / 滚动观感仍需手工验收，见 [性能基线](performance.md)。
+GPU 首帧 / 滚动观感仍需手工验收；M0 暂用硬换行，软换行的首帧代价见
+[性能基线](performance.md)。
 自建 undo（D16）、IME 命令屏障与关闭 / 失焦取消（D17 / D19）、mark marker 语义（D18）均已实测，
 真实 fcitx5 的关闭、失焦与提交后 mark 由 real-cases 覆盖，redo point 已对齐 Emacs。
 可选剩余为真实硬件键盘 / WM 保留键确认与 WM 强退 / 崩溃，不阻塞 M0。

@@ -45,7 +45,10 @@ impl Buffer {
         let editor = cx.new(|cx| {
             EditorState::new(window, cx)
                 .default_value(text)
-                .soft_wrap(true)
+                // M0 uses hard wrapping: soft-wrapping the 19k-char perf lines
+                // made the first focused frame take seconds (release) to tens of
+                // seconds (debug). Revisit in M3 with measured wrap behavior.
+                .soft_wrap(false)
                 .line_number(false)
         });
         let editor_events = cx.subscribe_in(

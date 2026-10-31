@@ -41,6 +41,18 @@ fn open_file_and_scroll(cx: &mut TestAppContext) {
         window.render_frame(cx);
         let first_frame_time = open_start.elapsed();
 
+        window.blur(cx);
+        let focus_start = Instant::now();
+        let focus = app.read(cx).buffer().read(cx).focus_handle(cx);
+        focus.focus(window, cx);
+        window.render_frame(cx);
+        let focus_frame_time = focus_start.elapsed();
+
+        window.blur(cx);
+        let click_start = Instant::now();
+        window.click("input-state", cx);
+        let click_time = click_start.elapsed();
+
         let before = app.read(cx).buffer().read(cx).scroll_offset(cx);
         let scroll_start = Instant::now();
         const SCROLLS: usize = 10;
@@ -74,10 +86,12 @@ fn open_file_and_scroll(cx: &mut TestAppContext) {
         assert!(text_len > 1_000_000, "perf sample should be non-trivial");
         assert_eq!(loaded_len, text_len, "the editor must hold the whole sample");
         println!(
-            "file={} file_and_decode_ms={:.3} window_and_first_frame_ms={:.3} scroll_calls={} scroll_call_avg_ms={:.3} idle_render_avg_ms={:.3} scroll_before_y={:.1} scroll_after_y={:.1}",
+            "file={} file_and_decode_ms={:.3} window_and_first_frame_ms={:.3} refocus_frame_ms={:.3} click_focus_ms={:.3} scroll_calls={} scroll_call_avg_ms={:.3} idle_render_avg_ms={:.3} scroll_before_y={:.1} scroll_after_y={:.1}",
             path.display(),
             load_time.as_secs_f64() * 1000.0,
             first_frame_time.as_secs_f64() * 1000.0,
+            focus_frame_time.as_secs_f64() * 1000.0,
+            click_time.as_secs_f64() * 1000.0,
             SCROLLS,
             scroll_time.as_secs_f64() * 1000.0 / SCROLLS as f64,
             render_time.as_secs_f64() * 1000.0 / RENDERS as f64,
