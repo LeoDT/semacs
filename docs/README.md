@@ -9,6 +9,8 @@ semacs 是一个用 Rust + [GPUI Kit](https://gpui-kit.com) 实现的 Emacs 风�
 真实 fcitx5 的关闭、失焦与提交后 mark 由 real-cases 覆盖，redo point 已对齐 Emacs。
 可选剩余为真实硬件键盘 / WM 保留键确认与 WM 强退 / 崩溃，不阻塞 M0。
 v1 截止 M3，split 与 diff / git 不在 v1 内。
+文件格式按 D20 支持 UTF-8 有 / 无 BOM、LF / CRLF 无损读写；该项已决定，待 M0 / M2 实现与验收。
+spike 通过证明候选机制可行，不代表尚未开始的产品实现已通过 v1 验收；证据索引及产品回归边界见 [实施计划](plan.md#spike-与产品验收的边界)。
 
 ## 阅读顺序
 
@@ -16,7 +18,7 @@ v1 截止 M3，split 与 diff / git 不在 v1 内。
 2. [Emacs 保真度](emacs-fidelity.md) —— "像 Emacs 到什么程度"的判定标准与清单（本项目最重要的约束）
 3. [架构设计](architecture.md) —— 分层、模块、按键分发链路、Buffer 边界
 4. [决策记录](decisions.md) —— 已做出的技术选择、理由、被否方案、后果
-5. [实施计划](plan.md) —— 待验证 spike、里程碑、验收标准
+5. [实施计划](plan.md) —— 已通过的 spike、证据边界、里程碑与产品验收标准
 
 ## 约定
 

@@ -55,7 +55,7 @@ src/
     emacs.rs        默认 global keymap
   command.rs        CommandSpec 注册表（M-x 与将来的 C-h 数据源）
   buffer/
-    mod.rs          Buffer：编辑状态、文件、dirty、undo 委托
+    mod.rs          Buffer：编辑状态、文件、dirty、自建 undo
     view.rs         BufferView：当前 buffer 绑定、region 渲染 / caret 同步
     target.rs       EditTarget、EditingState、正文 / minibuffer 底座适配
     edit.rs         Edit 计算（kill / motion / 缩进等纯函数）
@@ -63,7 +63,7 @@ src/
   mode.rs           MajorMode trait 与模式注册
   frame.rs          Emacs window（v1 只有 Leaf）与 mode line
   minibuffer.rs     read-from-minibuffer（M-x / find-file）与补全
-  files.rs          打开 / 保存 / 编码
+  files.rs          打开 / 保存 / 编码、BOM / 换行格式往返
   echo.rs           echo area 与 pending 键显示
 docs/
 .pi/tasks/          任务跟踪（实现阶段）
@@ -74,8 +74,8 @@ docs/
 ## 3. 按键分发链路
 
 GPUI 提供 `App::intercept_keystrokes`：它在 keymap / action 解析**之前**触发。
-按参考源码，调用 `cx.stop_propagation()` 可同时阻止 GPUI action 和平台层把 `key_char` 插入 buffer。
-这是 S1 要在 crates.io 实际依赖及 Wayland 上验证的假设，不等价于所有 IME 输入都经过按键事件。
+S1 已在 crates.io 依赖与 Wayland 验证：调用 `cx.stop_propagation()` 可同时阻止 GPUI action 和平台层把 `key_char` 插入 buffer。
+这不等价于所有 IME 输入都经过按键事件；直接 handler 路径仍需由适配层处理。
 
 ```
 cx.intercept_keystrokes(move |event, window, cx| {
@@ -140,7 +140,8 @@ enum Resolution { Execute(CommandId), Prefix, Undefined, SelfInsert }
 - 普通 Meta 组合是命令键，不因存在 `key_char` 就自插入；AltGr 只有经平台识别为文本输入时才例外。
 - 非空前缀下未绑定，或当前没有合法文本输入路径 → `Undefined`，消费按键并回显，不静默吞掉。
 - 死键、IME 预编辑与系统保留键在平台 / 焦点路由层分类；不以“未知修饰键”概括这些事件。
-- `C-g` 清空 pending、取消当前交互并停用 region，但不删除已存在的 mark 位置。
+- 顶层 `C-g` 执行 `keyboard-quit`，停用 region、回显 `Quit`，保留 mark；minibuffer 中取消会话并回显 `Quit`。
+  pending 前缀下按 keymap 解析；`C-x C-g` 走 undefined，清空 pending，但保留 mark 与 active，不执行 quit 副作用。
 
 键名解析器 `parse_key_sequence("C-x C-s")` 自己实现并单测，支持 `C- M- S- s-`。
 
@@ -167,11 +168,13 @@ struct CommandSpec {
 `EditTarget` 是语义接口而非 widget 抽象，最小能力为：稳定目标标识、读取文本与编辑状态、
 设置 point / mark、应用 `Edit`、请求 undo / redo、取得编辑完成结果及组合输入状态。
 底座事件归一化为携带目标标识、来源、替换范围 / 内容和完成状态的结果，再交给公共语义层处理。
-接口不暴露 `EditorState` / `InputState` 或 GPUI action；具体 Rust 签名由 S3 / S4 验证后确定。
+接口不暴露 `EditorState` / `InputState` 或 GPUI action；机制已由 S3 / S4 验证，产品 Rust 签名在 M1 按该窄接口确定。
 
 - 正文目标由 `Buffer` 实现，内部适配 `EditorState`；minibuffer 目标由 `MinibufferTarget` 实现，内部适配 `InputState`。
 - 两者共用 `EditingState` 和纯文本编辑算法。adapter 只处理控件差异，不复制 kill / motion / mark 的语义实现。
-- prompt / 补全属于 minibuffer 会话；prompt 不属于可编辑文本。文件身份、保存点属于正文 Buffer。
+- prompt / 补全属于 minibuffer 会话；prompt 不属于可编辑文本。文件身份、保存点、BOM 有无与 LF / CRLF 格式元数据属于正文 Buffer。
+  文件层按 D20 解码为无 BOM、LF 正文，保存时恢复原格式；命令、mark / undo 与 IME 不处理磁盘格式转换。
+  读取不产生编辑历史或置 dirty，BOM 不占正文位置；编解码单测在 M0，实际磁盘保存往返在 M2 验收。
 - minibuffer 的 `RET` 确认与 `TAB` 补全由其 keymap / 会话处理；不借此放行底座默认 CUA 编辑命令。
 
 下面是状态归属示意，不是已验证可编译的底座接口：
@@ -221,7 +224,7 @@ struct BufferView {
   的 selection 当作 region，因为公开 API 无法表达"point 在 mark 之前"的反向 region
   （`set_selected_range` 强制 caret 落在末端）。
 - mark 位置与激活状态独立：`None` 表示从未设 mark，`mark_active` 控制 region 是否激活。
-  `C-g`、undo / redo、平台输入与 IME 提交的停用只清 active，不等于把 mark 设为 `None`；
+  顶层 `C-g`、undo / redo、平台输入与 IME 提交的停用只清 active，不等于把 mark 设为 `None`；
   mark 仍随文本变更移动。
 - 预编辑文本视为临时层：开始 / 更新 / 取消不移动 mark，提交按一次插入更新。
 - 输入与同步协议的约束：
@@ -235,8 +238,8 @@ struct BufferView {
     不在每次 `cx.observe` 通知中无条件清 selection，以免破坏拖选锚点或 IME selection。
   - 自有同步不应反向触发第二次语义更新；通用 `Change` / observe 通知本身不足以证明来源、范围或操作完成。
   - 平台输入提交也参与语义操作边界，须打断连续 kill 等命令链；不能因绕过命令注册表而遗漏。
-- S4 必须验证外部变更的观测机制与完成时机，产出覆盖鼠标、IME、自有命令和历史回放的同步方案；
-  当前不预设公开 API 已满足这些要求。
+- S4 已验证通过公共输入适配器取得文本变更范围与内容的机制，覆盖记录见 `spikes/EVIDENCE.md`；
+  M1 / M2 依上述协议接入产品并补齐交错回归，不把 spike 的机制通过等同于产品所有组合均已验收。
 - `RangeDecoration` 仅用于非空高亮；参考源码会过滤空范围，不能用空 decoration 充当通用 marker。
 - 命令层禁止直接接触 `Entity<EditorState>` / `Entity<InputState>`，为将来的 model/view 拆分留缝。
 
@@ -260,6 +263,8 @@ struct BufferView {
 
 - undo / redo 由我们自己的 change 记录实现（[D16](decisions.md#d16-自建-undo)），
   不派发 `EditorState` 的 `Undo` / `Redo` action；每个编辑目标持有独立历史，dirty 与保存点由 change 记录派生。
+  modified 语义以 D16 与 Emacs 对照为准：回到保存点为 clean，已记录的 undo 越过保存点场景仍 clean，再输入变 dirty；
+  不以当前文本与磁盘内容比较替代这套状态规则。
 - 每个 `Change` 记录 `{range, old, new, kind}`；命令意图区分 Typing / DeleteBackward / DeleteForward / Other。
   连续同类合并，其它命令插入边界，undo / redo 不与输入合并，undo 后输入开新组并清空 redo。
 - replay 通过同一个 `EditTarget` 应用，带 `replaying` 标志避免自我记录；mark 也在这条路径上更新。
@@ -277,7 +282,7 @@ struct BufferView {
 - 键位分发在 minibuffer 激活时切换到 minibuffer 自己的 keymap，但 `C-g` / 前缀显示沿用全局行为。
 - minibuffer 激活时是当前输入目标；正文 point / region 保留，不能把 minibuffer 的输入、删除或 undo 路由到正文。
   确认后执行待完成命令，取消则不执行；两种路径都恢复原焦点并清理 pending。
-- S2–S4 先用最小会话验证公共 `EditTarget`：`C-a` / `C-e`、删除、`C-k` / `C-y`、mark 与 undo；
+- S2–S4 的最小会话用于验证公共 `EditTarget`；产品在 M1 / M2 回归 `C-a` / `C-e`、删除、`C-k` / `C-y`、mark 与 undo：
   正文 → minibuffer → 正文的 kill / yank 共用 kill ring，undo 不跨目标，prompt 不可被编辑。
 - `M-x` 与上述读取 / 补全流程在 M2 明确实现和验收；补全替换也通过目标编辑入口，不直接改 widget。
   会话确认 / 取消必须经过第 6 节的输入完成屏障，之后才能执行待完成命令或销毁目标。
