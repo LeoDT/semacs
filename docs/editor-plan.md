@@ -1,7 +1,7 @@
 # 编辑器实现计划
 
-状态：R1 已完成首批源码导入、Buffer / InputSession、正文 View 与最小 GPUI 平台输入 / 生命周期接线；已完成首轮真实 Wayland / Pinyin 功能验证（软件渲染），硬件 GPU 与完整性能验收仍未完成。
-下述清单仍是整个 R1 的验收要求，不是编辑能力或性能已经通过的证明。
+状态：**R1 已完成，用户已确认原生预算及验收边界**。实现包括首批源码导入、Buffer / InputSession、正文 View 与最小 GPUI 平台输入 / 生命周期接线；真实 Wayland / Pinyin 功能验证（软件渲染）和宿主 RADV 硬件路径的 36 次 CPU / 提交流程结果已留证。
+下述清单记录 R1 的能力与验收要求，不代表完整 Emacs 命令、历史或保存已实现。GPU 执行 / 实际呈现时间保留未测说明，不阻塞 R1；下一阶段为 M1。
 
 ## 当前已落地部分
 
@@ -22,6 +22,7 @@
 - `src/view.rs`：BufferView 持有 Buffer / InputSession、viewport / 滚动、可见行 shaping 缓存与几何；AppShell 观察它并提供外围 UI。
   可显示正文 / 空文档，点击定位光标、横纵滚动，支持宽度和字体参数变更。行列按 Unicode scalar 计列，不按 UTF-8 字节或 grapheme 计列。
   后台任务有取消标记、弱目标和结果身份校验；稳定帧共享可见 ShapedRow。单条可见行超过 8 KiB 时 shaping 转后台。
+  远滚动后的宽度 / 字体重排可保留同一 display 身份的上一份可见行，仅用于裁剪绘制；命中、caret 与 IME 几何不使用这份旧布局。新显示文本立即丢弃保留快照。
 - `tests/buffer_input.rs`：坐标、纯模型和随机投影替换回归，含生产 chunk 配置下的 8 MiB 单行及混合正文。
 - `src/platform.rs`：GPUI InputHandler 绑定弱目标、会话 token 和绘制注册代次，提供 UTF-16 文本 / 范围 / 命中 / 几何查询。
   同一 handler 只在自身成功回调后推进 token；新绘制、失焦 / 关闭失效旧 handler，不把旧事件改贴新目标。
@@ -34,11 +35,12 @@
 - `src/view/input_tests.rs`：注册输入、同帧连续协议回调、跨帧旧 handler、D17、失焦、关闭确认、几何空窗 / 刷新及真实输入增量重排。
 - `tests/display.rs`、`tests/view.rs`、view 内部测试：GPUI headless 下覆盖换行 / 合行 patch、grapheme 跨 Rope 块、tab / EOF、滚动、非零原点、改宽 / 字体、任务取消和空帧缓存共享。
 - `examples/perf_view.rs`：六类约 8 MiB 正文的 TestPlatform / TestTextSystem 显示与插入 / 删除 / 换行 / 合行测量，数据与边界见 [性能记录](performance.md)。
+- `examples/perf_native.rs` / `scripts/perf_native.py`：可选 profiler 的原生字体 / CPU draw / 平台提交入口，含六类样本、只读 / 最小输入、受控真实 fcitx5 驱动；计时边界与未测指标见 [性能记录](performance.md#8-原生-cpu-绘制--平台提交测量入口)。
 - `examples/native_input.rs`：生产 AppShell 的显式原生诊断入口；真实 Wayland / fcitx5 结果及软件渲染限制见 [原生输入记录](native-input.md)。
 
-尚未完成：完整 Emacs 命令 / keymap / history、保存（按 M1 / M2 推进）、原生字体 / 硬件 GPU / IME 性能及完整原生验证矩阵。
+尚未完成：完整 Emacs 命令 / keymap / history（M1）、保存与文件 / minibuffer 会话（M2）。GPU 执行 / 实际呈现及纯实体输入端到端延迟未测，用户已接受其作为 R1 明确限制；持续输入和完整命令链性能在 M1 补测。
 headless 协议测试使用与注册 handler 相同的适配器，但不模拟原生 IME 事件翻译；几何刷新记录的是调度请求，不是原生候选窗位置。
-只读与最小输入驱动 headless 预算均已由用户确认，见性能记录；原生预算独立管理；本轮独立窗口测试已获授权并留证，不扩大授权范围，R1 保持未完成。
+headless 与独立原生预算均已由用户确认，见 [性能记录](performance.md#9-宿主硬件路径基线与已确认预算)；真实环境测试按批次授权并留证，不扩大到后续 M1 桌面测试。
 
 ### 已确认的取消语义
 
@@ -126,4 +128,4 @@ R1 恢复正文显示、光标、最小输入 / 替换、滚动和换行。完�
 - 分别报告首帧、最终精确布局就绪时间、前台更新与空帧；不靠截断正文或关闭换行通过。
 - 固定样本、环境、构建模式及测量边界；headless 数据不表示 GPU 帧率。
 - 首轮测量后提交量化预算并确认。明显前台全文阻塞或无法解释的回退阻止完成 R1，不留到 M3 再处理。
-- 功能、性能和真实平台结果都有可复现记录后完成 R1；任何未验收项明确保持未完成。
+- 功能、性能和真实平台结果都有可复现记录后完成 R1；用户已确认采用上述组合证据验收，未测指标不重标为通过，保留为明确限制。

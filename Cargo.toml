@@ -5,6 +5,13 @@ edition = "2024"
 publish = false
 license = "GPL-3.0-or-later"
 
+[features]
+native-profiler = ["gpui-kit/profiler"]
+
+[[example]]
+name = "perf_native"
+required-features = ["native-profiler"]
+
 [dependencies]
 gpui-kit = "0.8.1"
 heapless = "0.9.2"

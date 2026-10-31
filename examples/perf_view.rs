@@ -9,7 +9,8 @@ use semacs::buffer::Buffer;
 use semacs::files::{self, DecodedFile, FileFormat};
 use semacs::view::BufferView;
 
-const MIB8: usize = 8 * 1024 * 1024;
+#[path = "support/samples.rs"]
+mod samples;
 
 fn draw(cx: &mut VisualTestContext, force: bool) {
     cx.update(|window, cx| {
@@ -220,23 +221,8 @@ fn main() {
     println!(
         "sample,run,bytes,wrap_rows,first_rows,preview_scan_bytes,model_ms,first_ms,ready_ms,scroll_ms,resize_ready_ms,font_ready_ms,forced_frame_ms,empty_draw_ms,insert_front_ms,insert_ready_ms,delete_front_ms,delete_ready_ms,newline_front_ms,newline_ready_ms,join_front_ms,join_ready_ms"
     );
-    for (sample, text) in [
-        ("mixed", mixed),
-        (
-            "short-ascii",
-            format!("{}\n", "x".repeat(127)).repeat(65_536),
-        ),
-        (
-            "short-unicode",
-            format!("{}z\n", "λ界🙂".repeat(14)).repeat(65_536),
-        ),
-        (
-            "long-ascii",
-            format!("{}\n", "x".repeat(19_455)).repeat(MIB8.div_ceil(19_456)),
-        ),
-        ("single-ascii", "x".repeat(MIB8)),
-        ("single-unicode", "e\u{301}🙂x".repeat(MIB8 / 8)),
-    ] {
+    for sample in samples::NAMES {
+        let text = samples::build(sample, &mixed);
         for run in 1..=runs {
             measure(sample, &text, run);
         }

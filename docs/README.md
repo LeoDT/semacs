@@ -14,7 +14,7 @@ gpui-kit 用于外围 UI；文本模型、编辑视图、输入适配和命令�
 **完整 Emacs keymap / 命令、undo 和保存尚未实现**，echo area 明示此限制；不采用 CUA 复制 / 粘贴。
 
 已建立 GPUI headless 输入 / 视图回归与显示 / 输入性能入口；测试字体 / 无 GPU 的结果不能代表原生字体、真实 Wayland 或 IME 通过。
-首轮 headless 输入测量与已确认预算已记录；已获授权完成首轮真实 Wayland / fcitx5 功能验证（软件渲染），见 [原生输入记录](native-input.md)；硬件 GPU / 原生性能仍待测，R1 尚未完成。来源与许可见 [THIRD_PARTY.md](../THIRD_PARTY.md) 和 [LICENSE](../LICENSE)。
+headless 与宿主硬件路径的原生 CPU / 提交流程测量及预算已确认；真实 Wayland / fcitx5 功能证据与硬件结果分别记录于 [原生输入记录](native-input.md)。**R1 已按用户确认的验收边界完成，下一阶段为 M1**；GPU 执行 / 实际呈现时间仍明确未测，不宣称已通过这些指标。来源与许可见 [THIRD_PARTY.md](../THIRD_PARTY.md) 和 [LICENSE](../LICENSE)。
 
 ## 阅读顺序
 

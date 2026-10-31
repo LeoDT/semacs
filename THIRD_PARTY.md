@@ -48,6 +48,14 @@ copied as a separate runtime. See `LICENSE` for combined-work distribution and
 corresponding-source requirements. Dependency license notices must additionally
 be audited before distributing binaries; this inventory covers vendored source.
 
+### Optional native profiling dependency
+
+The opt-in Cargo feature `native-profiler` enables the existing GPUI profiler
+through `gpui-kit/profiler`. It adds the registry dependency `hdrhistogram`
+7.6.0 (manifest license `MIT/Apache-2.0`); no dependency source was vendored or
+patched. Its notices must be included in the dependency audit if distributing
+a binary built with this feature. The default product does not enable it.
+
 ### Input behavior reference
 
 The frozen editor `crates/editor/src/input.rs` and Linux GPUI input paths were

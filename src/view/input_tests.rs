@@ -276,6 +276,63 @@ fn scrolling_replaces_platform_geometry_and_bounds_match_the_drawn_region(cx: &m
 }
 
 #[gpui::test]
+fn scrolled_reflow_retains_paint_but_never_reuses_old_input_geometry(cx: &mut TestAppContext) {
+    for change_font in [false, true] {
+        let (mut visual, editor) = open(&"x".repeat(1024 * 1024), cx);
+        visual.update(|window, cx| {
+            editor.update(cx, |view, cx| {
+                let bounds = view.viewport_layout().unwrap().bounds().inset(px(-8.));
+                let color = view.color.unwrap();
+                view.scroll_by(point(px(0.), px(3600.)), cx);
+                view.prepare(bounds, color, window, cx);
+                let old = view.paint_layout().unwrap().clone();
+                assert!(!old.rows.is_empty());
+                let mut new_bounds = bounds;
+                if change_font {
+                    view.set_font(font("monospace").bold(), px(18.), px(27.), cx);
+                } else {
+                    new_bounds.size.width = px(250.);
+                }
+                view.prepare(new_bounds, color, window, cx);
+                assert!(!view.layout_ready());
+                assert!(view.viewport_layout().unwrap().rows.is_empty());
+                let retained = view.paint_layout().unwrap();
+                assert_eq!(retained.key(), old.key());
+                assert_ne!(retained.key(), view.wrap_index().unwrap().key());
+                assert!(std::sync::Arc::ptr_eq(&retained.rows[0], &old.rows[0]));
+                assert_eq!(retained.bounds(), view.viewport_layout().unwrap().bounds());
+            });
+            let mut input = BufferInputHandler {
+                view: editor.downgrade(),
+                token: editor.read(cx).input.token(),
+                registration: editor.read(cx).registration,
+            };
+            let position =
+                editor.read(cx).viewport_layout().unwrap().bounds().origin + point(px(4.), px(4.));
+            assert!(
+                input
+                    .character_index_for_point(position, window, cx)
+                    .is_none()
+            );
+            input.replace_text_in_range(None, "new", window, cx);
+            assert!(editor.read(cx).retained_paint_layout.is_none());
+            assert!(editor.read(cx).paint_layout().is_none());
+        });
+        redraw(&mut visual);
+        visual.read(|cx| {
+            let view = editor.read(cx);
+            assert!(view.layout_ready());
+            assert_eq!(
+                view.paint_layout().unwrap().key(),
+                view.viewport_layout().unwrap().key()
+            );
+            assert!(view.retained_paint_layout.is_none());
+            assert!(view.buffer.text().to_string().starts_with("new"));
+        });
+    }
+}
+
+#[gpui::test]
 fn malformed_platform_callbacks_leave_projection_and_committed_versions_unchanged(
     cx: &mut TestAppContext,
 ) {

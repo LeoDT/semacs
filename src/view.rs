@@ -255,6 +255,7 @@ pub struct BufferView {
     cache: HashMap<usize, Arc<ShapedRow>>,
     color: Option<Hsla>,
     geometry: Option<ViewportLayout>,
+    retained_paint_layout: Option<ViewportLayout>,
     scroll: Point<Pixels>,
     reflow_base: Option<WrapIndex>,
     pending_change: Option<DisplayChange>,
@@ -289,6 +290,7 @@ impl BufferView {
             cache: HashMap::new(),
             color: None,
             geometry: None,
+            retained_paint_layout: None,
             scroll: Point::default(),
             reflow_base: None,
             pending_change: None,
@@ -319,6 +321,30 @@ impl BufferView {
             geometry.key.display == self.display_snapshot().id()
                 && geometry.key.settings == self.settings
         })
+    }
+
+    /// A paint-only fallback may retain the same display at its previous font / width.
+    /// Input geometry must use `viewport_layout` instead.
+    pub fn paint_layout(&self) -> Option<&ViewportLayout> {
+        let current = self.viewport_layout();
+        current
+            .filter(|layout| !layout.rows.is_empty())
+            .or_else(|| {
+                self.retained_paint_layout
+                    .as_ref()
+                    .filter(|layout| layout.key.display == self.display_snapshot().id())
+            })
+            .or(current)
+    }
+
+    fn retain_paint_layout(&mut self) {
+        if let Some(layout) = self
+            .geometry
+            .take()
+            .filter(|layout| !layout.rows.is_empty())
+        {
+            self.retained_paint_layout = Some(layout);
+        }
     }
 
     pub fn layout_ready(&self) -> bool {
@@ -362,6 +388,7 @@ impl BufferView {
             _ => change,
         });
         self.geometry = None;
+        self.retained_paint_layout = None;
         self.layout_work = None;
         self.shape_work = None;
         self.shape_range = None;
@@ -528,6 +555,7 @@ impl BufferView {
         line_height: Pixels,
         cx: &mut Context<Self>,
     ) {
+        self.retain_paint_layout();
         self.settings.font = font;
         self.settings.font_size = font_size;
         self.settings.line_height = line_height;
@@ -563,7 +591,7 @@ impl BufferView {
         self.shape_work = None;
         self.shape_range = None;
         self.cache.clear();
-        self.geometry = None;
+        self.retain_paint_layout();
         if self
             .metrics
             .as_ref()
@@ -762,6 +790,15 @@ impl BufferView {
                 .filter_map(|row| self.cache.get(&row.index).cloned())
                 .collect(),
         });
+        if self
+            .geometry
+            .as_ref()
+            .is_some_and(|layout| !layout.rows.is_empty())
+        {
+            self.retained_paint_layout = None;
+        } else if let Some(retained) = &mut self.retained_paint_layout {
+            retained.bounds = bounds;
+        }
     }
 
     fn mouse_down(&mut self, event: &MouseDownEvent, window: &mut Window, cx: &mut Context<Self>) {
@@ -956,7 +993,7 @@ impl Element for TextCanvas {
         });
         let (layout, focus, caret, marked) = {
             let view = self.view.read(cx);
-            let Some(layout) = view.viewport_layout().cloned() else {
+            let Some(layout) = view.paint_layout().cloned() else {
                 return;
             };
             let focus = view.focus.is_focused(window);
