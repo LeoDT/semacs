@@ -1,0 +1,85 @@
+use std::io::ErrorKind;
+use std::path::PathBuf;
+use std::process::ExitCode;
+
+use gpui_kit::*;
+use semacs::app::{AppShell, StartupDocument};
+use semacs::files::{self, ReadError};
+
+fn main() -> ExitCode {
+    let path = match parse_args() {
+        Ok(path) => path,
+        Err(message) => {
+            eprintln!("semacs: {message}");
+            return ExitCode::from(2);
+        }
+    };
+
+    let document = match startup_document(path) {
+        Ok(document) => document,
+        Err(message) => {
+            eprintln!("semacs: {message}");
+            return ExitCode::FAILURE;
+        }
+    };
+
+    let title = document.title();
+    gpui_kit::application().run(move |cx| {
+        gpui_kit::init(cx);
+        let options = WindowOptions {
+            titlebar: Some(TitlebarOptions {
+                title: Some(title.into()),
+                ..Default::default()
+            }),
+            window_min_size: Some(size(px(480.0), px(320.0))),
+            ..Default::default()
+        };
+        gpui_kit::open_window(options, cx, move |window, cx| {
+            let app = cx.new(|cx| AppShell::new(document, window, cx));
+            let weak = app.downgrade();
+            window.on_window_should_close(cx, move |window, cx| {
+                weak.update(cx, |app, cx| app.should_close(window, cx))
+                    .unwrap_or(true)
+            });
+            app
+        })
+        .expect("failed to open semacs window");
+    });
+
+    ExitCode::SUCCESS
+}
+
+fn parse_args() -> Result<Option<PathBuf>, String> {
+    let mut args = std::env::args_os().skip(1);
+    let Some(first) = args.next() else {
+        return Ok(None);
+    };
+    if first == "-h" || first == "--help" {
+        print_help();
+        std::process::exit(0);
+    }
+    if args.next().is_some() {
+        return Err("expected at most one file argument\n\nUsage: semacs [FILE]".to_owned());
+    }
+    Ok(Some(PathBuf::from(first)))
+}
+
+fn print_help() {
+    println!("Usage: semacs [FILE]");
+    println!();
+    println!("Open FILE, or start with an empty *scratch* buffer.");
+}
+
+fn startup_document(path: Option<PathBuf>) -> Result<StartupDocument, String> {
+    let Some(path) = path else {
+        return Ok(StartupDocument::scratch());
+    };
+
+    match files::read(&path) {
+        Ok(file) => Ok(StartupDocument::visit(path, file)),
+        Err(ReadError::Io(error)) if error.kind() == ErrorKind::NotFound => {
+            Ok(StartupDocument::new_file(path))
+        }
+        Err(error) => Err(format!("{}: {error}", path.display())),
+    }
+}
