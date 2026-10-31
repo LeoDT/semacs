@@ -35,7 +35,7 @@ semacs 不是"另一个代码编辑器"，而是**把 Emacs 的操作模型搬�
 包含：
 
 - 启动时打开命令行参数指定的文件，或创建 scratch buffer；
-- 单窗口、单 buffer 显示；mode line 与 echo area；
+- 单顶层窗口、一个正文 view，管理并切换多个 buffer；mode line 与 echo area；
 - Emacs 基本 motion / 编辑 / kill ring / mark-region / undo；
 - `M-x`、`C-x C-f`、`C-x C-s`、`C-x C-w`、`C-x b`、`C-x k`、`C-x C-c`；
 - 文件读写（UTF-8、LF），dirty 标记与退出确认；
@@ -45,11 +45,14 @@ semacs 不是"另一个代码编辑器"，而是**把 Emacs 的操作模型搬�
 不包含（v1）：
 
 - isearch、正则替换、rectangle、键盘宏、narrowing、间接 buffer；
-- 同一 buffer 的多窗口显示、frame、tab-bar；
+- 所有 window split（包括不同 buffer）、多 frame、tab-bar；
 - 用户配置系统与自定义键位文件；
-- 语法高亮、LSP、补全（可作为后续增强）；
+- 语法高亮、LSP、正文代码补全（minibuffer 的命令名 / 路径 / buffer 名基础补全包含在 v1）；
 - 插件 / 脚本扩展；
 - diff 与 git（下一阶段）。
+
+v1 对应实施计划 M0–M3，前置 S1–S5 必须通过；M4 起为后续阶段。
+`C-u`、`M-y`、isearch 与 split 不作为 v1 发布条件，不因出现在保真度分级中自动纳入范围。
 
 ## 5. 长期非目标
 
@@ -64,15 +67,18 @@ semacs 不是"另一个代码编辑器"，而是**把 Emacs 的操作模型搬�
 - 依赖 crates.io 的 `gpui-kit = "0.8.1"`；本地 gpui-kit 源码只作阅读参考，不作为 path 依赖。
 - 平台：Linux 优先，Wayland 为验收环境，X11 保持可用；平台差异收敛在 `src/platform.rs`。
 - 键位：纯 Emacs。不做 CUA 的 `Ctrl-C / Ctrl-V`；复制 / 粘贴走 `M-w` / `C-y`。仅保留窗口管理层面的系统键。
-- 文本引擎：复用 gpui-kit 的 `EditorState` 作为文本 + caret + 排版 + IME 底座；编辑语义自己实现。
-  详见 [架构设计](architecture.md) 与 [决策 D5 / D6](decisions.md)。
+- 文本引擎候选路径：复用 gpui-kit 的 `EditorState` 作为文本 + caret + 排版 + IME 底座；编辑语义自己实现。
+  undo 分组、外部编辑观测与 marker 跟随须先通过 spike；不默认认定公开 API 足够。
+  若失败，暂停并按 [D14](decisions.md#d14-方案评估修正与实施门禁) 确认新增差异或 API / 依赖调整，不能隐式降低 F1。
 
 ## 7. 验收标准（v1）
 
 - 不碰鼠标可以完成：打开文件 → 编辑 → 保存 → 切换 buffer → 退出；每个操作都有 Emacs 键位。
 - `C-x` / `M-` 前缀与 `C-g` 取消行为正确；未定义键不插入字符，并在 echo area 报错。
 - 中文 / IME 输入正常；mark / region 与 kill ring 行为符合 [保真度清单](emacs-fidelity.md)。
-- 关键行为有测试：键序列解析、命令执行后的 point / mark / 文本、undo 分组、退出脏检查。
+- 关键行为有测试：键序列解析、命令执行后的 point / mark / 激活状态 / 文本、undo 分组、退出脏检查。
+- 保存失败不得清 dirty 或破坏原文件；保存后 undo 的 dirty 判定、kill dirty buffer、窗口关闭与取消退出均有验收。
+- 已记录大文件打开、滚动与按键延迟的可复现基线；不得等到引入 split 才检查底座性能。
 
 ## 8. 后续阶段
 

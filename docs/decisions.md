@@ -1,6 +1,7 @@
 # 决策记录
 
-状态：D1–D13 已决定。实现阶段如发现新事实，追加新决策而不是改写历史。
+状态：D1–D13 保留原始决策记录；D14 是本次方案评估后的现行修正，优先于其中冲突的旧假设。
+方案 B 只获准进入 spike，尚未获证实可满足全部行为要求。新增事实通过追加决策记录，不改写历史。
 
 | ID | 决策 | 状态 |
 |---|---|---|
@@ -8,15 +9,16 @@
 | D2 | Linux / Wayland 优先，平台差异收敛到 `platform.rs` | 已决定 |
 | D3 | 纯 Emacs 键位，不做 CUA | 已决定 |
 | D4 | 自研键位分发器，挂在 `intercept_keystrokes` 上 | 已决定 |
-| D5 | 文本底座复用 `EditorState`（方案 B） | 已决定 |
+| D5 | 文本底座复用 `EditorState`（方案 B） | 候选路径，受 D14 门禁约束 |
 | D6 | 编辑语义归我们，`EditorState` 只做文本 / caret / 排版 / IME | 已决定 |
-| D7 | region 用 `RangeDecoration` 自绘，不用 EditorState 的 selection | 已决定 |
-| D8 | undo 委托 `EditorState` 的 Undo / Redo action，接受已登记差异 | 已决定 |
-| D9 | v1 每 window 一个 buffer；同 buffer 多窗口不支持，预留 model/view 缝 | 已决定 |
+| D7 | region 用 `RangeDecoration` 自绘，不用 EditorState 的 selection | 保留方向，同步 / marker 假设由 D14 修正 |
+| D8 | undo 委托 `EditorState` 的 Undo / Redo action，接受已登记差异 | 分组与完成机制待验证，见 D14 |
+| D9 | 每 window 一个 buffer；同 buffer 多窗口不支持，预留 model/view 缝 | v1 split 范围由 D14 取代 |
 | D10 | 单 crate，暂不拆 workspace | 已决定 |
 | D11 | 命令注册表是 M-x / C-h 的唯一数据源 | 已决定 |
 | D12 | 不模仿 Emacs 外观，视觉用 gpui-kit | 已决定 |
 | D13 | v1 键位写在 Rust 代码里，用户配置格式待定 | 已决定 |
+| D14 | 修正输入 / mark / undo 假设；spike 门禁；v1 截止 M3 | 已决定，API 缺口的处理选项仍待确认 |
 
 ---
 
@@ -67,6 +69,8 @@ GPUI keymap 之前接管按键；`stop_propagation()` 消费事件。
 
 ## D5 文本底座
 
+> 历史记录：下文“公开 API 均可绕过”的判断未经完整验证，已由 D14 撤回；方案 B 先做 spike。
+
 **决策**：复用 gpui-kit 的 `EditorState`（`InputBaseState<EditorMode>`）作为文本 + caret +
 排版 + IME + 滚动 + 装饰的底座，不自研文本引擎。
 
@@ -94,6 +98,8 @@ minibuffer、undo 边界。`EditorState` 只负责"文本 + 画 caret + 排版 +
 
 ## D7 region 与 mark
 
+> 历史记录：保留自有 point / mark 与 region 高亮方向。下文空 `RangeDecoration` 兜底与简化同步假设不再有效，现行约束见 D14。
+
 **决策**：不把 `EditorState` 的 selection 当 region。point / mark 自己维护；
 region 用 `create_range_decorations_collection(RangeDecoration::Fill)` 绘制。
 
@@ -108,6 +114,8 @@ region 用 `create_range_decorations_collection(RangeDecoration::Fill)` 绘制�
 
 ## D8 undo
 
+> 历史记录：下文“每条命令后同步即可复现边界”、分组实测等价与清 mark 的推论不再作为实现依据；见 D14 与更新后的验收矩阵。
+
 **决策**：v1 委托 `EditorState` 的 `Undo` / `Redo` action（`window.dispatch_action`）。
 绑定与 Emacs 31 一致。接受两个已知差异：连续 yank 不合并、无 undo-in-region。
 每条命令结束同步 caret，以复现 Emacs 的 undo 命令边界。
@@ -119,6 +127,8 @@ region 用 `create_range_decorations_collection(RangeDecoration::Fill)` 绘制�
 若将来差异变得刺眼，可请上游公开 `begin_transaction / end_transaction`，或自研 view 时一并重做。
 
 ## D9 多窗口
+
+> 历史记录：下文“v1 支持不同 buffer split”的范围由 D14 取代；v1 不含任何 split。
 
 **决策**：v1 每个 window 一个 buffer；支持不同 buffer 的 split 展示；
 同一 buffer 同时显示在两个 window 不支持，UI 明确提示而不是静默共享 point。
@@ -156,12 +166,51 @@ region 用 `create_range_decorations_collection(RangeDecoration::Fill)` 绘制�
 
 ---
 
+## D14 方案评估修正与实施门禁
+
+**决策**：先执行 [S1–S5](plan.md#1-先做-spike不写正式代码)，通过后再进入 M0。
+本次修正没有批准新增 F3 差异、依赖 patch、上游 API 修改或自研 view。
+
+**理由 / 证据边界**：
+
+- 本次检查的本地 gpui-kit 参考快照为 `94480398`；依据文件包括
+  `crates/base/src/input/base/{state,movement,undo_manager}.rs` 与
+  `crates/base/src/input/editor/decorations.rs`。公开 `insert` / `replace` 使用 Atomic 意图，
+  原生 Backspace / Delete 使用专用合并意图；`set_selected_range` 会打断合并。
+  因此，旧表的底座行为不能证明自有命令入口的 undo 分组一致。
+- 空 `RangeDecoration` 会被过滤，不能承担通用 marker 语义。
+- IME handler 可接收指定替换范围，旧 point / 新 cursor / 长度差不足以定位一般编辑。
+- 本机 Emacs 31.1 的 `C-x a` 为 abbreviation 前缀，不是 undefined 测试基准。
+- 以上是参考源码 / 绑定核对，不是 crates.io 依赖构建、完整 Emacs 对照脚本或 Wayland 运行验证结果。
+
+**现行约束**：
+
+1. caret 同步与 undo 分组分开考虑。异步 action 必须在正确目标完成后再收敛 point / mark；
+   不以派发返回代表完成，不在每条命令后无条件写回 selection。
+2. mark 位置与 region 激活状态独立；deactivate 不清除 mark。
+   外部输入、IME 更新 / 提交 / 取消、鼠标与历史回放的来源、替换范围和完成时机须在 S4 验证。
+3. 普通 Meta 不自插入，Shift 字符可以输入；AltGr、死键与 IME 显式分类。
+   编辑器目标内未绑定命令键统一消费并回显 undefined，不静默 `Ignored`。
+4. Emacs 基准固定版本、major mode、选项、初始状态、脚本与 command loop 驱动方式；
+   semacs 必须走真实命令链路。旧 undo 对照结论降为待复测项，已登记 F3 不因此扩大。
+5. v1 为 M0–M3：单顶层窗口、一个正文 view、可切换多个 buffer；`M-x` / minibuffer 在 M2，
+   连续 kill 规则在 M1，性能基线从 M0 / M1 建立，M2 覆盖文件安全。
+   所有 split、isearch、`M-y`、`C-u` 都在 v1 之后评估。D9 的 v1 split 承诺由本条取代。
+
+**后果 / 失败门禁**：任何 spike 失败或关键状态无法可靠观测，暂停正式实现，提交最小复现、
+API 缺口、受影响的保真度项与候选路径。是否接受新差异、补上游 API、引入依赖 patch 或更换底座，
+须确认后另记决策；不得在实现中选择成本最低的降级作为默认行为。
+
+---
+
 ## 待决事项
 
-- 配置系统：Rust 构建期、TOML、还是（不做的）elisp 子集。
-- 文件层：编码（UTF-8 / CRLF / BOM）、自动保存、备份文件、`C-x C-c` 的确认文案。
-- 键位细节：`ESC` / `M-` / `C-g` / `C-u` / 前缀显示 / `C-?` 平台键名。
-- kill ring 与系统剪贴板的同步。
-- 连续 yank 的 undo 合并是否需要上游 `begin_transaction`。
-- 同 buffer 多窗口是否启动方案 2（自研 view）。
-- isearch / occur / syntax highlighting 的优先级。
+- 阻断性 API 缺口：S3 / S4 的实际可行机制；失败时在新增差异、补上游 API、依赖 patch 或更换底座之间另行确认。
+- 文件层：v1 保证 UTF-8 / LF；CRLF / BOM 等输入的拒绝或保留策略须在 M2 明确，禁止静默有损转换。
+  自动保存、备份文件属后续增强；确认文案在 M2 固定。
+- v1 键位细节：`ESC` / Meta 输入与取消的完整交互、前缀显示、`C-?` 平台键名；前缀默认无超时。
+  `RET` / `TAB` / `C-j` 的命令与缩进选项须在 M1 前固定，不沿用未经核对的全局绑定假设。
+- kill ring 与系统剪贴板的同步策略；不影响应用内 kill / yank 的 v1 验收。
+- 首轮基线测量后的性能预算与样本规模。
+- v1 后的配置格式、isearch / occur / syntax highlighting、`M-y`、`C-u` 及更多重复语义的优先级。
+- 后续 split 的键位与限制、同 buffer 多视图是否需要自研 view；不作为 v1 前置工作。

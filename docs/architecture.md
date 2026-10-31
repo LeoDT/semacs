@@ -1,5 +1,9 @@
 # 架构设计
 
+状态：方案 B 为候选实现路径，先完成 [S1–S5](plan.md#1-先做-spike不写正式代码)。
+分层与行为约束已确定；undo 分组、外部文本变更观测和输入同步的可行性尚未通过运行验证。
+若公开 API 无法满足约束，暂停正式实现，按 D14 重新决策，不默认增加保真度差异。
+
 ## 1. 分层
 
 ```
@@ -33,8 +37,9 @@
 职责边界：
 
 - **keys / command / buffer 的 API 不依赖 GPUI 的具体 widget**，方便单测。
-- **只有 Buffer 内部**可以接触 `Entity<EditorState>`。命令层不得直接操作它。
-- **BufferView** 持有 Emacs 的 point / mark / goal column 与渲染入口；`EditorState` 的 cursor 只是 caret 的绘制载体。
+- **只有 `buffer/` 内部的适配层**可以接触 `Entity<EditorState>`。命令层不得直接操作它。
+- **BufferView** 持有 Emacs 的 point / mark / goal column 与渲染入口；`EditorState` 的 cursor 承载 caret 与平台交互状态，
+  来源与完成时机按第 6 节同步协议区分，不能假定它只是无副作用的绘制字段。
 
 ## 2. 预期目录结构
 
@@ -67,8 +72,8 @@ docs/
 ## 3. 按键分发链路
 
 GPUI 提供 `App::intercept_keystrokes`：它在 keymap / action 解析**之前**触发。
-在其中调用 `cx.stop_propagation()` 会同时阻止 GPUI action 和平台层把 `key_char` 插入 buffer
-（Linux X11 / Wayland 后端只在 dispatch 返回 `propagate == true` 后调用 `replace_text_in_range`）。
+按参考源码，调用 `cx.stop_propagation()` 可同时阻止 GPUI action 和平台层把 `key_char` 插入 buffer。
+这是 S1 要在 crates.io 实际依赖及 Wayland 上验证的假设，不等价于所有 IME 输入都经过按键事件。
 
 ```
 cx.intercept_keystrokes(move |event, window, cx| {
@@ -81,8 +86,10 @@ cx.intercept_keystrokes(move |event, window, cx| {
 });
 ```
 
-返回 `false` 的按键会落到平台文本输入路径，从而由 `EditorState` 的
-`EntityInputHandler` 插入字符（IME、中文、死键都走这条路）。
+允许文本输入的按键交给平台路径，由当前输入目标的 `EntityInputHandler` 处理。
+IME 预编辑和提交可能直接调用输入 handler，不能只靠 interceptor 跟踪或拦截。
+路由先判断当前焦点、平台输入状态与系统保留键，再执行下面的编辑器键位解析；
+minibuffer 是独立输入目标，不把其输入或编辑命令发送到正文 buffer。
 
 ```
 fn handle_keystroke(&mut self, ks, window, cx) -> bool {
@@ -90,27 +97,19 @@ fn handle_keystroke(&mut self, ks, window, cx) -> bool {
         Resolution::Prefix => { self.pending.push(ks); self.echo.show_prefix(); true }
         Resolution::Execute(cmd) => { self.pending.clear(); self.execute(cmd, window, cx); true }
         Resolution::Undefined => { self.pending.clear(); self.echo.error_undefined(); true }
-        Resolution::SelfInsert => false,   // 交给平台 / IME
-        Resolution::Ignored => true,       // 带修饰键的未知键：吞掉，绝不插入
+        Resolution::SelfInsert => false,   // 仅已确认的文本输入路径
     }
 }
 ```
 
-命令统一出口（注意"每条命令结束同步 caret"）：
+命令统一出口负责选择输入目标、执行命令和完成后的状态收敛，但**不无条件写回 caret**：
 
-```
-fn execute(&mut self, cmd: CommandId, window, cx) {
-    (self.commands[cmd].execute)(self, window, cx);
-    self.active_view.update(cx, |view, cx| view.sync_caret_after_command(window, cx));
-    self.echo.maybe_finish();
-}
-```
-
-`sync_caret_after_command` 用 `state.set_selected_range(point..point, cx)` 完成三件事：
-
-1. 把我们的 point 写给 EditorState 画 caret；
-2. 触发 `move_to()`，打断 undo 合并，复现 Emacs 的"命令边界"；
-3. 滚动到 point 可见。
+- 自有 motion / 编辑完成后，适配层按需要把 point 写给底座并更新 region / 滚动。
+- 平台输入、鼠标操作和 undo / redo 后，先从底座取得已完成的变更与 cursor，再更新语义状态。
+- `window.dispatch_action` 的调用返回不视为 undo 已完成。完成观测、焦点约束和后续操作顺序必须经 S3 验证；
+  连续 undo、undo 后立即输入或切换 buffer 不得路由到错误目标。
+- `set_selected_range` 会调用 `move_to` 并打断底座 undo 合并，不能同时承担所有同步和事务边界职责。
+  caret 同步、滚动与 undo 分组分别按行为验收；公开 API 若无法兼顾，记录为阻断问题而非隐式降级。
 
 ## 4. 键位引擎
 
@@ -123,19 +122,23 @@ type KeySeq = Vec<KeyStroke>;
 struct Keymap {
     name: &'static str,
     parent: Option<Arc<Keymap>>,           // global < major mode < minor / transient
-    bindings: HashMap<KeySeq, CommandId>,
+    bindings: HashMap<KeySeq, Binding>,
 }
 
-enum Resolution { Execute(CommandId), Prefix, Undefined, SelfInsert, Ignored }
+enum Binding { Command(CommandId), Prefix }
+enum Resolution { Execute(CommandId), Prefix, Undefined, SelfInsert }
 ```
 
 规则：
 
-- 精确匹配且同时是前缀时保持 pending（Emacs 行为）；
-- 空前缀下未绑定、可打印、无 control / super → `SelfInsert`；
-- 非空前缀下未绑定 → `Undefined`，消费按键并回显；
-- 带修饰键的未知键 → `Ignored`，消费但不插入，避免 GPUI 的内置 action 意外触发；
-- `C-g` 清空 pending 并取消当前交互。
+- 同一 keymap 的一个节点要么是命令，要么是前缀；注册时拒绝命令与子序列冲突，不用等待规则掩盖冲突。
+  允许显式声明尚无子绑定的前缀（如 v1 的 `C-c` / `C-h`），不能仅靠现有命令的子序列推导所有前缀。
+- 多层 keymap 的覆盖与前缀查找须有测试，不把父表前缀无条件置于子表命令之前。
+- 空前缀下未绑定、可打印，且无 control / Meta / super → `SelfInsert`；Shift 产生的字符可自插入。
+- 普通 Meta 组合是命令键，不因存在 `key_char` 就自插入；AltGr 只有经平台识别为文本输入时才例外。
+- 非空前缀下未绑定，或当前没有合法文本输入路径 → `Undefined`，消费按键并回显，不静默吞掉。
+- 死键、IME 预编辑与系统保留键在平台 / 焦点路由层分类；不以“未知修饰键”概括这些事件。
+- `C-g` 清空 pending、取消当前交互并停用 region，但不删除已存在的 mark 位置。
 
 键名解析器 `parse_key_sequence("C-x C-s")` 自己实现并单测，支持 `C- M- S- s-`。
 
@@ -162,8 +165,8 @@ impl Buffer {
     fn text(&self) -> &Rope;
     fn len(&self) -> usize;
     fn slice(&self, range: Range<usize>) -> String;
-    fn apply(&mut self, edit: Edit, window, cx);   // 一次 replace = 一个 undo step
-    fn undo(&mut self, window, cx);                // 当前实现：派发 Undo action
+    fn apply(&mut self, edit: Edit, window, cx);   // 自有编辑；分组规则须经 S3 验证
+    fn undo(&mut self, window, cx);                // 候选实现：派发 Undo action
     fn redo(&mut self, window, cx);
     fn is_modified(&self) -> bool;
     fn save(&mut self, window, cx) -> io::Result<()>;
@@ -173,6 +176,7 @@ struct BufferView {
     buffer: Entity<Buffer>,
     point: usize,
     mark: Option<usize>,
+    mark_active: bool,
     goal_column: Option<usize>,
     region: RangeDecorationCollection,
     _subs: Vec<Subscription>,
@@ -183,24 +187,33 @@ struct BufferView {
 - region 高亮用 `RangeDecoration`（Fill），其 range 会随编辑自动调整；不把 EditorState
   的 selection 当作 region，因为公开 API 无法表达"point 在 mark 之前"的反向 region
   （`set_selected_range` 强制 caret 落在末端）。
-- 鼠标点击 / 拖选由 `EditorState` 内部处理；我们通过 `cx.observe` 读
-  `cursor()` 与 `selected_range()` 反向同步成 point / mark，然后清掉原生 selection，
-  并加 `syncing` 标志防回环。
-- mark 的跟随（marker 语义）：
-  - 我们自己的编辑直接按 `Edit { range, replacement }` 调整；
-  - 平台自插入 / IME 提交发生在 point，可用"旧 point + 新 cursor + 字节长度差"定位并调整；
-  - undo / redo 后清 mark（Emacs 也 deactivate mark）；
-  - 将来如果规则变复杂，可把 mark 存成一个空 `RangeDecoration` 并用 `get_ranges()` 读回，
-    让 `EditorState` 自动跟踪。
+- mark 位置与激活状态独立：`None` 表示从未设 mark，`mark_active` 控制 region 是否激活。
+  `C-g`、undo / redo 的停用操作不等于把 mark 设为 `None`；mark 仍需跟随文本变更。
+- 输入与同步协议的约束：
+  - 文本以 `EditorState` 为准；自有命令的 point 意图与底座产生的 cursor 更新必须区分来源，不能互相覆盖。
+  - 自有编辑提供 `Edit { range, replacement }`；所有位置以 UTF-8 字节偏移表示，并保持字符边界。
+  - 平台输入和历史回放也必须取得足够的替换范围 / 替换内容信息，才能更新 mark。
+    IME 可指定替换范围；禁止用“旧 point + 新 cursor + 字节长度差”推断一般编辑。
+  - 预编辑、提交、取消分别处理；取消后文本、mark 和 dirty 状态应恢复到相应状态。
+  - 鼠标拖选结束后，适配层按 cursor 与 selection 的方向导入 point / mark / 激活状态，再转换为 region 高亮。
+    不在每次 `cx.observe` 通知中无条件清 selection，以免破坏拖选锚点或 IME selection。
+  - 自有同步不应反向触发第二次语义更新；通用 `Change` / observe 通知本身不足以证明来源、范围或操作完成。
+  - 平台输入提交也参与语义操作边界，须打断连续 kill 等命令链；不能因绕过命令注册表而遗漏。
+- S4 必须验证外部变更的观测机制与完成时机，产出覆盖鼠标、IME、自有命令和历史回放的同步方案；
+  当前不预设公开 API 已满足这些要求。
+- `RangeDecoration` 仅用于非空高亮；参考源码会过滤空范围，不能用空 decoration 充当通用 marker。
 - 命令层禁止直接接触 `Entity<EditorState>`，为将来的 model/view 拆分留缝。
 
 ## 7. undo
 
-- v1 委托 `EditorState`：`Undo` / `Redo` action，经 `window.dispatch_action` 派发。
+- 候选路径是委托 `EditorState`：`Undo` / `Redo` action，经 `window.dispatch_action` 派发，S3 通过后才能用于正式实现。
 - 绑定与 Emacs 31 一致：`C-/` / `C-_` / `C-x u` = undo；`C-?` / `C-M-_` = redo。
 - 已知差异（连续 yank 的分组、undo-in-region）登记在 [保真度文档](emacs-fidelity.md)。
-- 不自建 undo：平台自插入 / IME 提交不经过我们的编辑入口，精确记录 change 的成本过高。
-  若将来自研 view，再实现 Emacs 语义的 undo。
+- 参考源码的公开 `insert` / `replace` 使用 Atomic 意图；原生 Backspace / Delete 的相邻合并，
+  不能证明走 `Buffer::apply` 的自有删除也能合并。必须以真实命令链路对照验收矩阵。
+- 无可撤销内容时的错误回显、保存点与 dirty、mark 跟随也必须验证，不能只检查文本恢复。
+- 当前不自建 undo，也未批准新增 F3 差异或依赖 patch。若 S3 / S4 失败，提交 API 缺口、
+  最小复现与候选方案，确认后再继续；不得把底座限制直接写成产品行为。
 
 ## 8. minibuffer 与 echo area
 
@@ -209,6 +222,9 @@ struct BufferView {
 - v1 读取函数：`M-x`（命令名补全）、`C-x C-f` / `C-x C-w`（路径读取）、`C-x b` / `C-x k`（buffer 名补全）。
 - `RET` 确认、`TAB` 补全、`C-g` 取消；更完整的补全交互在 M3 打磨。
 - 键位分发在 minibuffer 激活时切换到 minibuffer 自己的 keymap，但 `C-g` / 前缀显示沿用全局行为。
+- minibuffer 激活时是当前输入目标；正文 point / region 保留，不能把 minibuffer 的输入、删除或 undo 路由到正文。
+  确认后执行待完成命令，取消则不执行；两种路径都恢复原焦点并清理 pending。
+- `M-x` 与上述读取 / 补全流程在 M2 明确实现和验收。
 
 ## 9. 平台适配
 
@@ -227,7 +243,7 @@ struct BufferView {
 | 能力 | 来源 | 说明 |
 |---|---|---|
 | 文本存储与编辑 | EditorState | Rope、UTF-8 / UTF-16 转换、编辑应用 |
-| undo 事务 | EditorState | 分组接近 Emacs，差异见 D8 |
+| undo 事务 | EditorState（候选） | 自有命令入口的分组与完成顺序待 S3 验证，见 D14 |
 | 排版与绘制 | EditorState | 软换行、行号、caret、选区、滚动、虚拟化、鼠标命中测试 |
 | 输入 | EditorState + 平台 | IME / 预编辑、剪贴板、无障碍 |
 | 装饰 | EditorState | RangeDecoration / TextDecoration / gutter，随编辑自动跟踪 |
@@ -243,16 +259,16 @@ struct BufferView {
 - **C（自研文本引擎 + 自研 view）**：控制力最强，但要自己实现 IME、命中测试、滚动 / 虚拟化、
   无障碍、caret 绘制，数周工作量且长期消耗边角案例；v1 目标不允许。
 
-已知代价（均已登记）：
+已知代价与待验证限制：
 
 1. point / mark 需要自建与同步（D7）；
-2. undo 分组委托给 EditorState，接受已登记差异（D8）；
+2. undo 分组受底座 API 限制，仅接受已登记差异，其余须经 S3 / S4 验证（D14）；
 3. 同一 buffer 多窗口不可行（D9）；
 4. 每个 buffer 一个 widget 实例，命令层不能直接摸 `EditorState`，用 `Buffer` 窄接口隔离。
 
 ## 11. EditorState 公开 API 的事实与缺口
 
-已确认可用：
+参考源码中可见的 API（不表示已在 crates.io 依赖上构建或运行验证）：
 
 - `text()` / `cursor()` / `selected_range()` / `set_selected_range()` / `insert()` / `replace()` / `set_value()` / `focus()`
 - `scroll_offset()` / `set_scroll_offset()` / `visible_row_range()` / `line_height()` / `range_to_bounds()`
@@ -261,14 +277,14 @@ struct BufferView {
 - `InputEvent::Change`
 - `Undo` / `Redo` action
 
-缺口与绕过：
+缺口与验证路径：
 
-| 缺口 | 绕过 |
+| 缺口 | 处理 / 验证路径 |
 |---|---|
 | selection 无法表达反向 region（`set_selected_range` 强制 `reversed = false`） | point / mark 自建，region 用 `RangeDecoration`（D7） |
-| `undo` / `redo` / `begin_transaction` 是 `pub(super)` | undo / redo 用 action 派发；多步编辑实现成一次 `replace`，避免需要事务 |
+| `undo` / `redo` / 事务控制与编辑意图非公开 API | action 派发、Atomic 编辑的适用范围及分组需经 S3 验证，一次 replace 不解决连续命令的合并 |
 | point / scroll / focus 绑在 state 上 | 同 buffer 多窗口推迟（D9） |
-| 没有通用 marker / overlay | mark 用 offset + 已知编辑位置调整，必要时用空 `RangeDecoration` 跟踪；高亮用 decoration |
+| 没有已验证的通用 marker / 外部变更流 | 自有编辑范围已知；IME / 历史回放的精确跟踪待 S4 验证。空 `RangeDecoration` 会被过滤，不能兜底 |
 | 没有 narrowing / indirect buffer / text property | 明确非目标 |
 
 ## 12. 未来替换文本引擎的成本
@@ -280,16 +296,15 @@ struct BufferView {
    1–2k 行以上，是**真正的方案**；
 3. 改上游 `gpui-base` 把 model / view 拆开：2 万行级重构，不建议。
 
-当前选择：先只支持"每个 window 一个 buffer"，不同 buffer 的 split 不受影响；同 buffer
-多窗口明确限制。`Buffer` / `BufferView` 的窄接口保证将来切换只改 `buffer/` 内部。
+当前选择：v1 只有一个正文 view，可切换多个 buffer；所有 split 均在 v1 之后的 M4 评估。
+若开展不同 buffer 的 split，仍需定义 `C-x 2/3` 默认复制当前 buffer 与禁止同 buffer 多视图之间的冲突，
+不得在“纯 Emacs 键位”名义下静默替换语义。窄接口用于收敛未来替换成本，不保证不需要上层调整。
 
 ## 13. 待 spike 验证
 
-1. `intercept_keystrokes` + `stop_propagation` 确实阻止平台插入；未拦截字符正常插入；IME 正常。
-2. 前缀 `C-x` 的 pending 显示、`C-g` 取消、未定义键不插入。
-3. 在 interceptor 中 `window.dispatch_action(Undo)` 的稳定性与连按顺序。
-4. point / mark 同步与 `RangeDecoration`：反向 region、鼠标拖选后的转换、mark 跟随。
-5. Wayland 下的 `C-?`、AltGr、死键键名与文本输入行为。
+以 [实施计划的 S1–S5](plan.md#1-先做-spike不写正式代码) 为唯一验收清单，包含真实命令入口、
+IME 生命周期、外部变更观测、异步完成顺序及 minibuffer 焦点切换。源码检查不能替代运行验证。
+S3 / S4 无法满足 F1 时，按 D14 暂停并确认，不自动接受新差异或启动自研 view。
 
 ## 14. 测试策略
 
@@ -298,4 +313,5 @@ struct BufferView {
 - 交互测试：使用 gpui-kit 的 `test-support` 与 `VisualTestContext`，
   `cx.simulate_keystrokes("ctrl-f")`、`cx.simulate_keystrokes("ctrl-x ctrl-s")`，
   断言 buffer 文本、point、mark、echo 状态。
-- undo 分组用一组固定脚本做回归（对照 [保真度文档](emacs-fidelity.md) 的表）。
+- undo 分组与 mark 跟随使用固定基准脚本，记录 Emacs 环境及 semacs 真实链路结果；
+  [保真度文档](emacs-fidelity.md) 的矩阵是待复测验收项，不是 semacs 已通过的证据。
