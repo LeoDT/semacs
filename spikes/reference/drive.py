@@ -34,6 +34,7 @@ ESC = b"\x1b"
 C_M__ = b"\x1b\x1f"  # C-M-_ (redo)
 C_SPC = b"\x00"
 C_X = b"\x18"
+C_W = b"\x17"
 
 # Each case: (initial text, [(label, keys), ...])
 CASES = {
@@ -97,6 +98,35 @@ CASES = {
     "del-then-undo-then-type": ("abc", [("C-a", C_A), ("delete to end", C_K),
                                         ("undo", C_SLASH), ("type z", b"z"),
                                         ("undo", C_SLASH)]),
+    "redo-point": ("abc", [("type zz", b"zz"), ("undo", C_SLASH), ("redo", C_M__)]),
+    # mark is a marker: text changes move it (insertion type nil, deleted text
+    # collapses it to the deletion start), and undo restores it when it is still
+    # at that start. Active state is deactivated by edits, not by position.
+    "mark-insert": ("abcdef", [("C-a C-f x2", C_A + C_F * 2), ("C-SPC", C_SPC),
+                                ("insert at mark", b"X"), ("C-a", C_A),
+                                ("insert before mark", b"Y"), ("C-e", C_E),
+                                ("insert after mark", b"Z")]),
+    "mark-insert-undo": ("abcdef", [("C-a C-f x2", C_A + C_F * 2), ("C-SPC", C_SPC),
+                                     ("C-a", C_A), ("insert before mark", b"X"),
+                                     ("undo", C_SLASH), ("redo", C_M__)]),
+    "mark-delete-undo": ("abcdef", [("C-a C-f x3", C_A + C_F * 3), ("C-SPC", C_SPC),
+                                     ("C-a", C_A), ("C-k", C_K),
+                                     ("undo", C_SLASH), ("redo", C_M__)]),
+    "mark-region-undo": ("abcdef", [("C-a C-f x2", C_A + C_F * 2), ("C-SPC", C_SPC),
+                                     ("C-a", C_A), ("C-w", C_W),
+                                     ("undo", C_SLASH)]),
+    "mark-undo-moved": ("abcdef", [("C-a C-f x3", C_A + C_F * 3), ("C-SPC", C_SPC),
+                                    ("C-a", C_A), ("C-d x3", C_D * 3),
+                                    ("C-e", C_E), ("C-SPC", C_SPC), ("C-g", C_G),
+                                    ("undo", C_SLASH)]),
+    "mark-buffers": ("abcdef", [("C-a C-f x3", C_A + C_F * 3), ("C-SPC", C_SPC),
+                                 ("C-x b foo RET", C_X + b"bfoo\r"),
+                                 ("type xx", b"xx"), ("C-a C-f", C_A + C_F),
+                                 ("C-SPC", C_SPC), ("type yy", b"yy"),
+                                 ("C-x b *spike* RET", C_X + b"b*spike*\r"),
+                                 ("C-a", C_A), ("insert before A mark", b"Q"),
+                                 ("C-x b foo RET", C_X + b"bfoo\r"),
+                                 ("undo in foo", C_SLASH)]),
 }
 
 

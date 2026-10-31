@@ -1,7 +1,7 @@
 # 架构设计
 
-状态：方案 B 为候选实现路径，先完成 [S1–S5](plan.md#1-先做-spike不写正式代码)。
-分层与行为约束已确定；undo 分组、外部文本变更观测和输入同步的可行性尚未通过运行验证。
+状态：方案 B 为候选实现路径。S1–S5 的机制验证见 `spikes/EVIDENCE.md`；D16 自建 undo 与 D17 IME 组合屏障已获批准。
+mark 已按 marker 语义验证；D17 的窗口关闭入口已验证，真实焦点切换路径仍待按第 6 节要求复核。
 若公开 API 无法满足约束，暂停正式实现，按 D14 重新决策，不默认增加保真度差异。
 
 ## 1. 分层
@@ -108,8 +108,8 @@ fn handle_keystroke(&mut self, ks, window, cx) -> bool {
 
 - 自有 motion / 编辑完成后，适配层按需要把 point 写给底座并更新 region / 滚动。
 - 平台输入、鼠标操作和 undo / redo 后，先从底座取得已完成的变更与 cursor，再更新语义状态。
-- `window.dispatch_action` 的调用返回不视为 undo 已完成。完成观测、焦点约束和后续操作顺序必须经 S3 验证；
-  连续 undo、undo 后立即输入或切换 buffer 不得路由到错误目标。
+- `window.dispatch_action` 或其它异步 action 的调用返回不视为编辑已完成；undo / redo 已自建（D16），
+  不再依赖 action。平台输入、鼠标和回放的完成观测与后续操作顺序见第 6 节。
 - `set_selected_range` 会调用 `move_to` 并打断底座 undo 合并，不能同时承担所有同步和事务边界职责。
   caret 同步、滚动与 undo 分组分别按行为验收；公开 API 若无法兼顾，记录为阻断问题而非隐式降级。
 
@@ -181,8 +181,8 @@ impl Buffer {
     fn text(&self) -> &Rope;
     fn len(&self) -> usize;
     fn slice(&self, range: Range<usize>) -> String;
-    fn apply(&mut self, edit: Edit, window, cx);   // 自有编辑；分组规则须经 S3 验证
-    fn undo(&mut self, window, cx);                // 候选实现：派发 Undo action
+    fn apply(&mut self, edit: Edit, window, cx);   // 自有编辑；分组规则见 D16
+    fn undo(&mut self, window, cx);                // 自建 change 历史，不派发底座 action
     fn redo(&mut self, window, cx);
     fn is_modified(&self) -> bool;
     fn save(&mut self, window, cx) -> io::Result<()>;
@@ -190,7 +190,7 @@ impl Buffer {
 
 struct EditingState {
     point: usize,
-    mark: Option<usize>,
+    mark: Option<Marker>,      // 不是 offset：insertion type nil，随文本变更移动
     mark_active: bool,
     goal_column: Option<usize>,
 }
@@ -208,6 +208,9 @@ struct BufferView {
 ```
 
 - point / mark 是**我们自己的模型**，不依赖底座的 selection 表示。
+  mark 使用 marker 语义：在其前面插入会后移，在其位置插入不动，覆盖它的删除会坍缩到删除起点；
+  删除时记录塌缩偏移，undo 只有在 mark 仍位于该起点时才恢复。更新点必须放在适配层的唯一文本变更入口，
+  因为平台输入与历史回放不经过命令层，不能在每条命令后各自修一次。
 - v1 每个正文 Buffer 保存自己的 `EditingState`；切换 A → B → A 不重置 A 的 point / mark，也不把 A 的状态复制给 B。
   mark 与激活状态是 buffer-local；切换命令引起的激活状态变化、goal column 重置按固定 Emacs 基准处理，不等于无条件恢复旧激活状态。
 - 切换前先完成旧目标的输入 / 编辑，解除 view 对旧 Buffer 的高亮与渲染订阅，保留 Buffer 自身的变更观测；
@@ -218,7 +221,9 @@ struct BufferView {
   的 selection 当作 region，因为公开 API 无法表达"point 在 mark 之前"的反向 region
   （`set_selected_range` 强制 caret 落在末端）。
 - mark 位置与激活状态独立：`None` 表示从未设 mark，`mark_active` 控制 region 是否激活。
-  `C-g`、undo / redo 的停用操作不等于把 mark 设为 `None`；mark 仍需跟随文本变更。
+  `C-g`、undo / redo、平台输入与 IME 提交的停用只清 active，不等于把 mark 设为 `None`；
+  mark 仍随文本变更移动。
+- 预编辑文本视为临时层：开始 / 更新 / 取消不移动 mark，提交按一次插入更新。
 - 输入与同步协议的约束：
   - 文本以 `EditorState` 为准；自有命令的 point 意图与底座产生的 cursor 更新必须区分来源，不能互相覆盖。
   - 自有编辑提供 `Edit { range, replacement }`；所有位置以 UTF-8 字节偏移表示，并保持字符边界。
@@ -237,29 +242,31 @@ struct BufferView {
 
 ### 组合输入与命令的串行化
 
-- 平台 / IME 自己消费的候选操作不作为编辑器命令执行。AppShell 在目标适配层前设置输入完成屏障：
-  预编辑期间实际交给编辑器的编辑命令、保存、前缀启动、切换 buffer、
-  进入 / 退出 minibuffer、kill / close 必须先收敛原目标的组合输入，再执行后续操作。
-  提交还是取消，以及 `C-g` 的处理，须在 S1 / S4 按固定平台与 Emacs 对照确定并记录；不在实现中隐式选择。
-- 收敛完成意味着已收到可验证的提交 / 取消结果，并完成文本、mark、dirty 与 undo 状态更新；
-  请求提交、改变焦点或派发 action 的返回都不是完成证明。无法可靠完成或观测即为 spike 阻断。
-- 等待中的命令绑定原目标标识及会话代次，按序执行；事件也必须关联原目标，不能按回调发生时的当前焦点重新解释。
-  目标销毁前先收敛输入；已结束会话的迟到回调不得修改另一个 buffer 或新的 minibuffer 会话。
-- 保存只读取屏障完成后的已提交文本，不能把临时预编辑落盘；取消后验证内存、磁盘与保存点没有误变更。
-- pending 前缀期间直接到达 handler 的文本不能无条件自插入。前缀启动前的组合输入先收敛；
+- 平台 / IME 自己消费的候选操作不作为编辑器命令执行。当前公开 API 没有“主动提交组合并等待完成”的入口，
+  因此按 [D17](decisions.md#d17-ime-组合屏障命令拒绝关闭--失焦取消)：`marked_text_range()` 非空时，
+  命令、前缀启动、保存、切换 buffer、进入 / 退出 minibuffer、kill / quit 一律拒绝并回显
+  `Input method composition is active; finish it first`，组合与 buffer 保持原样。
+- 关闭 / 失焦不是命令入口：未提交的预编辑不是输入，按取消处理。
+  `Window::on_window_should_close` 先取消组合再允许关闭；内部 `Window::remove_window()` 同样接入。
+  焦点被切走时以平台在 text-input leave 的取消为准，保留主动取消兜底；不回写 buffer、不变 dirty。
+- 所有回调绑定原目标 / 会话代次，迟到提交不得按当前焦点重新解释，也不能借焦点变化推定输入已完成。
+  若将来上游提供公开的 commit / cancel + 完成通知，可升级为“先收敛再执行”。
+- 事件必须关联原目标；目标销毁前拒绝或取消组合；已结束会话的迟到回调不得修改另一个 buffer 或新的 minibuffer 会话。
+- 保存只读取已提交文本，不能把临时预编辑落盘；取消后验证内存、磁盘与保存点没有误变更。
+- pending 前缀期间直接到达 handler 的文本不能无条件自插入。前缀启动前的组合输入先按 D17 处理；
   前缀期间新到达的文本走受前缀约束的输入解析，按基准完成绑定或报 undefined，不绕过键位引擎修改文本。
-  这需要验证输入 handler 的控制能力，不能用事后观察文本变化替代拦截。
 
 ## 7. undo
 
-- 候选路径是委托 `EditorState`：`Undo` / `Redo` action，经 `window.dispatch_action` 派发，S3 通过后才能用于正式实现。
+- undo / redo 由我们自己的 change 记录实现（[D16](decisions.md#d16-自建-undo)），
+  不派发 `EditorState` 的 `Undo` / `Redo` action；每个编辑目标持有独立历史，dirty 与保存点由 change 记录派生。
+- 每个 `Change` 记录 `{range, old, new, kind}`；命令意图区分 Typing / DeleteBackward / DeleteForward / Other。
+  连续同类合并，其它命令插入边界，undo / redo 不与输入合并，undo 后输入开新组并清空 redo。
+- replay 通过同一个 `EditTarget` 应用，带 `replaying` 标志避免自我记录；mark 也在这条路径上更新。
 - 绑定与 Emacs 31 一致：`C-/` / `C-_` / `C-x u` = undo；`C-?` / `C-M-_` = redo。
-- 已知差异（连续 yank 的分组、undo-in-region）登记在 [保真度文档](emacs-fidelity.md)。
-- 参考源码的公开 `insert` / `replace` 使用 Atomic 意图；原生 Backspace / Delete 的相邻合并，
-  不能证明走 `Buffer::apply` 的自有删除也能合并。必须以真实命令链路对照验收矩阵。
-- 无可撤销内容时的错误回显、保存点与 dirty、mark 跟随也必须验证，不能只检查文本恢复。
-- 当前不自建 undo，也未批准新增 F3 差异或依赖 patch。若 S3 / S4 失败，提交 API 缺口、
-  最小复现与候选方案，确认后再继续；不得把底座限制直接写成产品行为。
+- 已知差异：region 激活时仍执行全局 undo（undo-in-region 属 F3）。
+- undo 恢复组开始前的 point；redo 回到组内最早变更的起点（与 Emacs 对齐，`Group::redo_point()`）。
+- 无可撤销内容时回显 `No further undo information`，不静默失败。
 
 ## 8. minibuffer 与 echo area
 
@@ -292,7 +299,7 @@ struct BufferView {
 | 能力 | 来源 | 说明 |
 |---|---|---|
 | 文本存储与编辑 | EditorState | Rope、UTF-8 / UTF-16 转换、编辑应用 |
-| undo 事务 | EditorState（候选） | 自有命令入口的分组与完成顺序待 S3 验证，见 D14 |
+| undo 事务 | 我们（D16） | 自建 change 记录；EditorState 只负责应用文本 |
 | 排版与绘制 | EditorState | 软换行、行号、caret、选区、滚动、虚拟化、鼠标命中测试 |
 | 输入 | EditorState + 平台 | IME / 预编辑、剪贴板、无障碍 |
 | 装饰 | EditorState | RangeDecoration / TextDecoration / gutter，随编辑自动跟踪 |
@@ -310,8 +317,8 @@ struct BufferView {
 
 已知代价与待验证限制：
 
-1. point / mark 需要自建与同步（D7）；
-2. undo 分组受底座 API 限制，仅接受已登记差异，其余须经 S3 / S4 验证（D14）；
+1. point / mark 需要自建与同步（D7、D18）；
+2. undo 由我们维护（D16），不再是底座限制；redo point 已对齐，undo-in-region 属 F3；
 3. 同一 buffer 多窗口不可行（D9）；
 4. 每个 buffer 一个 widget 实例，命令层不能直接摸 `EditorState`，用 `Buffer` 窄接口隔离。
 
@@ -331,9 +338,11 @@ struct BufferView {
 | 缺口 | 处理 / 验证路径 |
 |---|---|
 | selection 无法表达反向 region（`set_selected_range` 强制 `reversed = false`） | point / mark 自建，region 用 `RangeDecoration`（D7） |
-| `undo` / `redo` / 事务控制与编辑意图非公开 API | action 派发、Atomic 编辑的适用范围及分组需经 S3 验证，一次 replace 不解决连续命令的合并 |
+| `undo` / `redo` / 事务控制与编辑意图非公开 API | 已由 D16 绕过：自有 change 记录，编辑经 `EntityInputHandler` 应用；不依赖 action 与 EditIntent |
 | point / scroll / focus 绑在 state 上 | 同 buffer 多窗口推迟（D9） |
-| 没有已验证的通用 marker / 外部变更流 | 自有编辑范围已知；IME / 历史回放的精确跟踪待 S4 验证。空 `RangeDecoration` 会被过滤，不能兜底 |
+| 没有通用 marker / 外部变更流 | mark 在我们这里维护（D18）；所有文本变更经 `EditTarget` 同一入口。空 `RangeDecoration` 会被过滤，不能兜底 |
+| 窗口关闭没有专用 hook | `Window::on_window_should_close` 可在关闭前执行取消逻辑并允许关闭（D17）；内部 `remove_window` 仍需自己接入 |
+| 焦点切走没有 veto | 只能观察 activation；回调必须绑定原目标 / 会话代次，不能按当前焦点重解释 |
 | 没有 narrowing / indirect buffer / text property | 明确非目标 |
 
 ## 12. 未来替换文本引擎的成本
@@ -349,11 +358,13 @@ struct BufferView {
 若开展不同 buffer 的 split，仍需定义 `C-x 2/3` 默认复制当前 buffer 与禁止同 buffer 多视图之间的冲突，
 不得在“纯 Emacs 键位”名义下静默替换语义。窄接口用于收敛未来替换成本，不保证不需要上层调整。
 
-## 13. 待 spike 验证
+## 13. spike 验证状态与剩余门禁
 
-以 [实施计划的 S1–S5](plan.md#1-先做-spike不写正式代码) 为唯一验收清单，包含真实命令入口、
-IME 与命令交错、外部变更观测、异步完成顺序、跨 buffer 状态恢复及正文 / minibuffer 公共编辑目标。
-源码检查不能替代运行验证；细化约束见 D15。
+以 [实施计划的 S1–S5](plan.md#1-先做-spike不写正式代码) 为唯一验收清单；逐项证据在 `spikes/EVIDENCE.md`。
+已通过：interceptor 边界、前缀 / undefined / C-g、自建 undo 分组 / 保存点 / redo point、平台输入与 IME 观测、
+mark marker 语义、鼠标拖选导入、多 buffer 隔离、真实键位分类、IME 命令屏障、关闭 / 失焦取消、
+真实 fcitx5 提交后的 mark。
+可选剩余：真实硬件键盘与 WM 保留键确认；WM 强退 / 进程崩溃未测。
 S3 / S4 无法满足 F1 时，按 D14 暂停并确认，不自动接受新差异或启动自研 view。
 
 ## 14. 测试策略
@@ -364,4 +375,4 @@ S3 / S4 无法满足 F1 时，按 D14 暂停并确认，不自动接受新差异
   `cx.simulate_keystrokes("ctrl-f")`、`cx.simulate_keystrokes("ctrl-x ctrl-s")`，
   断言 buffer 文本、point、mark、echo 状态。
 - undo 分组与 mark 跟随使用固定基准脚本，记录 Emacs 环境及 semacs 真实链路结果；
-  [保真度文档](emacs-fidelity.md) 的矩阵是待复测验收项，不是 semacs 已通过的证据。
+  [保真度文档](emacs-fidelity.md) 的矩阵是验收要求，具体结果与证据位置以 `spikes/EVIDENCE.md` 为准。

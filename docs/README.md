@@ -4,9 +4,11 @@ semacs 是一个用 Rust + [GPUI Kit](https://gpui-kit.com) 实现的 Emacs 风�
 项目重点是**复刻 Emacs 的操作模型与按键逻辑**，而不是复刻 Emacs 的外观或扩展生态。
 后续阶段会在同一套键位 / 命令 / 模式框架上增加 diff 查看器和 magit 风格的 git 操作界面。
 
-当前状态：方案评估后的文档已修正，尚未开始实现。先验证 S1–S5，再决定是否进入 M0；
-方案 B 的 undo / marker / 输入同步可行性仍待验证。D15 已补齐 IME 命令屏障、跨 buffer 状态、
-正文 / minibuffer 公共编辑目标与命令名核对门禁；这些约束尚未通过 spike。v1 截止 M3，split 与 diff / git 不在 v1 内。
+当前状态：尚未开始正式实现。S1–S5 的机制验证已完成并落在 `spikes/`：自建 undo（D16）、
+IME 命令屏障与关闭 / 失焦取消（D17）、mark marker 语义（D18）均已实测，
+真实 fcitx5 的关闭、失焦与提交后 mark 由 real-cases 覆盖，redo point 已对齐 Emacs。
+剩余为可选的真实硬件键盘 / WM 保留键确认；这些完成前不宣布 S1–S5 全部通过，也不进入 M0。
+v1 截止 M3，split 与 diff / git 不在 v1 内。
 
 ## 阅读顺序
 

@@ -73,6 +73,9 @@ VPTR="$DIR/scripts/vptr/build/vptr"
 [ -x "$VPTR" ] || "$DIR/scripts/vptr/build.sh" >/dev/null 2>>"$APP_LOG" || true
 # Absolute pointer motion/click/drag inside the headless output (1280x800).
 mouse() { "$VPTR" "$@" 2>>"$DIR/log/$CASE.vptr.log"; sleep 0.3; }
+# Compositor requests (close, workspace switch). SWAYSOCK belongs to the private
+# headless session started above, never to the user's desktop.
+wm() { swaymsg "$@" 2>>"$DIR/log/$CASE.swaymsg.log"; sleep 0.3; }
 shot() { grim "$SHOT" 2>/dev/null && echo "screenshot: $SHOT"; }
 
 # shellcheck source=/dev/null

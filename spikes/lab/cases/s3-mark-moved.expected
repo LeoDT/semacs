@@ -1,0 +1,69 @@
+=== focused
+KEY   key="a" key_char=None ctrl=true alt=false shift=false super=false pref=false
+RESOLVE seq="C-a" pending="" -> Execute("move-beginning-of-line")
+CMD   move-beginning-of-line
+KEY   key="f" key_char=None ctrl=true alt=false shift=false super=false pref=false
+RESOLVE seq="C-f" pending="" -> Execute("forward-char")
+CMD   forward-char
+KEY   key="f" key_char=None ctrl=true alt=false shift=false super=false pref=false
+RESOLVE seq="C-f" pending="" -> Execute("forward-char")
+CMD   forward-char
+KEY   key="f" key_char=None ctrl=true alt=false shift=false super=false pref=false
+RESOLVE seq="C-f" pending="" -> Execute("forward-char")
+CMD   forward-char
+KEY   key="space" key_char=None ctrl=true alt=false shift=false super=false pref=false
+RESOLVE seq="C-space" pending="" -> Execute("set-mark-command")
+CMD   set-mark-command
+ECHO  Mark set
+KEY   key="a" key_char=None ctrl=true alt=false shift=false super=false pref=false
+RESOLVE seq="C-a" pending="" -> Execute("move-beginning-of-line")
+CMD   move-beginning-of-line
+KEY   key="d" key_char=None ctrl=true alt=false shift=false super=false pref=false
+RESOLVE seq="C-d" pending="" -> Execute("delete-char")
+CMD   delete-char
+TARGET[buffer] replace_text_in_range range_utf16=Some(0..1) bytes=0..1 text=""
+CHANGE text="bcdef" cursor=0 sel=0..0
+KEY   key="d" key_char=None ctrl=true alt=false shift=false super=false pref=false
+RESOLVE seq="C-d" pending="" -> Execute("delete-char")
+CMD   delete-char
+TARGET[buffer] replace_text_in_range range_utf16=Some(0..1) bytes=0..1 text=""
+CHANGE text="cdef" cursor=0 sel=0..0
+KEY   key="d" key_char=None ctrl=true alt=false shift=false super=false pref=false
+RESOLVE seq="C-d" pending="" -> Execute("delete-char")
+CMD   delete-char
+TARGET[buffer] replace_text_in_range range_utf16=Some(0..1) bytes=0..1 text=""
+CHANGE text="def" cursor=0 sel=0..0
+KEY   key="s" key_char=None ctrl=true alt=false shift=true super=false pref=false
+RESOLVE seq="C-S-s" pending="" -> Execute("spike-dump")
+CMD   spike-dump
+DUMP  text="def" cursor=0 sel=0..0 mark=Some(0) active=false echo="Mark set" pending="" ring=0 session=Buffer mini="" undo=1 redo=0
+DUMP2 dirty=true mini_undo=0/0
+KEY   key="e" key_char=None ctrl=true alt=false shift=false super=false pref=false
+RESOLVE seq="C-e" pending="" -> Execute("move-end-of-line")
+CMD   move-end-of-line
+KEY   key="space" key_char=None ctrl=true alt=false shift=false super=false pref=false
+RESOLVE seq="C-space" pending="" -> Execute("set-mark-command")
+CMD   set-mark-command
+ECHO  Mark set
+KEY   key="g" key_char=None ctrl=true alt=false shift=false super=false pref=false
+RESOLVE seq="C-g" pending="" -> Execute("keyboard-quit")
+CMD   keyboard-quit
+ECHO  Quit
+KEY   key="u" key_char=None ctrl=true alt=false shift=true super=false pref=false
+RESOLVE seq="C-S-u" pending="" -> Execute("spike-undo")
+CMD   spike-undo
+REPLAY undo 0..0 <- "c"
+TARGET[buffer] replace_text_in_range range_utf16=Some(0..0) bytes=0..0 text="c"
+REPLAY undo 0..0 <- "b"
+TARGET[buffer] replace_text_in_range range_utf16=Some(0..0) bytes=0..0 text="b"
+REPLAY undo 0..0 <- "a"
+TARGET[buffer] replace_text_in_range range_utf16=Some(0..0) bytes=0..0 text="a"
+OWNUNDO text="def" cursor=3 sel=3..3 -> text="abcdef" cursor=0 sel=0..0
+CHANGE text="abcdef" cursor=0 sel=0..0
+CHANGE text="abcdef" cursor=0 sel=0..0
+CHANGE text="abcdef" cursor=0 sel=0..0
+KEY   key="s" key_char=None ctrl=true alt=false shift=true super=false pref=false
+RESOLVE seq="C-S-s" pending="" -> Execute("spike-dump")
+CMD   spike-dump
+DUMP  text="abcdef" cursor=0 sel=0..0 mark=Some(6) active=false echo="Quit" pending="" ring=0 session=Buffer mini="" undo=0 redo=1
+DUMP2 dirty=false mini_undo=0/0

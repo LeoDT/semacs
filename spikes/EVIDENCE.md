@@ -45,9 +45,43 @@ spike 实测（同一分组规则对照）：
 → 结论：**用公开 API 无法复现 Emacs 的"连续删除合并"**；只有平台自身的按键输入会合并（那是我们让出去的路径）。
 
 其他 Undo 观察：
-- undo 后 point：Emacs redo 把 point 放在被恢复区的起点（point=1），底座 redo 放在末尾（point=3）。
+- undo 后 point：底座 redo 放在被恢复区末尾（point=3）；自建 undo 已按 Emacs 规则对齐（见下方 redo point）。
 - undo 后底座会留下非空 selection（例如 sel=0..1），不能当作 region，需要按我们自己的 mark 模型归一。
 - 空历史连续 undo：底座静默不动作（无 Change），Emacs 只在 echo area 提示；echo 需我们自己做。
+
+## S3/S4 mark 的 marker 语义（2026）
+
+mark 不再是普通 offset，而是每目标一份 marker（`src/mark.rs`），只在唯一文本变更入口更新：
+
+- `EditTarget` 的 `replace_text_in_range`：平台自插入、自有命令、undo / redo replay、IME 提交都经过这里，
+  因此命令层不需要、也无法各自维护 mark；
+- 插入规则：mark 前插入后移、mark 处插入不动（insertion type nil）、mark 后插入不动；
+- 删除规则：覆盖 mark 时坍缩到删除起点；
+- undo：`Change` 记录删除时的 `mark_collapse` 偏移，只有 mark 当前仍在删除起点时才恢复；
+  如果删除后 mark 已被移到别处，undo 只按文本位移调整（Emacs `mark-undo-moved`）；
+- redo：重新按删除规则坍缩；
+- 预编辑：预编辑文本视为临时层，不调整 mark；commit 按一次插入调整，cancel 不调整；
+- active：平台输入 / IME 提交 / undo / redo 停用 region，但不移动或清除 mark；`C-g` 同样只停用。
+
+Emacs 基准（`reference/drive.py` 的 `mark-*`，结果见 `reference/RESULTS.md`）与 headless case 对照：
+
+| 用例 | Emacs（1-based）| semacs（0-based）|
+|---|---|---|
+| `mark-insert` / `s3-mark-follow` | 插入在 mark 处 3→3，前插 3→4，后插不变 | 2→2，前插 2→3，后插不变 ✅ |
+| `mark-insert-undo` / `s3-mark-undo` | undo 后 mark 3、redo 后 4 | 2 / 3 ✅ |
+| `mark-delete-undo` / `s3-mark-delete` | C-k 坍缩到 1；undo 回 4；redo 回 1 | 0 → 2 → 0 ✅ |
+| `mark-region-undo` | mark 在删除末端，坍缩到 1；undo 回 3 | 0 → 2（`s3-mark-delete` 同规则）✅ |
+| `mark-undo-moved` / `s3-mark-moved` | 删除后 mark 移走，undo 后 = 7 而不是 1 | 6（对应 0-based）✅ |
+| `mark-buffers` / `s3-mark-buffers` | A/B 的 mark 与 undo 隔离 | ✅ |
+| IME 合成序列 `s4-mark-ime` | 提交按插入调整 mark，undo 恢复 | `abcd` mark2 → `a你好bcd` mark8 → undo 后 mark2 ✅ |
+| 真实 fcitx5 `real-cases/s4-ime-mark` | 预编辑按临时层处理，空格提交按一次插入 | mark2 → 8 → undo 后 2 ✅ |
+
+redo point 已对齐：自建 undo 现在回到组内**最早变更的起点**，与 Emacs 一致
+（`abc` 末尾输入 `zz` → undo → redo：Emacs point=4 1-based，spike 0-based point=3；
+`real-cases/s4-ime-mark` 也覆盖该行为）。
+
+证据边界：`s4-mark-ime` 由适配器直接驱动预编辑 / 提交；真实 fcitx5 路径由
+`real-cases/s4-ime-mark` 覆盖（F7 probe 设 mark，避免 `Ctrl-SPC` 被 fcitx5 当作激活快捷键）。
 
 ## 其他事实
 6. 单独按修饰键会合成一个 keystroke（`key="control"`）进入 interceptor；键位引擎需分类处理。
@@ -97,11 +131,12 @@ undo/redo 不与输入合并；replay 走同一个适配器（`replaying` 标志
 | 连续自有插入 ×2 → undo | 一组 | 一组 ✅ |
 | undo 后 redo | 文本恢复 | 文本恢复 ✅ |
 
-undo 后 point：已按组记录 `point_before` / `point_after`，与 Emacs（undo-del point=4、undo-cd point=1）一致。
+undo 后 point：恢复到组开始前的 point，与 Emacs（undo-del point=4、undo-cd point=1）一致。
+redo 后 point：回到组内最早变更的起点（`abc` 末尾输入 `zz` → redo：Emacs 1-based point=4，spike 0-based 3）；
+`Group::redo_point()` 与单测覆盖该规则。
 undo 后立即输入：开新组并清空 redo，见 `cases/s3-undo-then-input.*`。
 
-遗留：mark 目前是普通 offset，编辑 / undo 缩短文本后不会跟随移动；Emacs 的 mark 是 marker。
-这是 M1 必须补的（D7 的 marker / RangeDecoration 方案），spike 未伪装成已通过。
+遗留：mark / active 的 marker 语义已补齐（见上一节）；真实 fcitx5 提交后的 mark 跟随由 `real-cases/s4-ime-mark` 验证。
 
 已知代价：replay 会写进底座自己的 undo 历史（我们不再派发底座 Undo/Redo，无副作用）；
 底座也不再需要承担 dirty / 保存点，全部由我们的 change 记录派生。
@@ -150,7 +185,8 @@ undo 后立即输入：开新组并清空 redo，见 `cases/s3-undo-then-input.*
 | 输入 abc → 保存 → 输入 d → C-/ | 文本回 abc，且 **modified 变回 nil** | dirty=false | ✅ |
 | 保存 abc → C-/（退到保存点之前）→ 输入 x | 撤销越过保存点时 modified 仍为 nil；再输入变 t | 同（保存点标记被撤销丢弃 → 视为干净）| ✅ |
 | 空历史 C-/ | echo `No further undo information` | 同 | ✅ |
-| undo 后 point | 回到组开始前的 point（undo-del 4 / undo-cd 1）| `point_before`/`point_after` 已按组记录 | ✅ |
+| undo 后 point | 回到组开始前的 point（undo-del 4 / undo-cd 1）| `Group::point_before`，✅ |
+| redo 后 point | 回到组内最早变更起点（`redo-point`: 1-based 4） | `Group::redo_point()` + 单测，✅ |
 
 只读目标：输入字符 → echo `Buffer is read-only`，文本不变，`C-a` 等 motion 仍然工作（与 Emacs 一致）；
 平台文本输入由 `accepts_text_input=false` 单独拦住。
@@ -200,8 +236,30 @@ undo 后立即输入：开新组并清空 redo，见 `cases/s3-undo-then-input.*
   GPUI 会在虚拟键盘 leave 时删掉它），断言 save / C-x / switch 被拒绝，关闭标志后 save 正常。
 - `real-cases/s4-ime-save.*`：真实 fcitx5，`REFUSE save-buffer preedit=0..6`，组合保留；Escape 取消后
   同一命令保存 `0 chars`。
-- 仍未覆盖：窗口关闭、点击其它窗口、系统切走焦点不经过命令入口；M1 必须在 close / focus 路径做同样检查。
-  若上游未来提供 commit/cancel + 完成通知，可升级为“先收敛再执行”。
+
+### D17 非命令入口：窗口关闭 / 焦点切走（2026，真实会话已验证）
+
+用户确认的语义：**未提交的预编辑不是输入**。关闭或失焦时，组合按取消处理（不写入 buffer、
+不 dirty、不保存），而不是保留组合或等用户回来。命令入口仍按 D17 拒绝。
+
+- 窗口关闭：`Window::on_window_should_close` 回调在组合中先取消组合，再返回 true 允许关闭。
+  `cases/s4-ime-close.*` 用 f10 假标志验证 headless 分支；`real-cases/s4-ime-close.*` 用真实 fcitx5：
+  `CANCEL close preedit=0..6` → `TARGET ... marked=0..6 text=""` → `CLOSE allow preedit_after=None` → 进程退出，
+  没有任何保存或 dirty 变更。
+- 焦点切走：平台在 text-input leave 时已经自动取消组合，早于 GPUI 的 activation 回调。
+  `real-cases/s4-ime-focus.*` 的组合中切 workspace：日志顺序是
+  `TARGET replace_text_in_range marked=0..6 text=""` → `ACTIVATION active=false ... preedit=None`，
+  返回后文本为空、undo=0、dirty=false；没有迟到 commit 污染 buffer。
+  activation observer 里仍保留了“主动取消 + 记录 `CANCEL focus`”的兜底，真实路径没有触发它。
+- `SPIKE_LOG_ACTIVATION=1` 在 activation 变化时打印 text / point / mark / preedit / undo / dirty 快照；
+  headless sway 不投递窗口间 activation 变化，所以这项只用于 real case。
+- 内部调用 `Window::remove_window()` 或 `C-x C-c` 不走 should-close 回调：前者必须在 M1 自己接入
+  同一处理，后者已经过命令入口的 D17 检查。
+- 若上游未来提供 commit/cancel + 完成通知，可升级为“先收敛再执行”；当前行为已是“取消未提交内容后继续”。
+- 真实 case 的工具链修正：Hyprland 0.56 使用 Lua dispatcher，`hyprctl dispatch focuswindow ...` 会报错；
+  `run-real.sh` 改用 `hl.dsp.focus({window="address:..."})` / `hl.dsp.focus({workspace=...})`，
+  并在退出时恢复原 workspace。`Ctrl-SPC` 会被 fcitx5 抢作激活快捷键，
+  所以 real mark case 用 F7 probe 绑定走同一个 `set-mark-command`。
 
 ## 鼠标拖选（virtual pointer，layer 2 + 真实合成器）
 
@@ -227,11 +285,10 @@ Emacs 基准 `buffers` case 同样保留 A 的 point/mark/active 并隔离 undo�
 
 ## 仍未覆盖 / 未解决
 
-1. **mark 跟随编辑 / undo**：当前是 offset，未按 marker 调整；M1 必补。
-2. **D17 的非命令入口**：窗口关闭、焦点被切走、WM 强退。
-3. **物理键盘**：用的是上传真实 keymap 的虚拟键盘（协议层等价），不是字面硬件；
+1. **WM 强退 / 进程崩溃**：正常 close 与焦点切走已验证；强制 kill、合成器崩溃时的内容安全未测。
+2. **物理键盘**：用的是上传真实 keymap 的虚拟键盘（协议层等价），不是字面硬件；
    如需最终确认，可由用户按几下 C-?/Shift/死键。
-4. **系统保留键**（WM 层快捷键）分类未测。
-5. **真实 case 的可移植性**：`real-cases/*.expected` 依赖本机 Hyprland + fcitx5 pinyin + us 布局，
+3. **系统保留键**（WM 层快捷键）分类未测。
+4. **真实 case 的可移植性**：`real-cases/*.expected` 依赖本机 Hyprland 0.56 + fcitx5 pinyin + us 布局，
    换机器/升级 fcitx5 后需人工审阅并 `UPDATE=1`。
-6. **性能**：只做了功能验证，没有按键到显示的延迟测量。
+5. **性能**：只做了功能验证，没有按键到显示的延迟测量。

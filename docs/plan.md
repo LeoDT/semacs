@@ -1,7 +1,10 @@
 # 实施计划
 
 发布边界：S1–S5 是正式实现的前置门禁，M0–M3 构成 v1；M4 / M5 是后续阶段，不阻塞 v1。
-当前尚无 spike 通过记录，也没有 crates.io 依赖构建与 Wayland 运行验证结果。
+当前 S1–S5 的机制验证已落在 `spikes/`（逐项证据见 `spikes/EVIDENCE.md`）：
+interceptor、前缀 / C-g、自建 undo、平台输入与 IME 观测、mark marker 语义、鼠标导入、多 buffer 隔离、
+真实键位分类、IME 命令屏障、窗口关闭 / 焦点切走、真实 IME 提交后的 mark、redo point 均已实测并对齐。
+可选剩余：真实硬件键盘 / WM 保留键确认；WM 强退与进程崩溃未测。
 
 ## 1. 先做 spike（不写正式代码）
 
@@ -31,6 +34,10 @@ S1–S4 必测的跨边界场景（先固化 Emacs / 平台预期，再验证候
 
 交付与失败处理：
 
+- 已完成的证据：`spikes/reference/RESULTS.md`（Emacs 31.1 真实 command loop）、
+  `spikes/EVIDENCE.md`（实现事实与未覆盖项）、`spikes/lab/cases/*.expected`（headless 断言）。
+  `mark-*` 与 `s3-mark-*` 覆盖 marker 跟踪；`s4-ime-close` / `s4-ime-focus` 覆盖关闭与失焦；
+  `real-cases/s4-ime-mark` 覆盖真实 fcitx5 提交后的 mark 跟随；`s4-mark-ime` 保留为适配器驱动的合成回归。
 - 先按 [保真度基准](emacs-fidelity.md#5-对照基准与-undo-验收矩阵) 固定参照脚本、模式、选项与初始状态，
   再记录双方结果。`C-x a` 在参照 Emacs 中是前缀，不能用作 undefined 基准。
 - 导出并核对全部 v1 默认键位的 Emacs 命令名及 semacs 注册表；保存参照模式、选项、绑定结果与差异。
@@ -76,7 +83,8 @@ S1–S4 必测的跨边界场景（先固化 Emacs / 平台预期，再验证候
 - 交互测试覆盖 motion、kill / yank、`C-g`、undo / redo，并用测试命令验证多键前缀派发；
   `C-x C-s` 的真实保存测试随 M2 提交，不以空实现充当通过；
 - 未定义键不插入且回显，Meta / Shift / AltGr 分类与 S5 结果一致；
-- mark 与激活状态、输入提交后的连续 kill 中断均有断言；
+- mark 是 marker（编辑 / undo / redo / IME 提交后跟随），与激活状态独立；输入提交后的连续 kill 中断均有断言；
+  redo point 与 Emacs 已对齐；
 - 回归 S3 / S4 的真实链路用例，记录按键到显示更新的延迟基线与测量方式。
 
 ### M2 minibuffer、M-x、文件与 buffer 管理
@@ -149,11 +157,12 @@ S1–S5 的测试均已迁移或保留可复现运行方式。未批准的新差
 
 ## 4. 任务跟踪
 
-实现阶段在 `.pi/tasks/` 下建立跟踪文件，按里程碑维护：
+spike 阶段在 `.pi/tasks/spike-tasks.md` 维护剩余项（可选真实硬件确认、文档）；
+实现阶段按里程碑建立新的跟踪文件，例如：
 
 ```
-- [ ] S1 intercept_keystrokes 验证
-- [ ] S2 前缀与取消
+- [ ] M0 骨架与性能基线
+- [ ] M1 键位引擎 / 基础编辑 / marker 回归
 ...
 ```
 

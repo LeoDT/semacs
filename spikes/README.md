@@ -47,8 +47,8 @@ log/<case>.png         截图
 log/<case>.app.log     应用 stderr（渲染/协议问题看这里）
 ```
 
-对比只保留带行为的行：`KEY RESOLVE CMD ECHO CHANGE DUMP DUMP2 BUFFERS SYNC REFUSE FAKE-PREEDIT
-OWNEDIT OWNUNDO REDO REPLAY MINI PREEDIT PREFIX TARGET`，
+对比只保留带行为的行：`KEY RESOLVE CMD ECHO CHANGE DUMP DUMP2 BUFFERS SYNC REFUSE CANCEL CLOSE ACTIVATION
+FAKE-PREEDIT OWNEDIT OWNUNDO REDO REPLAY MINI PREEDIT PREFIX TARGET`，
 并丢弃 harness 噪声（虚拟键盘导致的 `WINDOW active` 抖动、高频 `accepts_text_input` 轮询、pid）。
 
 ### 加 case
@@ -59,6 +59,7 @@ OWNEDIT OWNUNDO REDO REPLAY MINI PREEDIT PREFIX TARGET`，
    多键序列必须一次发完，中间不要插探针键（会吃掉 pending 前缀）。
    需要在同一批次里保持合成 marked text 时，必须放在**同一个 `vk` 调用**里
    （虚拟键盘 leave 会让 GPUI 删掉 marked text）。
+   真实会话的 `Ctrl-SPC` 会被 fcitx5 当作激活快捷键；spike 的 F7 probe 走同一条 `set-mark-command`。
 2. 需要初始状态时写 `cases/<name>.env`（会被 source，例如 `export SPIKE_INITIAL=$'ab\ncd'`、`export SPIKE_MODE=log`、`export SPIKE_READONLY=1`）。
 3. `UPDATE=1 scripts/check.sh <name>` 生成期望值，**逐行审阅**后再提交。
 4. 涉及 Emacs 参照的 case，同时在 `reference/drive.py` 的 `CASES` 里加一条并记录到 `reference/RESULTS.md`。
@@ -78,9 +79,16 @@ OWNEDIT OWNUNDO REDO REPLAY MINI PREEDIT PREFIX TARGET`，
 | `s3-kill-yank` | kill / yank 各自成组；yank 设 mark 并回显 `Mark set` | S3 |
 | `s3-dirty` | 保存 → 编辑 → undo 回到保存点，dirty 变回 false | S3 |
 | `s3-buffers` | 两个 buffer 的 text / point / mark / active / undo 隔离；切换是 undo 边界 | S3/S4 |
+| `s3-mark-follow` | mark 是 marker：插入在 mark 前 / 处 / 后时的位置变化 | S3/S4 |
+| `s3-mark-undo` | 插入 undo / redo 时 mark 跟随文本，不按组快照回滚 | S3/S4 |
+| `s3-mark-delete` | 删除覆盖 mark 时坍缩到起点；undo 恢复、redo 再坍缩 | S3/S4 |
+| `s3-mark-moved` | 删除后 mark 移走，undo 只按文本位移调整（Emacs marker 规则） | S3/S4 |
+| `s3-mark-buffers` | A/B 的 mark 与编辑 / undo 互不影响 | S3/S4 |
 | `s3-undo-then-input` | undo 后立即输入开新组并清空 redo | S3 |
 | `s4-observe` | 平台文本输入经适配器可见（范围 + 内容）；预编辑；pending 前缀期间字符按序列解析、不插入 | S4 |
+| `s4-mark-ime` | IME 提交按插入调整 mark，undo 恢复；重复预编辑 / 提交由适配器同一入口处理 | S4 |
 | `s4-ime-barrier` | D17 策略分支：组合中 save / 前缀 / 切换被拒绝，组合结束后恢复 | S4 |
+| `s4-ime-close` | D17 非命令入口：组合中关闭先取消预编辑再允许关闭，不保存、不变 dirty | S4 |
 | `s4-mouse` | 虚拟指针正反向拖选 → point / mark / active 导入；单击保留 mark | S4 |
 | `s4-readonly` | 只读目标拒绝输入并回显 `Buffer is read-only`，motion 仍工作 | S1/S4 |
 | `s5-raw` | 原始键名与 `key_char` 分类：RET/`C-m`、TAB/`C-i`、DEL、ESC、箭头、M-f、AltGr、死键 | S5 |
@@ -100,7 +108,9 @@ SPIKE_REAL=1 scripts/check-real.sh --all    # 与 real-cases/*.expected 对比
 
 - 必须显式 `SPIKE_REAL=1`；否则脚本拒绝运行。
 - 每次注键前用 `hyprctl` 校验焦点仍是 lab 窗口，焦点丢失立即中止，绝不把键发到终端。
-- 保存并在退出时恢复 fcitx5 的输入法与激活状态。
+- 保存并在退出时恢复 fcitx5 的输入法、激活状态与原 workspace。
+- 焦点 / 关闭使用 Hyprland 0.56 的 Lua dispatcher（`hl.dsp.focus(...)` / `hl.dsp.window.close()`）；
+  `run-real.sh` 的 `focus_window` / `focus_workspace` 带旧语法回退。
 - `real-cases/*.expected` 绑定本机环境（Hyprland + fcitx5 pinyin + us 布局），换机器/升级后需人工审阅并
   `UPDATE=1` 重写；preedit 更新噪声在 `check-real.sh` 中被过滤，commit / cancel / text / undo 仍断言。
 
@@ -108,6 +118,9 @@ SPIKE_REAL=1 scripts/check-real.sh --all    # 与 real-cases/*.expected 对比
 |---|---|
 | `s4-ime` | 真实 fcitx5 预编辑 / 空格提交 / Escape 取消 / 提交后 undo（不再 panic）/ 预编辑不 dirty |
 | `s4-ime-save` | D17：组合中保存被拒绝且组合保留；取消后同一命令保存已完成文本 |
+| `s4-ime-close` | D17 非命令入口：组合中关闭先取消预编辑再关闭，不保存、不变 dirty |
+| `s4-ime-focus` | D17 非命令入口：组合中切 workspace，平台取消组合，文本 / undo / dirty 不变；恢复后无迟到污染 |
+| `s4-ime-mark` | 真实 fcitx5 空格提交后 mark 跟随，undo 恢复（F7 probe 避开 `Ctrl-SPC`） |
 | `s5-real-keymap` | 真实 Hyprland 下的 Shift / `C-?` / 死键 / AltGr 分类（与 headless 结果对照） |
 
 ## reference（Emacs 对照）
@@ -137,8 +150,11 @@ emacs -Q --batch -l export-keys.el         # 导出 v1 默认键位的命令名�
   `real-cases/s4-ime*` 验证，且依赖本机环境。
 - **鼠标**：`vptr` 是 wlr virtual pointer（协议等价于物理指针），不是物理鼠标；与 IME / caret 同步的交错未测。
 - **Shift / `C-?` / 死键**：`s5-keymap` 上传与合成器相同的 keymap，协议层等价；不是字面硬件键盘。
-- **D17 非命令入口**：窗口关闭、点击其它窗口、WM 切焦点不经过命令入口，尚未验证。
-- **mark 跟随**：undo / 编辑缩短文本后的 mark 调整（marker 语义）未实现。
+- **D17 非命令入口**：关闭与焦点切走已在真实 Hyprland + fcitx5 验证：未提交预编辑按取消处理，
+  关闭 / 失焦不保存、不变 dirty。WM 强退与进程崩溃未测。
+- **mark 跟随**：`s3-mark-*` 已与 Emacs 31.1 对照；`s4-mark-ime` 是适配器驱动的合成提交，
+  真实 fcitx5 路径由 `real-cases/s4-ime-mark` 验证。
+- **redo point**：已对齐 Emacs：redo 回到组内最早变更起点，`Group::redo_point()` 有单测；`s3-own-undo` / `s3-mark-undo` 断言。
 - **多 buffer / 多窗口 / 性能**：只做了两个 buffer 的状态隔离；没有多窗口，也没有性能测量。
 
 产品级结论以 `docs/` 为准；本目录的 `EVIDENCE.md` 是过程证据与代码依据。

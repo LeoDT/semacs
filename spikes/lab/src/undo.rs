@@ -37,6 +37,9 @@ pub struct Change {
     pub old: String,
     pub new: String,
     pub kind: Kind,
+    /// Offset the mark had inside a deletion, so undo can restore it when the
+    /// mark is still collapsed at `range.start` (Emacs marker adjustment).
+    pub mark_collapse: Option<usize>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -44,8 +47,19 @@ pub struct Group {
     pub changes: Vec<Change>,
     /// Point before the first change of the group (restored by undo).
     pub point_before: usize,
-    /// Point after the last change of the group (restored by redo).
-    pub point_after: usize,
+}
+
+impl Group {
+    /// Emacs redo leaves point at the start of the group's earliest change,
+    /// not at the point the group originally ended on. This differs from undo,
+    /// which restores `point_before`.
+    pub fn redo_point(&self) -> usize {
+        self.changes
+            .iter()
+            .map(|change| change.range.start)
+            .min()
+            .unwrap_or(self.point_before)
+    }
 }
 
 #[derive(Default)]
@@ -110,7 +124,6 @@ impl UndoStacks {
             }
         }
         let kind = change.kind;
-        let point_after = change.range.start + change.new.len();
         let coalesce = !self.barrier
             && kind.amalgamates()
             && self.last_kind == Some(kind)
@@ -119,12 +132,10 @@ impl UndoStacks {
         if coalesce {
             let group = self.groups.last_mut().expect("group");
             group.changes.push(change);
-            group.point_after = point_after;
         } else {
             self.groups.push(Group {
                 changes: vec![change],
                 point_before,
-                point_after,
             });
         }
         self.last_kind = Some(kind);
@@ -186,4 +197,40 @@ pub fn with_command_kind<T>(kind: Kind, f: impl FnOnce() -> T) -> T {
 
 pub fn take_pending_kind() -> Option<Kind> {
     PENDING_KIND.with(|p| p.borrow_mut().take())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn change(range: Range<usize>, old: &str, new: &str) -> Change {
+        Change {
+            range,
+            old: old.to_string(),
+            new: new.to_string(),
+            kind: Kind::Typing,
+            mark_collapse: None,
+        }
+    }
+
+    #[test]
+    fn redo_point_is_earliest_change_start() {
+        let insert = Group {
+            changes: vec![change(0..0, "", "a"), change(1..1, "", "b")],
+            point_before: 0,
+        };
+        assert_eq!(insert.redo_point(), 0);
+
+        let delete = Group {
+            changes: vec![change(2..3, "c", ""), change(1..2, "b", ""), change(0..1, "a", "")],
+            point_before: 3,
+        };
+        assert_eq!(delete.redo_point(), 0);
+
+        let insert_mid = Group {
+            changes: vec![change(2..2, "", "X")],
+            point_before: 2,
+        };
+        assert_eq!(insert_mid.redo_point(), 2);
+    }
 }

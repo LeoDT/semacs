@@ -50,6 +50,15 @@ export LIBGL_ALWAYS_SOFTWARE=${LIBGL_ALWAYS_SOFTWARE:-1}
 
 addresses() { hyprctl -j clients | python3 -c 'import json,sys;print("\n".join(c["address"] for c in json.load(sys.stdin)))'; }
 active_addr() { hyprctl -j activewindow | python3 -c 'import json,sys;print(json.load(sys.stdin).get("address",""))'; }
+# Hyprland 0.56 uses the Lua dispatcher API; keep the legacy name as a fallback.
+focus_window() {
+  hyprctl dispatch "hl.dsp.focus({window=\"address:$1\"})" >/dev/null 2>&1 \
+    || hyprctl dispatch focuswindow "address:$1" >/dev/null 2>&1
+}
+focus_workspace() {
+  hyprctl dispatch "hl.dsp.focus({workspace=$1})" >/dev/null 2>&1 \
+    || hyprctl dispatch workspace "$1" >/dev/null 2>&1
+}
 
 SAVED_IM=$(fcitx5-remote -n 2>/dev/null || true)
 SAVED_STATE=$(fcitx5-remote 2>/dev/null || true)
@@ -63,14 +72,17 @@ restore_ime() {
 }
 
 BEFORE=$(addresses)
+ORIG_WS=$(hyprctl -j activeworkspace 2>/dev/null | python3 -c 'import json,sys; print(json.load(sys.stdin).get("id",""))' 2>/dev/null || true)
 SPIKE_LOG="$LOG" SPIKE_MODE="${SPIKE_MODE:-log}" SPIKE_INITIAL="${SPIKE_INITIAL:-}" \
   "$DIR/target/debug/spike" > "$APP_LOG" 2>&1 &
 APP_PID=$!
 ADDR=""
+HELPER_PID=""
 cleanup() {
   [ -n "${APP_PID:-}" ] && kill "$APP_PID" 2>/dev/null
+  [ -n "${HELPER_PID:-}" ] && kill "$HELPER_PID" 2>/dev/null
+  [ -n "${ORIG_WS:-}" ] && focus_workspace "$ORIG_WS"
   restore_ime
-  wait 2>/dev/null
 }
 trap cleanup EXIT
 
@@ -83,7 +95,7 @@ for _ in $(seq 60); do
   [ -n "$ADDR" ] && break; sleep 0.05
 done
 [ -n "$ADDR" ] || { echo "FAIL: lab window not found"; exit 1; }
-hyprctl dispatch focuswindow "address:$ADDR" >/dev/null
+focus_window "$ADDR"
 sleep 0.6
 if [ "$(active_addr)" != "$ADDR" ]; then
   echo "FAIL: lab is not the focused window; refusing to type" >&2

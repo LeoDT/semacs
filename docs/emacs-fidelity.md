@@ -44,6 +44,8 @@ isearch、`C-u`、mark ring 等即使列为 F2，也在 v1 之后评估。新增
 
 - 词边界与段落边界的精确规则（Emacs 用 syntax table；我们用简化规则）。
 - `C-n` / `C-p` 的 goal column 与软换行下的行为。
+- IME 组合未提交时拒绝命令与前缀；关闭 / 失焦则取消未提交预编辑后继续（D17，用户批准的有意策略）；
+  需在用户可见说明中登记。
 - 滚动行为：`C-v` / `M-v` / `C-l` 的定位细节。
 - mark ring、`C-x C-x`（exchange-point-and-mark）、`C-u` 数字参数、按键重复。
 - isearch（`C-s` / `C-r`）的增量搜索与高亮。
@@ -141,6 +143,11 @@ headless sway + 真实 fcitx5 的 real-cases）。旧“底座原生 action 等�
   旧记录“有 region 时回显 Quit”是 pty 把 `C-x`、`C-g` 合并进同一 read 造成的采集假象。
 - `C-g` 单独按始终回显 `Quit`；minibuffer 中取消回显 `Quit`。
 - `kill-line` 在 EOB 回显 `End of buffer` 且不建 undo 组；`yank` 把 mark 设在插入起点并回显 `Mark set`。
+- mark 是 marker：在其前插入后移、在其位置插入不动、删除覆盖时塌缩到起点；
+  undo 只在 mark 仍位于该删除起点时恢复偏移（`mark-*` 与 `s3-mark-*` 已对照）。
+  active 与位置独立：平台输入、IME 提交、undo / redo 与 `C-g` 停用 region，但不删除 mark。
+- redo point 已对齐：redo 回到组内最早变更的起点（`redo-point` 基准与 `Group::redo_point()`）；
+  另一项 F3 仍是 region 激活时的全局 undo（undo-in-region）。
 
 | 场景 | 对照要求 / 待复核点 | semacs 验证要求 |
 |---|---|---|
@@ -153,11 +160,11 @@ headless sway + 真实 fcitx5 的 real-cases）。旧“底座原生 action 等�
 | undo 到无历史后继续 undo | 固定错误回显与重复 undo 行为 | 不静默失败、不意外 redo |
 | undo 后移动 / 输入，再 redo | 分别记录参照行为；undo 环差异单独登记 | 记录线性历史的 redo 可用性，不能宣称所有分支与 Emacs 相同 |
 | region 激活时 undo | 对照 region 内撤销行为 | 已接受全局 undo；不得破坏 mark 模型 |
-| undo / redo 后的 mark | 保留位置与跟随，激活状态单独断言 | 不能用清 mark 冒充 deactivate |
+| undo / redo 后的 mark | 保留位置与跟随，激活状态单独断言 | `s3-mark-*` 已按 marker 规则对照；redo point 已对齐 |
 | 连按 undo；undo 后立即输入 / 切换 buffer / 进入 minibuffer | 记录操作序列及目标 | 完成顺序、焦点、文本与 caret 一致 |
 | 保存 → 编辑 → undo；保存 → undo / redo | 固定保存点与 dirty 的可观察结果 | dirty 与保存内容一致，保存失败不更新保存点 |
-| IME 更新 → 提交 / 取消 → undo | 记录预编辑替换范围与最终状态 | 取消不留下净文本 / mark 偏移或错误 dirty |
-| 预编辑中编辑 / 保存 / 切换 buffer / 进入或退出 minibuffer / 关闭 | 固定 IME、平台、提交 / 取消选择与操作顺序 | 先完成原目标输入，再执行命令；不保存临时文本，文本 / mark / dirty / undo 与磁盘一致 |
+| IME 更新 → 提交 / 取消 → undo | 记录预编辑替换范围与最终状态 | 取消不留下净文本 / mark 偏移或错误 dirty；提交按插入调整 mark（合成路径 `s4-mark-ime`，真实 IME 待复核） |
+| 预编辑中编辑 / 保存 / 切换 buffer / 进入或退出 minibuffer / 关闭 | 固定 IME、平台、提交 / 取消选择与操作顺序 | 命令按 D17 拒绝并提示；关闭 / 失焦取消预编辑后继续，不保存、不变 dirty（真实 `s4-ime-close` / `s4-ime-focus`） |
 | pending 前缀期间文本提交；旧目标迟到 IME 回调 | 区分前缀前组合输入与前缀后的新输入 | 不绕过前缀自插入，不污染另一个 buffer 或新的 minibuffer 会话 |
 | A 设置 point / mark → B 编辑 → A | 分别固定 point、mark、激活状态及滚动位置的预期 | 状态按 buffer 保留、无串用；kill 后释放，事件不越界 |
 | 正文与 minibuffer 的 motion / kill / yank / undo | 同一命令在不同输入目标执行；prompt 不可编辑 | 共用编辑语义与 kill ring，undo 历史独立，补全通过编辑入口 |

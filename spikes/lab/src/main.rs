@@ -12,6 +12,7 @@
 
 mod edit;
 mod keys;
+mod mark;
 mod target;
 mod undo;
 
@@ -74,6 +75,7 @@ enum Direction {
 fn replay<S: edit::Editable + EntityInputHandler>(
     state: &Entity<S>,
     target: &Entity<EditTarget<S>>,
+    mark: &mark::SharedMark,
     group: &undo::Group,
     direction: Direction,
     window: &mut Window,
@@ -91,6 +93,9 @@ fn replay<S: edit::Editable + EntityInputHandler>(
                 target.update(cx, |t, cx| {
                     EntityInputHandler::replace_text_in_range(t, Some(s..e), &change.old, window, cx)
                 });
+                if let Some(offset) = change.mark_collapse {
+                    mark.borrow_mut().restore_collapsed(start, offset);
+                }
             }
             state.update(cx, |st, cx| st.set_point(group.point_before, cx));
         }
@@ -105,7 +110,7 @@ fn replay<S: edit::Editable + EntityInputHandler>(
                     EntityInputHandler::replace_text_in_range(t, Some(s..e), &change.new, window, cx)
                 });
             }
-            state.update(cx, |st, cx| st.set_point(group.point_after, cx));
+            state.update(cx, |st, cx| st.set_point(group.redo_point(), cx));
         }
     }
     undo::set_replaying(false);
@@ -125,8 +130,7 @@ struct BufferSaved {
     target: Entity<EditTarget<EditorState>>,
     focus_handle: FocusHandle,
     undo: undo::SharedUndo,
-    mark: Option<usize>,
-    mark_active: bool,
+    mark: mark::SharedMark,
 }
 
 struct Lab {
@@ -137,6 +141,7 @@ struct Lab {
     minibuffer: Entity<InputState>,
     mini_target: Entity<EditTarget<InputState>>,
     mini_focus: FocusHandle,
+    mini_mark: mark::SharedMark,
 
     session: Session,
     prompt: String,
@@ -146,8 +151,7 @@ struct Lab {
     pending: keys::KeySeq,
     echo: String,
 
-    mark: Option<usize>,
-    mark_active: bool,
+    mark: mark::SharedMark,
 
     buffer_undo: undo::SharedUndo,
     mini_undo: undo::SharedUndo,
@@ -168,10 +172,12 @@ impl Lab {
         });
         let buffer_undo = undo::new_stack();
         let mini_undo = undo::new_stack();
+        let buffer_mark = mark::new_mark();
         let target = cx.new({
             let undo = buffer_undo.clone();
+            let mark = buffer_mark.clone();
             let editor = editor.clone();
-            move |_| EditTarget::new(editor.clone(), "buffer", undo)
+            move |_| EditTarget::new(editor.clone(), "buffer", undo, mark)
         });
         let focus_handle = editor.read(cx).focus_handle(cx).clone();
         // Emacs baseline starts at point-max; mirror that so both sides compare.
@@ -188,10 +194,12 @@ impl Lab {
                 .line_number(false)
         });
         let alt_undo = undo::new_stack();
+        let alt_mark = mark::new_mark();
         let alt_target = cx.new({
             let undo = alt_undo.clone();
+            let mark = alt_mark.clone();
             let editor = alt_editor.clone();
-            move |_| EditTarget::new(editor.clone(), "buffer2", undo)
+            move |_| EditTarget::new(editor.clone(), "buffer2", undo, mark)
         });
         let alt_focus = alt_editor.read(cx).focus_handle(cx).clone();
         let alt_len = alt_editor.read(cx).text().len();
@@ -201,10 +209,12 @@ impl Lab {
         alt_undo.borrow_mut().mark_saved();
 
         let minibuffer = cx.new(|cx| InputState::new(window, cx).placeholder(""));
+        let mini_mark = mark::new_mark();
         let mini_target = cx.new({
             let undo = mini_undo.clone();
+            let mark = mini_mark.clone();
             let minibuffer = minibuffer.clone();
-            move |_| EditTarget::new(minibuffer.clone(), "mini", undo)
+            move |_| EditTarget::new(minibuffer.clone(), "mini", undo, mark)
         });
         let mini_focus = minibuffer.read(cx).focus_handle(cx).clone();
 
@@ -256,7 +266,35 @@ impl Lab {
                     }
                 },
             ),
-            cx.observe_window_activation(window, |lab, window, _cx| {
+            cx.observe_window_activation(window, |lab, window, cx| {
+                if std::env::var("SPIKE_LOG_ACTIVATION")
+                    .map(|v| v == "1")
+                    .unwrap_or(false)
+                {
+                    let preedit = lab.preedit_range(window, cx);
+                    let mark = lab.mark.borrow();
+                    log_line(format!(
+                        "ACTIVATION active={} text={:?} point={} mark={:?} active={} preedit={:?} undo={} dirty={}",
+                        window.is_window_active(),
+                        lab.editor.read(cx).text_string(),
+                        lab.editor.read(cx).point(),
+                        mark.pos(),
+                        mark.active(),
+                        preedit,
+                        lab.buffer_undo.borrow().depth().0,
+                        lab.is_dirty()
+                    ));
+                }
+                if !window.is_window_active()
+                    && let Some(range) = lab.real_marked_range(window, cx)
+                {
+                    log_line(format!("CANCEL focus preedit={range:?}"));
+                    lab.cancel_preedit(range, window, cx);
+                    log_line(format!(
+                        "CANCEL focus done preedit_after={:?}",
+                        lab.real_marked_range(window, cx)
+                    ));
+                }
                 log_line(format!(
                     "WINDOW active={} buffer_focused={} mini_focused={}",
                     window.is_window_active(),
@@ -289,14 +327,14 @@ impl Lab {
             minibuffer,
             mini_target,
             mini_focus,
+            mini_mark,
             session: Session::Buffer,
             prompt: String::new(),
             session_value: String::new(),
             keymap,
             pending: Vec::new(),
             echo: String::new(),
-            mark: None,
-            mark_active: false,
+            mark: buffer_mark,
             buffer_undo,
             mini_undo,
             ring: std::rc::Rc::new(std::cell::RefCell::new(edit::KillRing::default())),
@@ -305,8 +343,7 @@ impl Lab {
                 target: alt_target,
                 focus_handle: alt_focus,
                 undo: alt_undo,
-                mark: None,
-                mark_active: false,
+                mark: alt_mark,
             },
             _subs: subs,
         }
@@ -327,12 +364,39 @@ impl Lab {
         if FAKE_PREEDIT.load(std::sync::atomic::Ordering::Relaxed) {
             return Some(0..0);
         }
+        self.real_marked_range(window, cx)
+    }
+
+    fn real_marked_range(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Option<Range<usize>> {
         match self.session {
             Session::Buffer => self.editor.update(cx, |st, cx| {
                 EntityInputHandler::marked_text_range(st, window, cx)
             }),
             Session::Minibuffer => self.minibuffer.update(cx, |st, cx| {
                 EntityInputHandler::marked_text_range(st, window, cx)
+            }),
+        }
+    }
+
+    /// Cancel the current composition by replacing the marked range with empty
+    /// text. Used when the window loses focus or is closing: uncommitted preedit
+    /// is not input (D17).
+    fn cancel_preedit(
+        &mut self,
+        range: Range<usize>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match self.session {
+            Session::Buffer => self.target.update(cx, |t, cx| {
+                EntityInputHandler::replace_text_in_range(t, Some(range), "", window, cx)
+            }),
+            Session::Minibuffer => self.mini_target.update(cx, |t, cx| {
+                EntityInputHandler::replace_text_in_range(t, Some(range), "", window, cx)
             }),
         }
     }
@@ -347,6 +411,7 @@ impl Lab {
                 | "spike-sync-selection"
                 | "spike-preedit-start"
                 | "spike-preedit-cancel"
+                | "spike-mark-ime"
                 | "spike-fake-preedit-on"
                 | "spike-fake-preedit-off"
         )
@@ -354,6 +419,26 @@ impl Lab {
 
     fn text_input_available(&self) -> bool {
         !readonly_mode()
+    }
+
+    /// D17 for the compositor close path: uncommitted preedit is not input.
+    /// Cancel it and let the close proceed; only committed changes can make the
+    /// buffer dirty and require the M0 close confirmation.
+    fn should_close(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        if let Some(range) = self.real_marked_range(window, cx) {
+            log_line(format!("CANCEL close preedit={range:?}"));
+            self.cancel_preedit(range, window, cx);
+            log_line(format!(
+                "CLOSE allow preedit_after={:?}",
+                self.real_marked_range(window, cx)
+            ));
+        } else if FAKE_PREEDIT.load(std::sync::atomic::Ordering::Relaxed) {
+            log_line("CANCEL close preedit=fake");
+            log_line("CLOSE allow".to_string());
+        } else {
+            log_line("CLOSE allow".to_string());
+        }
+        true
     }
 
     fn echo(&mut self, message: impl Into<String>, cx: &mut Context<Self>) {
@@ -427,7 +512,7 @@ impl Lab {
                 self.pending.clear();
                 self.set_pending(false);
                 // Text goes to the platform path; a self-insert deactivates the mark.
-                self.mark_active = false;
+                self.mark.borrow_mut().set_active(false);
                 self.ring.borrow_mut().break_chain();
                 false
             }
@@ -439,11 +524,12 @@ impl Lab {
     }
 
     fn region(&self, cx: &mut Context<Self>) -> Option<Range<usize>> {
-        if !self.mark_active {
+        let mark_state = self.mark.borrow();
+        if !mark_state.active() {
             return None;
         }
         let point = self.editor.read(cx).point();
-        let mark = self.mark?;
+        let mark = mark_state.pos()?;
         Some(mark.min(point)..mark.max(point))
     }
 
@@ -468,7 +554,7 @@ impl Lab {
                 if self.session == Session::Minibuffer {
                     self.cancel_minibuffer(window, cx);
                 } else {
-                    self.mark_active = false;
+                    self.mark.borrow_mut().set_active(false);
                     self.echo("Quit", cx);
                 }
             }
@@ -495,11 +581,12 @@ impl Lab {
                     .as_ref()
                     .map(|m| format!(" preedit={m:?}"))
                     .unwrap_or_default();
+                let mark_state = self.mark.borrow();
                 log_line(format!(
                     "DUMP  {} mark={:?} active={} echo={:?} pending={:?} ring={} session={:?} mini={:?} undo={undo_depth} redo={redo_depth}{preedit_note}",
                     snapshot(&self.editor, cx),
-                    self.mark,
-                    self.mark_active,
+                    mark_state.pos(),
+                    mark_state.active(),
                     self.echo,
                     keys::describe(&self.pending),
                     self.ring.borrow().len(),
@@ -571,52 +658,58 @@ impl Lab {
                 std::mem::swap(&mut self.focus_handle, &mut self.alt.focus_handle);
                 std::mem::swap(&mut self.buffer_undo, &mut self.alt.undo);
                 std::mem::swap(&mut self.mark, &mut self.alt.mark);
-                std::mem::swap(&mut self.mark_active, &mut self.alt.mark_active);
                 let focus = self.focus_handle.clone();
                 focus.focus(window, cx);
                 self.pending.clear();
                 self.set_pending(false);
+                let mark_state = self.mark.borrow();
                 log_line(format!(
                     "BUFFER switch -> current point={} mark={:?} active={} undo={}",
                     self.editor.read(cx).point(),
-                    self.mark,
-                    self.mark_active,
+                    mark_state.pos(),
+                    mark_state.active(),
                     self.buffer_undo.borrow().depth().0
                 ));
             }
             ("spike-sync-selection", _) => {
                 let cursor = self.editor.read(cx).cursor();
                 let sel = self.editor.read(cx).selected_range();
-                if sel.is_empty() {
-                    // A click moves point and deactivates the region but keeps
-                    // the mark position (Emacs mouse-set-point).
-                    self.mark_active = false;
-                } else {
-                    // The selection is normalized; cursor() is the head, so the
-                    // other end is the anchor (mark), even for reverse drags.
-                    self.mark = Some(if cursor == sel.start { sel.end } else { sel.start });
-                    self.mark_active = true;
+                {
+                    let mut mark_state = self.mark.borrow_mut();
+                    if sel.is_empty() {
+                        // A click moves point and deactivates the region but keeps
+                        // the mark position (Emacs mouse-set-point).
+                        mark_state.set_active(false);
+                    } else {
+                        // The selection is normalized; cursor() is the head, so the
+                        // other end is the anchor (mark), even for reverse drags.
+                        mark_state.set(if cursor == sel.start { sel.end } else { sel.start });
+                        mark_state.set_active(true);
+                    }
                 }
                 self.stack().borrow_mut().end_command(false);
+                let mark_state = self.mark.borrow();
                 log_line(format!(
                     "SYNC  cursor={cursor} sel={sel:?} -> point={} mark={:?} active={}",
                     self.editor.read(cx).point(),
-                    self.mark,
-                    self.mark_active
+                    mark_state.pos(),
+                    mark_state.active()
                 ));
             }
             ("spike-dump-all", _) => {
                 let (undo_depth, redo_depth) = self.buffer_undo.borrow().depth();
+                let mark_state = self.mark.borrow();
+                let alt_mark = self.alt.mark.borrow();
                 log_line(format!(
                     "BUFFERS current text={:?} point={} mark={:?} active={} undo={undo_depth}/{redo_depth} | alt text={:?} point={} mark={:?} active={} undo={}",
                     self.editor.read(cx).text_string(),
                     self.editor.read(cx).point(),
-                    self.mark,
-                    self.mark_active,
+                    mark_state.pos(),
+                    mark_state.active(),
                     self.alt.editor.read(cx).text_string(),
                     self.alt.editor.read(cx).point(),
-                    self.alt.mark,
-                    self.alt.mark_active,
+                    alt_mark.pos(),
+                    alt_mark.active(),
                     self.alt.undo.borrow().depth().0
                 ));
             }
@@ -655,6 +748,35 @@ impl Lab {
                     });
                 } else {
                     self.echo("No composition to cancel", cx);
+                }
+            }
+            // Start and commit a composition in one command so the synthetic
+            // marked text survives (a virtual-keyboard leave would delete it).
+            ("spike-mark-ime", Session::Buffer) => {
+                self.target.update(cx, |t, cx| {
+                    EntityInputHandler::replace_and_mark_text_in_range(
+                        t,
+                        None,
+                        "ni hao",
+                        None,
+                        window,
+                        cx,
+                    );
+                });
+                match self.preedit_range(window, cx) {
+                    Some(range) => {
+                        log_line(format!("PREEDIT commit {range:?} -> 你好"));
+                        self.target.update(cx, |t, cx| {
+                            EntityInputHandler::replace_text_in_range(
+                                t,
+                                Some(range),
+                                "你好",
+                                window,
+                                cx,
+                            )
+                        });
+                    }
+                    None => self.echo("No composition to commit", cx),
                 }
             }
             ("spike-preedit", _) => {
@@ -718,15 +840,15 @@ impl Lab {
                 edit::move_to(&self.editor, prev, &self.stack(), cx);
             }
             ("delete-backward-char", Session::Buffer) => {
-                self.mark_active = false;
+                self.mark.borrow_mut().set_active(false);
                 edit::delete_backward(&self.editor, &self.target, &self.stack(), window, cx);
             }
             ("delete-char", Session::Buffer) => {
-                self.mark_active = false;
+                self.mark.borrow_mut().set_active(false);
                 edit::delete_forward(&self.editor, &self.target, &self.stack(), window, cx);
             }
             ("kill-line", Session::Buffer) => {
-                self.mark_active = false;
+                self.mark.borrow_mut().set_active(false);
                 if edit::kill_line(&self.editor, &self.target, &self.stack(), &ring, window, cx)
                     .is_err()
                 {
@@ -737,8 +859,11 @@ impl Lab {
                 let start = self.editor.read(cx).point();
                 if edit::yank(&self.editor, &self.target, &self.stack(), &ring, window, cx) {
                     // Emacs sets the mark at the start of the yanked text.
-                    self.mark = Some(start);
-                    self.mark_active = false;
+                    {
+                        let mut mark_state = self.mark.borrow_mut();
+                        mark_state.set(start);
+                        mark_state.set_active(false);
+                    }
                     self.echo("Mark set", cx);
                 } else {
                     self.echo("Kill ring is empty", cx);
@@ -757,7 +882,7 @@ impl Lab {
                             window,
                             cx,
                         );
-                        self.mark_active = false;
+                        self.mark.borrow_mut().set_active(false);
                     }
                     _ => {
                         self.echo(
@@ -769,14 +894,18 @@ impl Lab {
                 }
             }
             ("set-mark-command", Session::Buffer) => {
-                self.mark = Some(self.editor.read(cx).point());
-                self.mark_active = true;
+                let point = self.editor.read(cx).point();
+                {
+                    let mut mark_state = self.mark.borrow_mut();
+                    mark_state.set(point);
+                    mark_state.set_active(true);
+                }
                 self.ring.borrow_mut().break_chain();
                 self.stack().borrow_mut().end_command(false);
                 self.echo("Mark set", cx);
             }
             ("newline", Session::Buffer) => {
-                self.mark_active = false;
+                self.mark.borrow_mut().set_active(false);
                 edit::insert_text(
                     &self.editor,
                     &self.target, &self.stack(),
@@ -869,6 +998,7 @@ impl Lab {
                     Session::Buffer => replay(
                         &self.editor,
                         &self.target,
+                        &self.mark,
                         &group,
                         Direction::Undo,
                         window,
@@ -877,6 +1007,7 @@ impl Lab {
                     Session::Minibuffer => replay(
                         &self.minibuffer,
                         &self.mini_target,
+                        &self.mini_mark,
                         &group,
                         Direction::Undo,
                         window,
@@ -884,6 +1015,10 @@ impl Lab {
                     ),
                 }
                 log_line(format!("OWNUNDO {before} -> {}", snapshot(&self.editor, cx)));
+                match self.session {
+                    Session::Buffer => self.mark.borrow_mut().set_active(false),
+                    Session::Minibuffer => self.mini_mark.borrow_mut().set_active(false),
+                }
             }
             None => self.echo("No further undo information", cx),
         }
@@ -892,14 +1027,30 @@ impl Lab {
     fn command_redo(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         match self.stack().borrow_mut().redo_group() {
             Some(group) => {
-                replay(
-                    &self.editor,
-                    &self.target,
-                    &group,
-                    Direction::Redo,
-                    window,
-                    cx,
-                );
+                match self.session {
+                    Session::Buffer => replay(
+                        &self.editor,
+                        &self.target,
+                        &self.mark,
+                        &group,
+                        Direction::Redo,
+                        window,
+                        cx,
+                    ),
+                    Session::Minibuffer => replay(
+                        &self.minibuffer,
+                        &self.mini_target,
+                        &self.mini_mark,
+                        &group,
+                        Direction::Redo,
+                        window,
+                        cx,
+                    ),
+                }
+                match self.session {
+                    Session::Buffer => self.mark.borrow_mut().set_active(false),
+                    Session::Minibuffer => self.mini_mark.borrow_mut().set_active(false),
+                }
             }
             None => self.echo("No further redo information", cx),
         }
@@ -1035,6 +1186,10 @@ const COMMANDS: &[(&str, &str)] = &[
     ("C-S-c", "spike-preedit-cancel"),
     ("f10", "spike-fake-preedit-on"),
     ("f11", "spike-fake-preedit-off"),
+    ("f8", "spike-mark-ime"),
+    // Probe: fcitx5 grabs Ctrl-SPC as its activation toggle, so real cases set
+    // the mark through this binding instead.
+    ("f7", "set-mark-command"),
     // v1 default keys (S2 subset)
     ("C-f", "forward-char"),
     ("C-b", "backward-char"),
@@ -1069,7 +1224,13 @@ fn main() {
     gpui_kit::application().run(|cx| {
         gpui_kit::init(cx);
         gpui_kit::open_window(WindowOptions::default(), cx, |window, cx| {
-            cx.new(|cx| Lab::new(window, cx))
+            let lab = cx.new(|cx| Lab::new(window, cx));
+            let weak = lab.downgrade();
+            window.on_window_should_close(cx, move |window, cx| {
+                weak.update(cx, |lab, cx| lab.should_close(window, cx))
+                    .unwrap_or(true)
+            });
+            lab
         })
         .expect("failed to open window");
     });

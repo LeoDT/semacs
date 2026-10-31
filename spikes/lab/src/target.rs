@@ -12,17 +12,29 @@ use gpui_kit::*;
 
 use crate::edit::Editable;
 use crate::log_line;
+use crate::mark;
 use crate::undo;
 
 pub struct EditTarget<S: 'static> {
     state: Entity<S>,
     name: &'static str,
     undo: undo::SharedUndo,
+    mark: mark::SharedMark,
 }
 
 impl<S: 'static> EditTarget<S> {
-    pub fn new(state: Entity<S>, name: &'static str, undo: undo::SharedUndo) -> Self {
-        Self { state, name, undo }
+    pub fn new(
+        state: Entity<S>,
+        name: &'static str,
+        undo: undo::SharedUndo,
+        mark: mark::SharedMark,
+    ) -> Self {
+        Self {
+            state,
+            name,
+            undo,
+            mark,
+        }
     }
 
     fn note(&self, what: &str, extra: impl AsRef<str>) {
@@ -135,6 +147,11 @@ impl<S: Editable + EntityInputHandler> EntityInputHandler for EditTarget<S> {
         };
         let old = doc[start..end].to_string();
         let point_before = self.state.read(cx).point();
+        let mark_collapse = if targets_marked {
+            None
+        } else {
+            self.mark.borrow().collapse_offset(start..end)
+        };
         let marked_note = marked
             .as_ref()
             .map(|m| format!(" marked={m:?}"))
@@ -148,24 +165,37 @@ impl<S: Editable + EntityInputHandler> EntityInputHandler for EditTarget<S> {
         self.state.update(cx, |state, cx| {
             EntityInputHandler::replace_text_in_range(state, range, text, window, cx)
         });
-        if !undo::replaying() {
-            if targets_marked {
-                // Cancelling a composition is not an edit; committing one is.
-                // The preedit was never recorded, so the commit's previous
-                // text is empty and undo simply removes the committed text.
-                if !text.is_empty() {
+        if targets_marked {
+            // Preedit text is temporary: it was never marker-adjusted, so only
+            // a commit behaves as a real insertion at the preedit start.
+            // Cancelling (empty text) leaves the mark untouched.
+            if !text.is_empty() {
+                self.mark
+                    .borrow_mut()
+                    .after_replace(start..start, text.len());
+                if !undo::replaying() {
+                    // Platform input / IME commits are command boundaries too:
+                    // they deactivate the region but keep the mark position.
+                    self.mark.borrow_mut().set_active(false);
+                    // The commit's previous text is empty and undo simply
+                    // removes the committed text.
                     self.undo.borrow_mut().record(
                         undo::Change {
                             range: start..start,
                             old: String::new(),
                             new: text.to_string(),
                             kind: undo::Kind::Typing,
+                            mark_collapse: None,
                         },
                         point_before,
                     );
                 }
-                return;
             }
+            return;
+        }
+        self.mark.borrow_mut().after_replace(start..end, text.len());
+        if !undo::replaying() {
+            self.mark.borrow_mut().set_active(false);
             let kind = undo::take_pending_kind().unwrap_or({
                 if start == end && !text.contains('\n') {
                     undo::Kind::Typing
@@ -179,6 +209,7 @@ impl<S: Editable + EntityInputHandler> EntityInputHandler for EditTarget<S> {
                     old,
                     new: text.to_string(),
                     kind,
+                    mark_collapse,
                 },
                 point_before,
             );
