@@ -6,7 +6,7 @@ real command loop (`emacs -Q -nw`), fundamental-mode, transient mark on,
 keystrokes injected as terminal input.
 
 Usage: drive.py <case> [<case> ...]
-Output: ../log/emacs-<case>.jsonl plus a per-step index map on stdout.
+Output: .pi/tmp/emacs-reference/emacs-<case>.jsonl (repository-relative) plus a per-step index map on stdout.
 """
 import base64
 import json
@@ -18,7 +18,7 @@ import sys
 import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-LOG = os.path.abspath(os.path.join(HERE, "..", "log"))
+LOG = os.path.abspath(os.path.join(HERE, "..", "..", ".pi", "tmp", "emacs-reference"))
 
 C_D = b"\x04"
 C_F = b"\x06"
@@ -88,7 +88,7 @@ CASES = {
     "buffers": ("aa", [("C-e", C_E), ("C-SPC", C_SPC), ("C-a", C_A),
                         ("C-x b foo RET", C_X + b"bfoo\r"),
                         ("type bb", b"bb"), ("C-SPC", C_SPC), ("C-a", C_A),
-                        ("C-x b *spike* RET", C_X + b"b*spike*\r"),
+                        ("C-x b *reference* RET", C_X + b"b*reference*\r"),
                         ("type c", b"c"), ("undo", C_SLASH),
                         ("C-x b foo RET", C_X + b"bfoo\r"),
                         ("undo in foo", C_SLASH)]),
@@ -123,7 +123,7 @@ CASES = {
                                  ("C-x b foo RET", C_X + b"bfoo\r"),
                                  ("type xx", b"xx"), ("C-a C-f", C_A + C_F),
                                  ("C-SPC", C_SPC), ("type yy", b"yy"),
-                                 ("C-x b *spike* RET", C_X + b"b*spike*\r"),
+                                 ("C-x b *reference* RET", C_X + b"b*reference*\r"),
                                  ("C-a", C_A), ("insert before A mark", b"Q"),
                                  ("C-x b foo RET", C_X + b"bfoo\r"),
                                  ("undo in foo", C_SLASH)]),
@@ -155,7 +155,7 @@ def run_case(case, init_wait=1.5, settle=0.5):
     if os.path.exists(state):
         os.remove(state)
 
-    os.environ.update({"TERM": "xterm-256color", "SPIKE_STATE": state, "SPIKE_INITIAL": initial})
+    os.environ.update({"TERM": "xterm-256color", "EMACS_REFERENCE_STATE": state, "EMACS_REFERENCE_INITIAL": initial})
     pid, master = pty.fork()
     if pid == 0:  # child
         try:

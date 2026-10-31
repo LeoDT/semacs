@@ -34,14 +34,8 @@ fn main() -> ExitCode {
             window_min_size: Some(size(px(480.0), px(320.0))),
             ..Default::default()
         };
-        gpui_kit::open_window(options, cx, move |window, cx| {
-            let app = cx.new(|cx| AppShell::new(document, window, cx));
-            let weak = app.downgrade();
-            window.on_window_should_close(cx, move |window, cx| {
-                weak.update(cx, |app, cx| app.should_close(window, cx))
-                    .unwrap_or(true)
-            });
-            app
+        gpui_kit::open_window(options, cx, move |_, cx| {
+            cx.new(|_| AppShell::new(document))
         })
         .expect("failed to open semacs window");
     });
@@ -67,7 +61,8 @@ fn parse_args() -> Result<Option<PathBuf>, String> {
 fn print_help() {
     println!("Usage: semacs [FILE]");
     println!();
-    println!("Open FILE, or start with an empty *scratch* buffer.");
+    println!("Load FILE, or prepare an empty *scratch* document.");
+    println!("Text display and editing are not implemented yet.");
 }
 
 fn startup_document(path: Option<PathBuf>) -> Result<StartupDocument, String> {

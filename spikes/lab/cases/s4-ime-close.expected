@@ -1,6 +1,0 @@
-=== focused
-KEY   key="f10" key_char=None ctrl=false alt=false shift=false super=false pref=false
-RESOLVE seq="f10" pending="" -> Execute("spike-fake-preedit-on")
-CMD   spike-fake-preedit-on
-FAKE-PREEDIT on
-CLOSE allow

@@ -4,12 +4,12 @@
 ;; from the real command loop instead of calling functions from batch.
 ;; Environment fixed by docs/emacs-fidelity.md section 5.
 
-(defvar spike/state-file (getenv "SPIKE_STATE")
+(defvar reference/state-file (getenv "EMACS_REFERENCE_STATE")
   "File that receives one line per command.")
 
-(defvar spike/initial-text (or (getenv "SPIKE_INITIAL") ""))
+(defvar reference/initial-text (or (getenv "EMACS_REFERENCE_INITIAL") ""))
 
-(defun spike/dump (tag)
+(defun reference/dump (tag)
   (let ((line (format "{\"tag\":%s,\"text\":%s,\"point\":%d,\"mark\":%s,\"active\":%s,\"modified\":%s,\"msg\":%s}\n"
                       (if tag (format "\"%s\"" tag) "null")
                       (concat "\"" (base64-encode-string (encode-coding-string (buffer-string) 'utf-8) t) "\"")
@@ -21,15 +21,15 @@
     (let ((inhibit-message t))
       (with-temp-buffer
         (insert line)
-        (write-region (point-min) (point-max) spike/state-file t 'silent)))))
+        (write-region (point-min) (point-max) reference/state-file t 'silent)))))
 
-(defun spike/setup ()
-  (switch-to-buffer (get-buffer-create "*spike*"))
+(defun reference/setup ()
+  (switch-to-buffer (get-buffer-create "*reference*"))
   (fundamental-mode)
   (transient-mark-mode 1)
   (setq buffer-undo-list nil)
   (erase-buffer)
-  (insert spike/initial-text)
+  (insert reference/initial-text)
   (goto-char (point-max))
   (setq mark-active nil)
   (setq buffer-undo-list nil)
@@ -37,6 +37,6 @@
   (setq buffer-undo-list nil)
   (local-set-key (kbd "C-c m") (lambda () (interactive) (set-buffer-modified-p nil) (message "saved")))
   (local-set-key (kbd "C-c r") (lambda () (interactive) (setq buffer-read-only t) (message "readonly")))
-  (add-hook 'post-command-hook (lambda () (spike/dump nil))))
+  (add-hook 'post-command-hook (lambda () (reference/dump nil))))
 
-(add-hook 'window-setup-hook #'spike/setup)
+(add-hook 'window-setup-hook #'reference/setup)

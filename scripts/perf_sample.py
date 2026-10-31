@@ -3,7 +3,7 @@
 
 The sample mixes ASCII, CJK, accented/Greek/Cyrillic text, emoji and periodic
 very long lines. It is written as UTF-8 with LF endings unless --crlf or --bom
-is given. The same seed and arguments produce the same bytes.
+is given. The same arguments produce the same bytes.
 """
 
 import argparse

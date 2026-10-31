@@ -20,7 +20,7 @@
 | mark-quit | `hello world`、C-a → C-SPC → C-f×2 → C-g | 结束后 point=3、**mark=1**、active=false：C-g 只停用 region，mark 位置保留 |
 | quit-no-mark | 空 buffer → C-g ×2 | 两次都回显 `Quit`；point/mark 不变 |
 | minibuffer-quit | `C-x C-f` → 输入 → C-g | 取消 minibuffer，回显 `Quit`，buffer 不变 |
-| buffers | A 设 mark → `C-x b foo RET` → 编辑并设 mark → `C-x b *spike* RET` | 切回 A 后 point / mark / active（1、3、true）保留；B 的状态独立；undo 只影响当前 buffer |
+| buffers | A 设 mark → `C-x b foo RET` → 编辑并设 mark → `C-x b *reference* RET` | 切回 A 后 point / mark / active（1、3、true）保留；B 的状态独立；undo 只影响当前 buffer |
 | mark-insert | `abcdef`、point=3 设 mark → 在 mark 处插入 `X` → `C-a` 插 `Y` → `C-e` 插 `Z` | 在 mark 处插入不移 mark（3→3）；在 mark 前插入移 1（3→4）；在 mark 后插入不移；文本 `YabXcdefZ` |
 | mark-insert-undo | mark=3 → 在 point=1 插 `X` → undo → redo | undo 后 mark 回到 3（point=1）；redo 后 mark=4 |
 | mark-delete-undo | mark=4 → `C-a` → `C-k` 删整行 → undo → redo | 删除把 mark 坍缩到 1；undo 恢复文本与 mark=4（point=1）；redo 再坍缩到 1 |
@@ -33,7 +33,7 @@
 
 - undo 恢复到该组开始前的 point（`undo-del` point=4、`undo-cd` point=1）。
 - redo 不回到组末，而是回到组内**最早变更的起点**：`abc` 末尾输入 `zz` 后 redo，point=4（1-based）；
-  `abc` 输入后再 undo/redo，point=1。spike 的 `Group::redo_point()` 按此规则实现。
+  `abc` 输入后再 undo/redo，point=1。
 
 ### mark 的 marker 语义（批量探针 + command loop 复核）
 mark 不是普通 offset，而是 marker（insertion type 为 nil）：

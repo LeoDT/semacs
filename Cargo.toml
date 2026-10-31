@@ -6,10 +6,3 @@ publish = false
 
 [dependencies]
 gpui-kit = "0.8.1"
-
-[dev-dependencies]
-gpui-kit = { version = "0.8.1", features = ["test-support"] }
-# test-support makes Cargo resolve gpui-kit's optional gpui-fast tree, whose
-# exact pins must also satisfy the default gpui-pre tree.
-taffy = "=0.15.0"
-unicode-properties = "=0.1.3"

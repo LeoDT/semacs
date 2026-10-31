@@ -1,4 +1,4 @@
-//! File-layer load and decode timing for the M0 performance baseline.
+//! File-layer load and decode timing for the performance baseline.
 //!
 //! Usage: cargo run --release --example perf_load -- <file>
 

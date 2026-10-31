@@ -2,13 +2,13 @@
 ;;
 ;; Reference environment fixed by docs/emacs-fidelity.md section 5:
 ;;   GNU Emacs 31.1, emacs -Q, fundamental-mode, transient-mark-mode on.
-;; Usage: emacs -Q --batch -l .pi/tmp/emacs-baseline/export-keys.el
+;; Usage: emacs -Q --batch -l tests/emacs/export-keys.el
 ;;
 ;; Evidence boundary: this drives key-binding lookups, not a real command loop.
 
 (setq inhibit-startup-screen t)
 
-(defvar spike/keys
+(defvar reference/keys
   '("C-f" "C-b" "C-p" "C-n" "C-a" "C-e"
     "M-f" "M-b" "M-<" "M->"
     "C-v" "M-v"
@@ -22,7 +22,7 @@
     "C-x 1" "C-x 2" "C-x 3" "C-x o" "C-x a"
     "RET" "TAB" "C-i" "C-j" "C-m" "C-h" "ESC" "M-ESC"))
 
-(defun spike/describe-binding (key)
+(defun reference/describe-binding (key)
   (let ((cmd (condition-case err
                  (key-binding (kbd key) t)
                (error (format "ERROR:%S" err)))))
@@ -31,7 +31,7 @@
           ((stringp cmd) cmd)
           (t (symbol-name cmd)))))
 
-(defun spike/export ()
+(defun reference/export ()
   (with-temp-buffer
     (fundamental-mode)
     (transient-mark-mode 1)
@@ -43,7 +43,7 @@
     (princ (format "# undo-outer-limit: %s\n" undo-outer-limit))
     (princ "# driving: emacs -Q --batch, key-binding lookup (not a command loop)\n")
     (princ "#\n")
-    (dolist (key spike/keys)
-      (princ (format "%-10s %s\n" key (spike/describe-binding key))))))
+    (dolist (key reference/keys)
+      (princ (format "%-10s %s\n" key (reference/describe-binding key))))))
 
-(spike/export)
+(reference/export)
