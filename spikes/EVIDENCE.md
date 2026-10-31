@@ -97,8 +97,11 @@ undo/redo 不与输入合并；replay 走同一个适配器（`replaying` 标志
 | 连续自有插入 ×2 → undo | 一组 | 一组 ✅ |
 | undo 后 redo | 文本恢复 | 文本恢复 ✅ |
 
-待补：undo 后 point 应回到"该组开始前的 point"（Emacs：undo-del point=4、undo-cd point=1），
-当前实现放在组内第一个变更处，需把 `point_before` 存在组上。
+undo 后 point：已按组记录 `point_before` / `point_after`，与 Emacs（undo-del point=4、undo-cd point=1）一致。
+undo 后立即输入：开新组并清空 redo，见 `cases/s3-undo-then-input.*`。
+
+遗留：mark 目前是普通 offset，编辑 / undo 缩短文本后不会跟随移动；Emacs 的 mark 是 marker。
+这是 M1 必须补的（D7 的 marker / RangeDecoration 方案），spike 未伪装成已通过。
 
 已知代价：replay 会写进底座自己的 undo 历史（我们不再派发底座 Undo/Redo，无副作用）；
 底座也不再需要承担 dirty / 保存点，全部由我们的 change 记录派生。
@@ -121,13 +124,16 @@ undo/redo 不与输入合并；replay 走同一个适配器（`replaying` 标志
 | kill ring 共享 | 正文 `C-k` → minibuffer `C-y` 得到同一文本；minibuffer `C-k` 后再在正文 `C-y` 得到新内容 |
 | 连续 kill 追加 | 非 kill 命令（如 `yank`）打断追加链（Emacs 规则），ring 保留两条 |
 
-## C-g 与区域（待补矩阵）
+## C-g 与前缀（已定论，修正旧结论）
 
-- Emacs：`C-x C-g` 在**有活动 region** 时 echo `Quit`、`mark` 位置保留（12→6 不变）、`active` 变 false；
-  在**无活动 region** 时 echo `C-x C-g is undefined`。机制一致（prefix 放弃、不插字符），差在 echo 文案。
-- 需要单独矩阵：有 / 无活动 region、顶层 `C-g`、minibuffer 内 `C-g`、连续 `C-g`。
-- 之前两条互相矛盾的 C-g mark 观测已定位为采集噪声（`append-to-file` 污染 echo area + scratch 缓冲启动噪声），
-  基准脚本已改为 `write-region` + `inhibit-message`，并记录 echo 文案。
+旧记录“有活动 region 时 `C-x C-g` 回显 `Quit`、无 region 时 `undefined`”是**采集假象**：
+`emacs -nw` 的 pty 如果一次 read 里同时拿到 `C-x` 和 `C-g`，Emacs 会当作 quit（`Quit` 并 deactivate）；
+分两次 read（真实按键间隔）则得到 `C-x C-g is undefined`，mark 位置与 active 都**不变**。
+
+- 真实 PGTK GUI（Hyprland 会话，真实按键）复核：`C-x C-g is undefined`。
+- 顶层 `C-g` 始终 `Quit`（连续按也回显）；minibuffer 中 `C-g` 取消并回显 `Quit`。
+- 因此 semacs 去掉了“按 region 分支”的特殊处理：pending 时 `C-g` 走普通 undefined 解析；
+  `cases/s2-quit.*` 断言 echo、mark 与 active 不变。
 
 ## S3 矩阵（layer 2 + Emacs 基准逐条对照）
 
@@ -149,10 +155,83 @@ undo/redo 不与输入合并；replay 走同一个适配器（`replaying` 标志
 只读目标：输入字符 → echo `Buffer is read-only`，文本不变，`C-a` 等 motion 仍然工作（与 Emacs 一致）；
 平台文本输入由 `accepts_text_input=false` 单独拦住。
 
-## 仍然缺的（S4）
+## S5 真实键位分类（full-keymap 注入，2026）
 
-1. 鼠标拖选 → point / mark / active 的导入：layer 2 没有指针设备，`wtype` 不能移动指针。
-   需要 GPUI 的 `VisualTestContext::simulate_mouse_*`（进程内测试）或 layer 3 手工验证。
-2. 组合输入屏障：能观测到预编辑（`replace_and_mark_text_in_range` + `marked_text_range`），
-   但**没有公开 API 让应用主动 commit** 平台 IME 的组合输入（只能等平台发提交）。
-   这直接影响 D15 要求的"预编辑中保存 / 切换 / 关闭前先收敛输入"，需按 D14 作为 API 缺口单独确认。
+`wtype` 上传的 keymap 只有 level 1，Shift / dead key / AltGr 不可信。新增
+`scripts/vkbd/`：编译与合成器相同的 evdev keymap（规则 `evdev`、`pc105`、`us` / `us(intl)`），
+用命名 keysym 发键。`cases/s5-keymap.*` 与 `real-cases/s5-real-keymap.*`（真实 Hyprland）结果一致：
+
+| 输入 | GPUI keystroke | 解析 | 结论 |
+|---|---|---|---|
+| Shift+a | `key="a" key_char="A" shift=true` | `S-a` → SelfInsert | Shift 字符正常输入 |
+| Shift+1 | `key="!" key_char="!" shift=false` | SelfInsert | 符号不自带 shift |
+| Ctrl+Shift+/ | `key="?" ctrl=true shift=false` | `C-?` → undo-redo | **C-? 与 C-/ 可区分** |
+| Ctrl+/ | `key="/" key_char=None ctrl=true` | `C-/` → undo | |
+| Ctrl+Shift+- | `key="_" ctrl=true` | `C-_` → undo | |
+| dead_acute → a（us intl） | 先预编辑 `´`，再 `key="aacute" key_char="á"` | SelfInsert（按 key_char） | **死键组合能输入 á** |
+| AltGr+e（us intl） | `key="e" key_char="é"` | SelfInsert | AltGr 归入文本输入 |
+
+由此修正自插入判定：不能看 `key` 是否单字符，要看 `key_char` 是否可打印；
+死键中间态（plain、`key_char=None`、单字符 key）归为 `Composition`，消费但不回显 undefined。
+`keys.rs` 的 `KeyStroke` 身份比较忽略 `key_char`（它是载荷，不参与 keymap 查找），并有单测。
+
+## Layer 3：真实 fcitx5 / Hyprland（2026）
+
+用真实 Hyprland 会话 + 用户 fcitx5（pinyin）跑 `run-real.sh`（`SPIKE_REAL=1` 才允许，焦点每次校验，
+结束时恢复 IME 输入法与激活状态）。真实 text-input-v3 路径：
+
+1. 预编辑 `n i h a o` 到达 `replace_and_mark_text_in_range`，`marked_text_range` 为 `0..6`，
+   文本临时为 `ni hao`；**undo 记录仍为 0、dirty=false**。
+2. 空格提交：`replace_text_in_range range=None marked=0..6 text="你好"`，`CHANGE text="你好"`；
+   undo=1、dirty=true。提交按“替换预编辑、旧文本为空”记录，undo 只删除已提交文本。
+3. 提交后 `C-/`：`REPLAY undo 0..6 <- ""`，文本回空，**不再 panic**（此前按错位范围记录会越界）。
+4. 预编辑中 Escape：`replace_text_in_range Some(0..6) marked=0..6 text=""`，不建 undo 组、不 dirty。
+5. 跨目标/焦点：`accepts_text_input=false` 会让 GPUI 调 `disable_ime`，平台随后取消组合（异步）。
+
+### D17：组合未提交时拒绝命令（已批准）
+
+公开 API 没有“主动提交平台 IME 组合并等待完成”的入口。实测“组合中保存”会把预编辑当正文
+（`Saving file (spike): 6 chars`），随后取消组合使 buffer 变空且仍 clean → 真实文件会写坏。
+因此按用户批准的策略：`marked_text_range()` 非空时，命令与前缀启动一律拒绝，
+回显 `Input method composition is active; finish it first`，保持组合与 buffer 原样；
+只有观察 / 组合探针例外。
+
+- `cases/s4-ime-barrier.*`：用 f10/f11 假标志测策略分支（headless 无法稳定持有合成 marked text，
+  GPUI 会在虚拟键盘 leave 时删掉它），断言 save / C-x / switch 被拒绝，关闭标志后 save 正常。
+- `real-cases/s4-ime-save.*`：真实 fcitx5，`REFUSE save-buffer preedit=0..6`，组合保留；Escape 取消后
+  同一命令保存 `0 chars`。
+- 仍未覆盖：窗口关闭、点击其它窗口、系统切走焦点不经过命令入口；M1 必须在 close / focus 路径做同样检查。
+  若上游未来提供 commit/cancel + 完成通知，可升级为“先收敛再执行”。
+
+## 鼠标拖选（virtual pointer，layer 2 + 真实合成器）
+
+新增 `scripts/vptr/`（wlr virtual pointer，绝对坐标 + 按键）。`cases/s4-mouse.*` 在 headless sway：
+初始 `hello world`，`spike-sync-selection` 从 EditorState 的 `cursor()` + `selected_range()` 导入：
+
+| 操作 | EditorState | 导入结果 |
+|---|---|---|
+| 正向拖选 | `cursor=11 sel=1..11` | point=11、mark=1、active=true |
+| 反向拖选 | `cursor=1 sel=1..11` | point=1、mark=11、active=true（方向保留） |
+| 单击起始处 | `cursor=0 sel=0..0` | point=0、mark 保留 11、active=false |
+
+真实 PGTK Emacs（headless sway + 同一 vptr）为 1-based point=12/mark=2（正向）、point=2/mark=12（反向）、
+单击后 point 移动、mark 保留、active=false，与上表 0-based 数值一致。
+限制：这是虚拟指针，不是物理鼠标；尚未验证拖选与 IME / caret 同步的交错。
+
+## 多 buffer 隔离（S3）
+
+`cases/s3-buffers.*`：A 空、B `XY`，各自编辑 / 设 mark / undo。切换是命令边界；
+`BUFFERS` 行同时打印两个 buffer 的 text / point / mark / active / undo。
+结果：A 两次 undo 后 `aa → ""`，B 仍 `XYbb`；切到 B undo 只回 `XY`；A/B 的 mark 与 active 互不串用。
+Emacs 基准 `buffers` case 同样保留 A 的 point/mark/active 并隔离 undo。
+
+## 仍未覆盖 / 未解决
+
+1. **mark 跟随编辑 / undo**：当前是 offset，未按 marker 调整；M1 必补。
+2. **D17 的非命令入口**：窗口关闭、焦点被切走、WM 强退。
+3. **物理键盘**：用的是上传真实 keymap 的虚拟键盘（协议层等价），不是字面硬件；
+   如需最终确认，可由用户按几下 C-?/Shift/死键。
+4. **系统保留键**（WM 层快捷键）分类未测。
+5. **真实 case 的可移植性**：`real-cases/*.expected` 依赖本机 Hyprland + fcitx5 pinyin + us 布局，
+   换机器/升级 fcitx5 后需人工审阅并 `UPDATE=1`。
+6. **性能**：只做了功能验证，没有按键到显示的延迟测量。

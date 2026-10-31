@@ -64,6 +64,15 @@ sleep 0.4
 # virtual keyboard is created; without it the first key press is routed to the
 # old (nil) focus and silently dropped.
 keys() { wtype -s 200 -d 40 "$@" 2>>"$DIR/log/$CASE.wtype.log"; sleep 0.2; }
+# Real-keymap virtual keyboard: Shift levels, dead keys and AltGr, which wtype's
+# synthetic one-level keymap cannot produce. Build it once before the run.
+VKBD="$DIR/scripts/vkbd/build/vkbd"
+[ -x "$VKBD" ] || "$DIR/scripts/vkbd/build.sh" >/dev/null 2>>"$APP_LOG" || true
+vk() { "$VKBD" "$@" 2>>"$DIR/log/$CASE.vkbd.log"; sleep 0.3; }
+VPTR="$DIR/scripts/vptr/build/vptr"
+[ -x "$VPTR" ] || "$DIR/scripts/vptr/build.sh" >/dev/null 2>>"$APP_LOG" || true
+# Absolute pointer motion/click/drag inside the headless output (1280x800).
+mouse() { "$VPTR" "$@" 2>>"$DIR/log/$CASE.vptr.log"; sleep 0.3; }
 shot() { grim "$SHOT" 2>/dev/null && echo "screenshot: $SHOT"; }
 
 # shellcheck source=/dev/null

@@ -1,0 +1,121 @@
+=== focused
+KEY   key="a" key_char=Some("a") ctrl=false alt=false shift=false super=false pref=false
+RESOLVE seq="a" pending="" -> SelfInsert
+TARGET[buffer] replace_text_in_range range_utf16=None bytes=0..0 text="a"
+CHANGE text="a" cursor=1 sel=1..1
+KEY   key="a" key_char=Some("a") ctrl=false alt=false shift=false super=false pref=false
+RESOLVE seq="a" pending="" -> SelfInsert
+TARGET[buffer] replace_text_in_range range_utf16=None bytes=1..1 text="a"
+CHANGE text="aa" cursor=2 sel=2..2
+KEY   key="l" key_char=None ctrl=true alt=false shift=true super=false pref=false
+RESOLVE seq="C-S-l" pending="" -> Execute("spike-dump-all")
+CMD   spike-dump-all
+BUFFERS current text="aa" point=2 mark=None active=false undo=1/0 | alt text="XY" point=2 mark=None active=false undo=0
+KEY   key="o" key_char=None ctrl=true alt=false shift=true super=false pref=false
+RESOLVE seq="C-S-o" pending="" -> Execute("spike-switch-buffer")
+CMD   spike-switch-buffer
+KEY   key="l" key_char=None ctrl=true alt=false shift=true super=false pref=false
+RESOLVE seq="C-S-l" pending="" -> Execute("spike-dump-all")
+CMD   spike-dump-all
+BUFFERS current text="XY" point=2 mark=None active=false undo=0/0 | alt text="aa" point=2 mark=None active=false undo=1
+KEY   key="b" key_char=Some("b") ctrl=false alt=false shift=false super=false pref=false
+RESOLVE seq="b" pending="" -> SelfInsert
+TARGET[buffer2] replace_text_in_range range_utf16=None bytes=2..2 text="b"
+CHANGE[alt] text="XYb" cursor=3 sel=3..3
+KEY   key="b" key_char=Some("b") ctrl=false alt=false shift=false super=false pref=false
+RESOLVE seq="b" pending="" -> SelfInsert
+TARGET[buffer2] replace_text_in_range range_utf16=None bytes=3..3 text="b"
+CHANGE[alt] text="XYbb" cursor=4 sel=4..4
+KEY   key="l" key_char=None ctrl=true alt=false shift=true super=false pref=false
+RESOLVE seq="C-S-l" pending="" -> Execute("spike-dump-all")
+CMD   spike-dump-all
+BUFFERS current text="XYbb" point=4 mark=None active=false undo=1/0 | alt text="aa" point=2 mark=None active=false undo=1
+KEY   key="o" key_char=None ctrl=true alt=false shift=true super=false pref=false
+RESOLVE seq="C-S-o" pending="" -> Execute("spike-switch-buffer")
+CMD   spike-switch-buffer
+KEY   key="c" key_char=Some("c") ctrl=false alt=false shift=false super=false pref=false
+RESOLVE seq="c" pending="" -> SelfInsert
+TARGET[buffer] replace_text_in_range range_utf16=None bytes=2..2 text="c"
+CHANGE text="aac" cursor=3 sel=3..3
+KEY   key="c" key_char=Some("c") ctrl=false alt=false shift=false super=false pref=false
+RESOLVE seq="c" pending="" -> SelfInsert
+TARGET[buffer] replace_text_in_range range_utf16=None bytes=3..3 text="c"
+CHANGE text="aacc" cursor=4 sel=4..4
+KEY   key="l" key_char=None ctrl=true alt=false shift=true super=false pref=false
+RESOLVE seq="C-S-l" pending="" -> Execute("spike-dump-all")
+CMD   spike-dump-all
+BUFFERS current text="aacc" point=4 mark=None active=false undo=2/0 | alt text="XYbb" point=4 mark=None active=false undo=1
+KEY   key="u" key_char=None ctrl=true alt=false shift=true super=false pref=false
+RESOLVE seq="C-S-u" pending="" -> Execute("spike-undo")
+CMD   spike-undo
+REPLAY undo 3..4 <- ""
+TARGET[buffer] replace_text_in_range range_utf16=Some(3..4) bytes=3..4 text=""
+REPLAY undo 2..3 <- ""
+TARGET[buffer] replace_text_in_range range_utf16=Some(2..3) bytes=2..3 text=""
+OWNUNDO text="aacc" cursor=4 sel=4..4 -> text="aa" cursor=2 sel=2..2
+CHANGE text="aa" cursor=2 sel=2..2
+CHANGE text="aa" cursor=2 sel=2..2
+KEY   key="l" key_char=None ctrl=true alt=false shift=true super=false pref=false
+RESOLVE seq="C-S-l" pending="" -> Execute("spike-dump-all")
+CMD   spike-dump-all
+BUFFERS current text="aa" point=2 mark=None active=false undo=1/1 | alt text="XYbb" point=4 mark=None active=false undo=1
+KEY   key="u" key_char=None ctrl=true alt=false shift=true super=false pref=false
+RESOLVE seq="C-S-u" pending="" -> Execute("spike-undo")
+CMD   spike-undo
+REPLAY undo 1..2 <- ""
+TARGET[buffer] replace_text_in_range range_utf16=Some(1..2) bytes=1..2 text=""
+REPLAY undo 0..1 <- ""
+TARGET[buffer] replace_text_in_range range_utf16=Some(0..1) bytes=0..1 text=""
+OWNUNDO text="aa" cursor=2 sel=2..2 -> text="" cursor=0 sel=0..0
+CHANGE text="" cursor=0 sel=0..0
+CHANGE text="" cursor=0 sel=0..0
+KEY   key="l" key_char=None ctrl=true alt=false shift=true super=false pref=false
+RESOLVE seq="C-S-l" pending="" -> Execute("spike-dump-all")
+CMD   spike-dump-all
+BUFFERS current text="" point=0 mark=None active=false undo=0/2 | alt text="XYbb" point=4 mark=None active=false undo=1
+KEY   key="o" key_char=None ctrl=true alt=false shift=true super=false pref=false
+RESOLVE seq="C-S-o" pending="" -> Execute("spike-switch-buffer")
+CMD   spike-switch-buffer
+KEY   key="u" key_char=None ctrl=true alt=false shift=true super=false pref=false
+RESOLVE seq="C-S-u" pending="" -> Execute("spike-undo")
+CMD   spike-undo
+REPLAY undo 3..4 <- ""
+TARGET[buffer2] replace_text_in_range range_utf16=Some(3..4) bytes=3..4 text=""
+REPLAY undo 2..3 <- ""
+TARGET[buffer2] replace_text_in_range range_utf16=Some(2..3) bytes=2..3 text=""
+OWNUNDO text="XYbb" cursor=4 sel=4..4 -> text="XY" cursor=2 sel=2..2
+CHANGE[alt] text="XY" cursor=2 sel=2..2
+CHANGE[alt] text="XY" cursor=2 sel=2..2
+KEY   key="l" key_char=None ctrl=true alt=false shift=true super=false pref=false
+RESOLVE seq="C-S-l" pending="" -> Execute("spike-dump-all")
+CMD   spike-dump-all
+BUFFERS current text="XY" point=2 mark=None active=false undo=0/1 | alt text="" point=0 mark=None active=false undo=0
+KEY   key="space" key_char=None ctrl=true alt=false shift=false super=false pref=false
+RESOLVE seq="C-space" pending="" -> Execute("set-mark-command")
+CMD   set-mark-command
+ECHO  Mark set
+KEY   key="a" key_char=None ctrl=true alt=false shift=false super=false pref=false
+RESOLVE seq="C-a" pending="" -> Execute("move-beginning-of-line")
+CMD   move-beginning-of-line
+KEY   key="l" key_char=None ctrl=true alt=false shift=true super=false pref=false
+RESOLVE seq="C-S-l" pending="" -> Execute("spike-dump-all")
+CMD   spike-dump-all
+BUFFERS current text="XY" point=0 mark=Some(2) active=true undo=0/1 | alt text="" point=0 mark=None active=false undo=0
+KEY   key="o" key_char=None ctrl=true alt=false shift=true super=false pref=false
+RESOLVE seq="C-S-o" pending="" -> Execute("spike-switch-buffer")
+CMD   spike-switch-buffer
+KEY   key="a" key_char=Some("a") ctrl=false alt=false shift=false super=false pref=false
+RESOLVE seq="a" pending="" -> SelfInsert
+TARGET[buffer] replace_text_in_range range_utf16=None bytes=0..0 text="a"
+CHANGE text="a" cursor=1 sel=1..1
+KEY   key="space" key_char=None ctrl=true alt=false shift=false super=false pref=false
+RESOLVE seq="C-space" pending="" -> Execute("set-mark-command")
+CMD   set-mark-command
+ECHO  Mark set
+KEY   key="a" key_char=None ctrl=true alt=false shift=false super=false pref=false
+RESOLVE seq="C-a" pending="" -> Execute("move-beginning-of-line")
+CMD   move-beginning-of-line
+KEY   key="l" key_char=None ctrl=true alt=false shift=true super=false pref=false
+RESOLVE seq="C-S-l" pending="" -> Execute("spike-dump-all")
+CMD   spike-dump-all
+BUFFERS current text="a" point=0 mark=Some(1) active=true undo=1/0 | alt text="XY" point=0 mark=Some(2) active=true undo=0

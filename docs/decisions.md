@@ -1,6 +1,6 @@
 # 决策记录
 
-状态：D1–D13 保留原始决策记录；D14 修正实施门禁，D15 补齐交互边界与状态归属，优先于其中冲突的旧假设。
+状态：D1–D13 保留原始决策记录；D14 修正实施门禁，D15 补齐交互边界与状态归属，D16 / D17 记录 spike 实测后批准的自建 undo 与 IME 组合屏障，优先于其中冲突的旧假设。
 方案 B 只获准进入 spike，尚未获证实可满足全部行为要求。新增事实通过追加决策记录，不改写历史。
 
 | ID | 决策 | 状态 |
@@ -12,7 +12,7 @@
 | D5 | 文本底座复用 `EditorState`（方案 B） | 候选路径，受 D14 门禁约束 |
 | D6 | 编辑语义归我们，`EditorState` 只做文本 / caret / 排版 / IME | 已决定 |
 | D7 | region 用 `RangeDecoration` 自绘，不用 EditorState 的 selection | 保留方向，同步 / marker 假设由 D14 修正 |
-| D8 | undo 委托 `EditorState` 的 Undo / Redo action，接受已登记差异 | 分组与完成机制待验证，见 D14 |
+| D8 | undo 委托 `EditorState` 的 Undo / Redo action，接受已登记差异 | 由 D16 取代 |
 | D9 | 每 window 一个 buffer；同 buffer 多窗口不支持，预留 model/view 缝 | v1 split 范围由 D14 取代 |
 | D10 | 单 crate，暂不拆 workspace | 已决定 |
 | D11 | 命令注册表是 M-x / C-h 的唯一数据源 | 已决定 |
@@ -20,6 +20,8 @@
 | D13 | v1 键位写在 Rust 代码里，用户配置格式待定 | 已决定 |
 | D14 | 修正输入 / mark / undo 假设；spike 门禁；v1 截止 M3 | 已决定，API 缺口的处理选项仍待确认 |
 | D15 | IME 命令屏障、buffer-local 状态、公共编辑目标与命令名修正 | 已决定，适配可行性及 IME 收敛策略须经 spike 验证 |
+| D16 | 自建 undo，不派发底座 Undo / Redo；分组、保存点与每目标历史归我们 | 已决定（用户批准，spike 实测通过） |
+| D17 | IME 组合未提交时拒绝执行命令与启动前缀，先让用户完成输入 | 已决定（用户批准，spike 实测通过） |
 
 ---
 
@@ -230,6 +232,52 @@ InputState 公共适配尚未经过 crates.io 依赖构建或 Wayland 验证，�
 
 **后果**：架构、保真度矩阵与计划同步更新；minibuffer 的最小编辑适配提前在 spike 验证，
 完整读取与补全仍在 M2。diff / magit 仍为后续阶段，不因公共编辑接口获准而视为领域模型或 Git 操作已设计完成。
+
+---
+
+## D16 自建 undo
+
+**决策**：undo / redo 由我们自己的 change 记录实现，不再派发 `EditorState` 的 `Undo` / `Redo` action（取代 D8）。
+每个编辑目标（正文 buffer / minibuffer / 各 buffer）持有独立历史；dirty 与保存点由 change 记录派生。
+
+**分组规则**（与 Emacs 31.1 真实 command loop 逐条对照）：
+
+- 连续同类输入（Typing）合并；连续 `delete-backward-char` / `delete-char` 合并；连续 `kill-line` 各自成组；
+- 移动、其它非编辑命令、buffer 切换插入边界；
+- undo / redo 不与输入合并；undo 后立即输入开新组并清空 redo；
+- `kill-line` 在 EOB 报 `End of buffer` 且不建组；`yank` 把 mark 设在插入起点并回显 `Mark set`；
+- undo 后 point 回到该组开始前的 point；保存后 undo 越过保存点仍视为干净。
+
+**理由**：公开编辑入口全部强制 Atomic，`set_selected_range` 会打断合并，`EditIntent` 为 `pub(crate)`，
+无法用公开 API 复现 Emacs 的连续删除合并；spike 已逐条对齐。
+
+**代价 / 遗留**：replay 会写入底座自己的 undo 历史（我们不再派发底座 undo，无副作用）；
+当前 mark 仍是普通 offset，编辑 / undo 缩短文本后不会像 Emacs 那样跟随移动，需在 M1 改为 marker 语义。
+
+---
+
+## D17 IME 组合屏障：未提交时拒绝命令
+
+**决策**：当当前编辑目标存在未提交的 IME 组合（`marked_text_range()` 为 `Some`）时：
+
+- 不执行任何命令（保存、切换 buffer、进入 minibuffer、kill / quit、编辑命令等）；
+- 不启动前缀键（`C-x` 等），避免平台因 `accepts_text_input=false` 直接取消组合；
+- 回显固定提示 `Input method composition is active; finish it first`，保持组合与 buffer 原样；
+- 观察 / 组合探针（dump、同步选区、取消组合）例外，仅用于 spike 取证。
+
+**理由**：预编辑文本会临时进入底座正文；公开 API 没有“主动提交平台 IME 组合并等待完成”的入口。
+实测在真实 fcitx5 下，保存会把 `ni hao` 当正文（`Saving file (spike): 6 chars`），随后 Escape 取消组合、
+buffer 变回空且仍 clean；真实文件场景会写坏文件。用户确认：字没打完就不应该保存，因此按拒绝处理。
+
+**证据**：`spikes/lab/cases/s4-ime-barrier.*`（策略分支）与
+`spikes/lab/real-cases/s4-ime-save.*`（真实 fcitx5：`REFUSE save-buffer preedit=0..6`，组合保留；
+取消后同一命令保存已完成的文本）。
+
+**边界 / M1 要求**：
+
+- 窗口关闭、点击其它窗口、焦点被系统切走不经过命令入口，仍需在 close / focus 路径做同样检查并保留窗口与组合；
+- 若将来上游提供公开的 commit / cancel + 完成通知，可升级为“先收敛再执行”，但当前按 D17 拒绝；
+- 该策略是用户批准的有意差异，不是把失败的 spike 降级为 F3；需在用户文档中说明。
 
 ---
 

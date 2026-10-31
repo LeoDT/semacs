@@ -1,0 +1,28 @@
+=== focused
+KEY   key="k" key_char=None ctrl=true alt=false shift=true super=false pref=false
+RESOLVE seq="C-S-k" pending="" -> Execute("spike-sync-selection")
+CMD   spike-sync-selection
+SYNC  cursor=11 sel=1..11 -> point=11 mark=Some(1) active=true
+KEY   key="s" key_char=None ctrl=true alt=false shift=true super=false pref=false
+RESOLVE seq="C-S-s" pending="" -> Execute("spike-dump")
+CMD   spike-dump
+DUMP  text="hello world" cursor=11 sel=1..11 mark=Some(1) active=true echo="" pending="" ring=0 session=Buffer mini="" undo=0 redo=0
+DUMP2 dirty=false mini_undo=0/0
+KEY   key="k" key_char=None ctrl=true alt=false shift=true super=false pref=false
+RESOLVE seq="C-S-k" pending="" -> Execute("spike-sync-selection")
+CMD   spike-sync-selection
+SYNC  cursor=1 sel=1..11 -> point=1 mark=Some(11) active=true
+KEY   key="s" key_char=None ctrl=true alt=false shift=true super=false pref=false
+RESOLVE seq="C-S-s" pending="" -> Execute("spike-dump")
+CMD   spike-dump
+DUMP  text="hello world" cursor=1 sel=1..11 mark=Some(11) active=true echo="" pending="" ring=0 session=Buffer mini="" undo=0 redo=0
+DUMP2 dirty=false mini_undo=0/0
+KEY   key="k" key_char=None ctrl=true alt=false shift=true super=false pref=false
+RESOLVE seq="C-S-k" pending="" -> Execute("spike-sync-selection")
+CMD   spike-sync-selection
+SYNC  cursor=0 sel=0..0 -> point=0 mark=Some(11) active=false
+KEY   key="s" key_char=None ctrl=true alt=false shift=true super=false pref=false
+RESOLVE seq="C-S-s" pending="" -> Execute("spike-dump")
+CMD   spike-dump
+DUMP  text="hello world" cursor=0 sel=0..0 mark=Some(11) active=false echo="" pending="" ring=0 session=Buffer mini="" undo=0 redo=0
+DUMP2 dirty=false mini_undo=0/0

@@ -105,28 +105,67 @@ impl<S: Editable + EntityInputHandler> EntityInputHandler for EditTarget<S> {
         cx: &mut Context<Self>,
     ) {
         let doc = self.state.read(cx).text_string();
-        let (start, end) = match range.clone() {
-            Some(range) => utf16_range_to_byte(&doc, range),
-            None => {
-                let sel = self.state.read(cx).selection();
-                if sel.is_empty() {
-                    let point = self.state.read(cx).point();
-                    (point, point)
-                } else {
-                    (sel.start, sel.end)
+        // A platform IME commit/cancel speaks about the marked (preedit) range.
+        // GPUI passes `None` for commits and the marked range for cancels; both
+        // refer to the preedit text that is already in the document but was
+        // never a user edit. Resolve them here so the undo record stays true.
+        let marked = self.state.update(cx, |state, cx| {
+            EntityInputHandler::marked_text_range(state, window, cx)
+        });
+        let targets_marked = match (&range, &marked) {
+            (None, Some(_)) => true,
+            (Some(r), Some(m)) => r == m,
+            _ => false,
+        };
+        let (start, end) = if targets_marked {
+            utf16_range_to_byte(&doc, marked.clone().unwrap())
+        } else {
+            match range.clone() {
+                Some(range) => utf16_range_to_byte(&doc, range),
+                None => {
+                    let sel = self.state.read(cx).selection();
+                    if sel.is_empty() {
+                        let point = self.state.read(cx).point();
+                        (point, point)
+                    } else {
+                        (sel.start, sel.end)
+                    }
                 }
             }
         };
         let old = doc[start..end].to_string();
         let point_before = self.state.read(cx).point();
+        let marked_note = marked
+            .as_ref()
+            .map(|m| format!(" marked={m:?}"))
+            .unwrap_or_default();
         self.note(
             "replace_text_in_range",
-            format!("range_utf16={range:?} bytes={start}..{end} text={text:?}"),
+            format!(
+                "range_utf16={range:?}{marked_note} bytes={start}..{end} text={text:?}"
+            ),
         );
         self.state.update(cx, |state, cx| {
             EntityInputHandler::replace_text_in_range(state, range, text, window, cx)
         });
         if !undo::replaying() {
+            if targets_marked {
+                // Cancelling a composition is not an edit; committing one is.
+                // The preedit was never recorded, so the commit's previous
+                // text is empty and undo simply removes the committed text.
+                if !text.is_empty() {
+                    self.undo.borrow_mut().record(
+                        undo::Change {
+                            range: start..start,
+                            old: String::new(),
+                            new: text.to_string(),
+                            kind: undo::Kind::Typing,
+                        },
+                        point_before,
+                    );
+                }
+                return;
+            }
             let kind = undo::take_pending_kind().unwrap_or({
                 if start == end && !text.contains('\n') {
                     undo::Kind::Typing
@@ -217,6 +256,10 @@ impl<S: Editable + EntityInputHandler> EntityInputHandler for EditTarget<S> {
 
     /// Gate for platform text input while a prefix is pending or the target is
     /// read-only. The interceptor gates keystrokes separately.
+    ///
+    /// Turning this off also makes GPUI disable the IME, which cancels an
+    /// in-flight composition. There is no public API to commit it first, so
+    /// commands that run while composing see the preedit text (see EVIDENCE).
     fn accepts_text_input(&self, window: &mut Window, cx: &mut Context<Self>) -> bool {
         let accepts = self.state.update(cx, |state, cx| {
             EntityInputHandler::accepts_text_input(state, window, cx)

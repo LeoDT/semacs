@@ -46,7 +46,7 @@ KEY   key="dead_acute" key_char=None ctrl=false alt=false shift=false super=fals
 RESOLVE seq="dead_acute" pending="" -> Undefined
 ECHO  dead_acute is undefined
 TARGET[buffer] marked_text_range Some(4..5)
-TARGET[buffer] replace_text_in_range range_utf16=Some(4..5) bytes=4..6 text=""
+TARGET[buffer] replace_text_in_range range_utf16=Some(4..5) marked=4..5 bytes=4..6 text=""
 CHANGE text="\na-e" cursor=4 sel=4..4
 KEY   key="a" key_char=Some("a") ctrl=false alt=false shift=false super=false pref=false
 RESOLVE seq="a" pending="" -> SelfInsert

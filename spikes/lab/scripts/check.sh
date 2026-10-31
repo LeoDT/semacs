@@ -14,7 +14,7 @@ set -uo pipefail
 
 DIR=$(cd "$(dirname "$0")/.." && pwd)
 mkdir -p "$DIR/log"
-FILTER='^(KEY|RESOLVE|CMD|CMDQ|ECHO|CHANGE|DUMP|DUMP2|OWNEDIT|OWNUNDO|REDO|REPLAY|MINI|PREEDIT|PREFIX|TARGET|=== focused)'
+FILTER='^(KEY|RESOLVE|CMD|CMDQ|ECHO|CHANGE|DUMP|DUMP2|BUFFERS|SYNC|REFUSE|FAKE-PREEDIT|OWNEDIT|OWNUNDO|REDO|REPLAY|MINI|PREEDIT|PREFIX|TARGET|=== focused)'
 
 normalize() {
   grep -E "$FILTER" "$1" \
@@ -57,6 +57,14 @@ run_one() {
 
 cargo build --manifest-path "$DIR/Cargo.toml" >/dev/null 2>&1 || {
   echo "FAIL: cargo build failed"
+  exit 2
+}
+"$DIR/scripts/vkbd/build.sh" >/dev/null 2>&1 || {
+  echo "FAIL: vkbd build failed (need wayland-scanner, gcc, wayland-client, xkbcommon)"
+  exit 2
+}
+"$DIR/scripts/vptr/build.sh" >/dev/null 2>&1 || {
+  echo "FAIL: vptr build failed (need wayland-scanner, gcc, wayland-client)"
   exit 2
 }
 

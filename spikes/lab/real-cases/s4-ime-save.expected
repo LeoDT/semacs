@@ -1,0 +1,23 @@
+=== focused
+=== ime state: 2 pinyin
+KEY   key="f9" key_char=None ctrl=false alt=false shift=false super=false pref=false
+RESOLVE seq="f9" pending="" -> Execute("save-buffer")
+CMD   save-buffer
+REFUSE save-buffer preedit=0..6
+ECHO  Input method composition is active; finish it first
+KEY   key="s" key_char=None ctrl=true alt=false shift=true super=false pref=false
+RESOLVE seq="C-S-s" pending="" -> Execute("spike-dump")
+CMD   spike-dump
+DUMP  text="ni hao" cursor=6 sel=6..6 mark=None active=false echo="Input method composition is active; finish it first" pending="" ring=0 session=Buffer mini="" undo=0 redo=0 preedit=0..6
+DUMP2 dirty=false mini_undo=0/0
+TARGET[buffer] replace_text_in_range range_utf16=Some(0..6) marked=0..6 bytes=0..6 text=""
+CHANGE text="" cursor=0 sel=0..0
+KEY   key="f9" key_char=None ctrl=false alt=false shift=false super=false pref=false
+RESOLVE seq="f9" pending="" -> Execute("save-buffer")
+CMD   save-buffer
+ECHO  Saving file (spike): 0 chars
+KEY   key="s" key_char=None ctrl=true alt=false shift=true super=false pref=false
+RESOLVE seq="C-S-s" pending="" -> Execute("spike-dump")
+CMD   spike-dump
+DUMP  text="" cursor=0 sel=0..0 mark=None active=false echo="Saving file (spike): 0 chars" pending="" ring=0 session=Buffer mini="" undo=0 redo=0
+DUMP2 dirty=false mini_undo=0/0

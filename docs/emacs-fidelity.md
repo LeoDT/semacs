@@ -53,8 +53,6 @@ isearch、`C-u`、mark ring 等即使列为 F2，也在 v1 之后评估。新增
 
 ### F3：明确不同（有意差异，必须登记并在需要时提示用户）
 
-- **连续 yank 的 undo 分组**：已接受 semacs 将连续 `C-y` 分成多个 undo 单元；
-  原记录中的 Emacs 合并条件仍须按第 5 节固定脚本复核，不将其表述为无条件行为。
 - **undo-in-region**：region 激活时 Emacs 只撤销 region 内变更；我们执行全局 undo。
 - **undo 环 / undo tree**：不实现 Emacs 的 undo 环与 `undo-in-region`。
 - **窗口拆分**：v1 不提供 split；后续不同 buffer split 需先明确键位语义，同 buffer 多视图仍不承诺（见 D14）。
@@ -133,11 +131,16 @@ isearch、`C-u`、mark ring 等即使列为 F2，也在 v1 之后评估。新增
 
 ### 当前证据边界
 
-旧表未附可复现脚本，也混用了底座原生动作与自有编辑入口。下表替代旧的“一致”结论：
-所有 semacs 结果均待 S3 / S4 验证，Emacs 分组细节也须先固定条件复测。
+可执行对照在 `spikes/reference/`（Emacs 31.1 真实 command loop）与 `spikes/lab/`（semacs 候选实现，
+headless sway + 真实 fcitx5 的 real-cases）。旧“底座原生 action 等价”的结论已由 D14 / D16 取代；
+下表是验收要求，逐项结果与证据行号以 `spikes/EVIDENCE.md` 为准。
 
-参考源码检查表明：公开 `insert` / `replace` 请求 Atomic 意图；原生 Backspace / Delete 使用各自可合并的意图；
-`set_selected_range` 经 `move_to` 打断合并。这些事实不能推出 semacs 自有删除与 Emacs 一致。
+已复测的修正：
+- 连续 `C-y` 在 Emacs 与自建 undo 中都是独立单元，原“连续 yank 不合并”差异不成立，已从 F3 删除。
+- `C-x C-g` 在 GUI / 独立按键事件下回显 `<前缀> C-g is undefined`，mark 位置与 active 状态都不变；
+  旧记录“有 region 时回显 Quit”是 pty 把 `C-x`、`C-g` 合并进同一 read 造成的采集假象。
+- `C-g` 单独按始终回显 `Quit`；minibuffer 中取消回显 `Quit`。
+- `kill-line` 在 EOB 回显 `End of buffer` 且不建 undo 组；`yank` 把 mark 设在插入起点并回显 `Mark set`。
 
 | 场景 | 对照要求 / 待复核点 | semacs 验证要求 |
 |---|---|---|
@@ -145,7 +148,7 @@ isearch、`C-u`、mark ring 等即使列为 F2，也在 v1 之后评估。新增
 | 输入 `abc`，移动，再输入 `def`，undo | 移动打断合并 | 撤销后 point / 文本正确 |
 | 连续 `DEL` / 连续 `C-d`，undo | 复核旧记录“一次恢复两个字符”的条件 | 走自有删除入口，不以底座原生删除替代 |
 | `C-k` 两次，undo | 固定每次 kill 的命令边界 | kill ring 追加不等于 undo 合并 |
-| `C-k` 后 `C-y` 两次，undo | 复核 Emacs 连续 yank 的分组条件 | 允许已登记的 yank 分组差异 |
+| `C-k` 后 `C-y` 两次，undo | 连续 yank 在两边都是独立单元 | 断言各自成组，不再作为差异 |
 | 输入 `abc` + `RET` + `def`，undo | 换行与连续输入的边界 | 验证自有 newline 命令与输入路径 |
 | undo 到无历史后继续 undo | 固定错误回显与重复 undo 行为 | 不静默失败、不意外 redo |
 | undo 后移动 / 输入，再 redo | 分别记录参照行为；undo 环差异单独登记 | 记录线性历史的 redo 可用性，不能宣称所有分支与 Emacs 相同 |

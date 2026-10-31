@@ -27,6 +27,10 @@ use edit::Editable;
 
 /// Spike stand-in for the real key-map pending prefix (e.g. after C-x).
 static PREFIX_PENDING: AtomicBool = AtomicBool::new(false);
+/// Deterministic stand-in for an active IME composition in headless cases:
+/// GPUI deletes synthetic marked text when the virtual keyboard leaves, so the
+/// policy branch is tested with this flag and the real path with a real IME.
+static FAKE_PREEDIT: AtomicBool = AtomicBool::new(false);
 
 pub fn prefix_pending() -> bool {
     PREFIX_PENDING.load(std::sync::atomic::Ordering::Relaxed)
@@ -113,6 +117,18 @@ enum Session {
     Minibuffer,
 }
 
+/// The parts of a buffer that must survive A -> B -> A. The lab keeps exactly
+/// two buffers and swaps these fields; it is enough to prove per-buffer state
+/// and undo isolation without building a real buffer list.
+struct BufferSaved {
+    editor: Entity<EditorState>,
+    target: Entity<EditTarget<EditorState>>,
+    focus_handle: FocusHandle,
+    undo: undo::SharedUndo,
+    mark: Option<usize>,
+    mark_active: bool,
+}
+
 struct Lab {
     editor: Entity<EditorState>,
     target: Entity<EditTarget<EditorState>>,
@@ -137,6 +153,7 @@ struct Lab {
     mini_undo: undo::SharedUndo,
 
     ring: edit::SharedKillRing,
+    alt: BufferSaved,
     _subs: Vec<Subscription>,
 }
 
@@ -162,6 +179,26 @@ impl Lab {
         if initial_len > 0 {
             editor.update(cx, |st, cx| st.set_selected_range(initial_len..initial_len, cx));
         }
+
+        let alt_initial = std::env::var("SPIKE_INITIAL2").unwrap_or_default();
+        let alt_editor = cx.new(|cx| {
+            EditorState::new(window, cx)
+                .default_value(alt_initial)
+                .soft_wrap(true)
+                .line_number(false)
+        });
+        let alt_undo = undo::new_stack();
+        let alt_target = cx.new({
+            let undo = alt_undo.clone();
+            let editor = alt_editor.clone();
+            move |_| EditTarget::new(editor.clone(), "buffer2", undo)
+        });
+        let alt_focus = alt_editor.read(cx).focus_handle(cx).clone();
+        let alt_len = alt_editor.read(cx).text().len();
+        if alt_len > 0 {
+            alt_editor.update(cx, |st, cx| st.set_selected_range(alt_len..alt_len, cx));
+        }
+        alt_undo.borrow_mut().mark_saved();
 
         let minibuffer = cx.new(|cx| InputState::new(window, cx).placeholder(""));
         let mini_target = cx.new({
@@ -210,7 +247,16 @@ impl Lab {
                     cx.stop_propagation();
                 }
             }),
-            cx.observe_window_activation(window, |lab, window, cx| {
+            cx.subscribe_in(
+                &alt_editor,
+                window,
+                |_lab, source, ev: &InputEvent, _window, cx| {
+                    if matches!(ev, InputEvent::Change) {
+                        log_line(format!("CHANGE[alt] {}", snapshot(source, cx)));
+                    }
+                },
+            ),
+            cx.observe_window_activation(window, |lab, window, _cx| {
                 log_line(format!(
                     "WINDOW active={} buffer_focused={} mini_focused={}",
                     window.is_window_active(),
@@ -221,9 +267,9 @@ impl Lab {
             cx.subscribe_in(
                 &editor,
                 window,
-                |lab, _source, ev: &InputEvent, _window, cx| {
+                |_lab, source, ev: &InputEvent, _window, cx| {
                     if matches!(ev, InputEvent::Change) {
-                        log_line(format!("CHANGE {}", snapshot(&lab.editor, cx)));
+                        log_line(format!("CHANGE {}", snapshot(source, cx)));
                     }
                     cx.notify();
                 },
@@ -254,6 +300,14 @@ impl Lab {
             buffer_undo,
             mini_undo,
             ring: std::rc::Rc::new(std::cell::RefCell::new(edit::KillRing::default())),
+            alt: BufferSaved {
+                editor: alt_editor,
+                target: alt_target,
+                focus_handle: alt_focus,
+                undo: alt_undo,
+                mark: None,
+                mark_active: false,
+            },
             _subs: subs,
         }
     }
@@ -267,6 +321,35 @@ impl Lab {
 
     fn is_dirty(&self) -> bool {
         self.buffer_undo.borrow().is_dirty()
+    }
+
+    fn preedit_range(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Option<Range<usize>> {
+        if FAKE_PREEDIT.load(std::sync::atomic::Ordering::Relaxed) {
+            return Some(0..0);
+        }
+        match self.session {
+            Session::Buffer => self.editor.update(cx, |st, cx| {
+                EntityInputHandler::marked_text_range(st, window, cx)
+            }),
+            Session::Minibuffer => self.minibuffer.update(cx, |st, cx| {
+                EntityInputHandler::marked_text_range(st, window, cx)
+            }),
+        }
+    }
+
+    /// D17: an uncommitted IME composition means the text is not finished, so
+    /// commands must not act on it. Observation probes are exempt.
+    fn allow_while_composing(name: &str) -> bool {
+        matches!(
+            name,
+            "spike-dump"
+                | "spike-dump-all"
+                | "spike-sync-selection"
+                | "spike-preedit-start"
+                | "spike-preedit-cancel"
+                | "spike-fake-preedit-on"
+                | "spike-fake-preedit-off"
+        )
     }
 
     fn text_input_available(&self) -> bool {
@@ -284,16 +367,6 @@ impl Lab {
         let pass = std::env::var("SPIKE_PASS")
             .map(|list| list.split(',').any(|p| p.trim() == ks.key))
             .unwrap_or(false);
-
-        // Emacs quits an active prefix with C-g instead of reporting the
-        // combination as undefined.
-        if !self.pending.is_empty() && ks.ctrl && !ks.alt && ks.key == "g" {
-            self.pending.clear();
-            self.set_pending(false);
-            log_line("CMDQ  keyboard-quit (from prefix)".to_string());
-            self.run_command("keyboard-quit", window, cx);
-            return true;
-        }
 
         // Pending prefix wins over text input: text is parsed, never inserted.
         let (resolution, pending) = self.keymap.resolve(&self.pending, ks);
@@ -314,6 +387,14 @@ impl Lab {
                 true
             }
             keys::Resolution::Prefix => {
+                if let Some(preedit) = self.preedit_range(window, cx) {
+                    log_line(format!(
+                        "REFUSE prefix {} preedit={preedit:?}",
+                        keys::describe(&pending)
+                    ));
+                    self.echo("Input method composition is active; finish it first", cx);
+                    return true;
+                }
                 self.pending = pending;
                 self.set_pending(true);
                 log_line(format!("PREFIX {}", keys::describe(&self.pending)));
@@ -325,6 +406,12 @@ impl Lab {
                 self.pending.clear();
                 self.set_pending(false);
                 self.echo(format!("{} is undefined", seq.trim()), cx);
+                true
+            }
+            keys::Resolution::Composition => {
+                // Dead key / in-progress composition: the platform already
+                // delivered the marked text. No command, no undefined echo.
+                log_line("COMPOSE in-progress composition keystroke consumed".to_string());
                 true
             }
             keys::Resolution::SelfInsert => {
@@ -361,6 +448,13 @@ impl Lab {
     }
 
     fn run_command(&mut self, name: &str, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(preedit) = self.preedit_range(window, cx)
+            && !Self::allow_while_composing(name)
+        {
+            log_line(format!("REFUSE {name} preedit={preedit:?}"));
+            self.echo("Input method composition is active; finish it first", cx);
+            return;
+        }
         let ring = self.ring.clone();
         // Emacs appends only when the previous command was also a kill.
         if !matches!(name, "kill-line" | "kill-region") {
@@ -389,8 +483,20 @@ impl Lab {
                     .read(cx)
                     .text()
                     .to_string();
+                let preedit = match self.session {
+                    Session::Buffer => self.editor.update(cx, |st, cx| {
+                        EntityInputHandler::marked_text_range(st, window, cx)
+                    }),
+                    Session::Minibuffer => self.minibuffer.update(cx, |st, cx| {
+                        EntityInputHandler::marked_text_range(st, window, cx)
+                    }),
+                };
+                let preedit_note = preedit
+                    .as_ref()
+                    .map(|m| format!(" preedit={m:?}"))
+                    .unwrap_or_default();
                 log_line(format!(
-                    "DUMP  {} mark={:?} active={} echo={:?} pending={:?} ring={} session={:?} mini={:?} undo={undo_depth} redo={redo_depth}",
+                    "DUMP  {} mark={:?} active={} echo={:?} pending={:?} ring={} session={:?} mini={:?} undo={undo_depth} redo={redo_depth}{preedit_note}",
                     snapshot(&self.editor, cx),
                     self.mark,
                     self.mark_active,
@@ -455,10 +561,101 @@ impl Lab {
                     cx,
                 );
             }
+            ("spike-switch-buffer", _) => {
+                // A buffer switch ends the outgoing buffer's undo group, as a
+                // command boundary in Emacs does; the two histories stay apart.
+                self.buffer_undo.borrow_mut().end_command(false);
+                self.ring.borrow_mut().break_chain();
+                std::mem::swap(&mut self.editor, &mut self.alt.editor);
+                std::mem::swap(&mut self.target, &mut self.alt.target);
+                std::mem::swap(&mut self.focus_handle, &mut self.alt.focus_handle);
+                std::mem::swap(&mut self.buffer_undo, &mut self.alt.undo);
+                std::mem::swap(&mut self.mark, &mut self.alt.mark);
+                std::mem::swap(&mut self.mark_active, &mut self.alt.mark_active);
+                let focus = self.focus_handle.clone();
+                focus.focus(window, cx);
+                self.pending.clear();
+                self.set_pending(false);
+                log_line(format!(
+                    "BUFFER switch -> current point={} mark={:?} active={} undo={}",
+                    self.editor.read(cx).point(),
+                    self.mark,
+                    self.mark_active,
+                    self.buffer_undo.borrow().depth().0
+                ));
+            }
+            ("spike-sync-selection", _) => {
+                let cursor = self.editor.read(cx).cursor();
+                let sel = self.editor.read(cx).selected_range();
+                if sel.is_empty() {
+                    // A click moves point and deactivates the region but keeps
+                    // the mark position (Emacs mouse-set-point).
+                    self.mark_active = false;
+                } else {
+                    // The selection is normalized; cursor() is the head, so the
+                    // other end is the anchor (mark), even for reverse drags.
+                    self.mark = Some(if cursor == sel.start { sel.end } else { sel.start });
+                    self.mark_active = true;
+                }
+                self.stack().borrow_mut().end_command(false);
+                log_line(format!(
+                    "SYNC  cursor={cursor} sel={sel:?} -> point={} mark={:?} active={}",
+                    self.editor.read(cx).point(),
+                    self.mark,
+                    self.mark_active
+                ));
+            }
+            ("spike-dump-all", _) => {
+                let (undo_depth, redo_depth) = self.buffer_undo.borrow().depth();
+                log_line(format!(
+                    "BUFFERS current text={:?} point={} mark={:?} active={} undo={undo_depth}/{redo_depth} | alt text={:?} point={} mark={:?} active={} undo={}",
+                    self.editor.read(cx).text_string(),
+                    self.editor.read(cx).point(),
+                    self.mark,
+                    self.mark_active,
+                    self.alt.editor.read(cx).text_string(),
+                    self.alt.editor.read(cx).point(),
+                    self.alt.mark,
+                    self.alt.mark_active,
+                    self.alt.undo.borrow().depth().0
+                ));
+            }
             ("spike-toggle-prefix", _) => {
                 let next = !prefix_pending();
                 self.set_pending(next);
                 log_line(format!("PREFIX pending={next}"));
+            }
+            ("spike-fake-preedit-on", _) => {
+                FAKE_PREEDIT.store(true, std::sync::atomic::Ordering::Relaxed);
+                log_line("FAKE-PREEDIT on".to_string());
+            }
+            ("spike-fake-preedit-off", _) => {
+                FAKE_PREEDIT.store(false, std::sync::atomic::Ordering::Relaxed);
+                log_line("FAKE-PREEDIT off".to_string());
+            }
+            ("spike-preedit-start", _) => {
+                self.target.update(cx, |t, cx| {
+                    EntityInputHandler::replace_and_mark_text_in_range(
+                        t,
+                        None,
+                        "ni hao",
+                        None,
+                        window,
+                        cx,
+                    );
+                });
+                log_line("PREEDIT start (left marked)".to_string());
+            }
+            ("spike-preedit-cancel", _) => {
+                let marked = self.preedit_range(window, cx);
+                if let Some(range) = marked {
+                    log_line(format!("PREEDIT cancel {range:?}"));
+                    self.target.update(cx, |t, cx| {
+                        EntityInputHandler::replace_text_in_range(t, Some(range), "", window, cx)
+                    });
+                } else {
+                    self.echo("No composition to cancel", cx);
+                }
             }
             ("spike-preedit", _) => {
                 log_line("PREEDIT start");
@@ -764,7 +961,7 @@ fn previous_line(doc: &str, point: usize) -> usize {
 }
 
 impl Render for Lab {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, _: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
         let buffer_target = self.target.clone();
         let buffer_focus = self.focus_handle.clone();
         let mini_target = self.mini_target.clone();
@@ -827,7 +1024,17 @@ const COMMANDS: &[(&str, &str)] = &[
     ("C-S-y", "spike-insert-typing"),
     ("C-S-b", "spike-backspace-action"),
     ("C-S-p", "spike-toggle-prefix"),
+    ("C-S-o", "spike-switch-buffer"),
+    ("C-S-l", "spike-dump-all"),
+    ("C-S-k", "spike-sync-selection"),
     ("C-S-e", "spike-preedit"),
+    // Probe: save with no C-x prefix, so the composition barrier is exercised
+    // without the platform disabling the IME first.
+    ("f9", "save-buffer"),
+    ("C-S-j", "spike-preedit-start"),
+    ("C-S-c", "spike-preedit-cancel"),
+    ("f10", "spike-fake-preedit-on"),
+    ("f11", "spike-fake-preedit-off"),
     // v1 default keys (S2 subset)
     ("C-f", "forward-char"),
     ("C-b", "backward-char"),
@@ -847,6 +1054,7 @@ const COMMANDS: &[(&str, &str)] = &[
     ("C-/", "undo"),
     ("C-_", "undo"),
     ("C-x u", "undo"),
+    ("C-?", "undo-redo"),
     ("C-M-_", "undo-redo"),
     ("enter", "newline"),
     ("tab", "indent-for-tab-command"),
