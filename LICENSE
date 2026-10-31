@@ -1,0 +1,17 @@
+# semacs licensing
+
+semacs is licensed under the GNU General Public License, version 3 or (at your
+option) any later version (SPDX: GPL-3.0-or-later). The full terms are in
+LICENSE-GPL. This program is distributed WITHOUT ANY WARRANTY; see that license.
+
+Third-party source retains its own copyright and license. In particular, the
+Apache-2.0 files listed in THIRD_PARTY.md remain under Apache-2.0; their license
+and upstream copyright notice are in LICENSE-APACHE. This project-level notice
+does not relicense those files.
+
+When conveying binaries, provide the corresponding source, including local
+modifications, Cargo.toml, Cargo.lock and the scripts needed to build it, in a
+manner allowed by GPLv3 section 6. Include this notice, THIRD_PARTY.md and the
+applicable license texts. Dependencies retain their respective license and
+notice requirements; a binary release must audit and include those notices as
+well. The local Zed checkout is not required to build semacs.

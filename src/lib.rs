@@ -1,4 +1,11 @@
 pub mod app;
+pub mod buffer;
+pub mod display;
 pub mod echo;
 pub mod files;
 pub mod frame;
+pub mod input;
+mod platform;
+mod prompt;
+pub mod text;
+pub mod view;

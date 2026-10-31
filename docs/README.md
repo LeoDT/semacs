@@ -5,10 +5,16 @@ gpui-kit 用于外围 UI；文本模型、编辑视图、输入适配和命令�
 
 ## 当前状态
 
-当前代码提供应用窗口外壳、文件参数 / scratch、文件格式元数据、mode line 和 echo area。
-文件层已支持 UTF-8 有 / 无 BOM、统一 LF / CRLF 的读取与编解码。
-**正文显示与编辑尚未实现**，窗口显示明确的占位提示；当前不提供保存、dirty、IME 编辑或 Emacs 命令。
-Zed Rope / SumTree 已选为首批源码组件，尚未导入。下一步是 R1 最小正式编辑切片。
+当前提供文件 / scratch 的正文视图、最小文本输入、软换行、光标、点击定位及横纵滚动；mode line 显示文件格式、dirty 和行列。
+正文使用自有 Buffer / View 与 Zed Rope / SumTree，排版与绘制调用当前 GPUI；换行索引有有界预览和后台补全。
+文件层支持 UTF-8 有 / 无 BOM、统一 LF / CRLF 的读取与编解码。
+
+已有版本化 Edit、独立预编辑、目标绑定的 GPUI 输入 handler、UTF-16 几何与会话失效保护。
+最小驱动支持输入、换行和逐 Unicode scalar 删除；预编辑有下划线，已有 dirty 的窗口关闭须确认。
+**完整 Emacs keymap / 命令、undo 和保存尚未实现**，echo area 明示此限制；不采用 CUA 复制 / 粘贴。
+
+已建立 GPUI headless 输入 / 视图回归与显示 / 输入性能入口；测试字体 / 无 GPU 的结果不能代表原生字体、真实 Wayland 或 IME 通过。
+首轮 headless 输入测量与已确认预算已记录；已获授权完成首轮真实 Wayland / fcitx5 功能验证（软件渲染），见 [原生输入记录](native-input.md)；硬件 GPU / 原生性能仍待测，R1 尚未完成。来源与许可见 [THIRD_PARTY.md](../THIRD_PARTY.md) 和 [LICENSE](../LICENSE)。
 
 ## 阅读顺序
 
@@ -19,7 +25,8 @@ Zed Rope / SumTree 已选为首批源码组件，尚未导入。下一步是 R1 
 5. [实施计划](plan.md)：R0 / R1 与 M1–M3 交付门禁
 6. [编辑器实现计划](editor-plan.md)：源码组件、许可、最小切片验收
 7. [性能基线与测量](performance.md)：样本、文件层结果及编辑视图测量要求
-8. [Emacs 对照基准](../tests/emacs/README.md)：独立参照脚本及使用边界
+8. [原生输入记录](native-input.md)：实际环境、已验证场景与剩余限制
+9. [Emacs 对照基准](../tests/emacs/README.md)：独立参照脚本及使用边界
 
 ## 约定
 

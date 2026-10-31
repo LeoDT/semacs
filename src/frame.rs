@@ -5,8 +5,16 @@ use gpui_kit::*;
 
 use crate::echo::EchoArea;
 
-pub fn mode_line(name: String, format: crate::files::FileFormat, cx: &App) -> impl IntoElement {
+pub fn mode_line(
+    name: String,
+    format: crate::files::FileFormat,
+    modified: bool,
+    position: (u32, usize),
+    cx: &App,
+) -> impl IntoElement {
     let format = format.as_str();
+    let name = format!("{} {name}", if modified { "**" } else { "--" });
+    let position = format!("L{} C{}", position.0, position.1);
 
     h_flex()
         .id("mode-line")
@@ -20,6 +28,7 @@ pub fn mode_line(name: String, format: crate::files::FileFormat, cx: &App) -> im
         .text_sm()
         .child(name)
         .child(format)
+        .child(position)
 }
 
 pub fn echo_area(echo: &EchoArea, cx: &App) -> impl IntoElement {

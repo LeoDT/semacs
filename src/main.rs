@@ -3,7 +3,8 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 use gpui_kit::*;
-use semacs::app::{AppShell, StartupDocument};
+use semacs::app::AppShell;
+use semacs::buffer::Buffer;
 use semacs::files::{self, ReadError};
 
 fn main() -> ExitCode {
@@ -15,17 +16,17 @@ fn main() -> ExitCode {
         }
     };
 
-    let document = match startup_document(path) {
-        Ok(document) => document,
+    let buffer = match startup_buffer(path) {
+        Ok(buffer) => buffer,
         Err(message) => {
             eprintln!("semacs: {message}");
             return ExitCode::FAILURE;
         }
     };
 
-    let title = document.title();
+    let title = format!("{} - semacs", buffer.display_name());
     gpui_kit::application().run(move |cx| {
-        gpui_kit::init(cx);
+        semacs::app::init(cx);
         let options = WindowOptions {
             titlebar: Some(TitlebarOptions {
                 title: Some(title.into()),
@@ -34,8 +35,8 @@ fn main() -> ExitCode {
             window_min_size: Some(size(px(480.0), px(320.0))),
             ..Default::default()
         };
-        gpui_kit::open_window(options, cx, move |_, cx| {
-            cx.new(|_| AppShell::new(document))
+        gpui_kit::open_window(options, cx, move |window, cx| {
+            cx.new(|cx| AppShell::new(buffer, window, cx))
         })
         .expect("failed to open semacs window");
     });
@@ -62,18 +63,18 @@ fn print_help() {
     println!("Usage: semacs [FILE]");
     println!();
     println!("Load FILE, or prepare an empty *scratch* document.");
-    println!("Text display and editing are not implemented yet.");
+    println!("R1 supports basic input; Emacs commands, undo and saving are not connected yet.");
 }
 
-fn startup_document(path: Option<PathBuf>) -> Result<StartupDocument, String> {
+fn startup_buffer(path: Option<PathBuf>) -> Result<Buffer, String> {
     let Some(path) = path else {
-        return Ok(StartupDocument::scratch());
+        return Ok(Buffer::scratch());
     };
 
     match files::read(&path) {
-        Ok(file) => Ok(StartupDocument::visit(path, file)),
+        Ok(file) => Ok(Buffer::new(Some(path), file)),
         Err(ReadError::Io(error)) if error.kind() == ErrorKind::NotFound => {
-            Ok(StartupDocument::new_file(path))
+            Ok(Buffer::new_file(path))
         }
         Err(error) => Err(format!("{}: {error}", path.display())),
     }

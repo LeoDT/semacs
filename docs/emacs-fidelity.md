@@ -21,7 +21,7 @@
 - 前缀键：`C-x`、`C-c`、`M-`、`C-h` 的等待与完成行为。
 - 顶层 `C-g` = `keyboard-quit`：停用 region、echo `Quit`，保留 mark 位置；minibuffer 中取消会话并回显 `Quit`。前缀中 `C-g` 依据当前 keymap 解析；`C-x C-g` 为 undefined，清空前缀但不执行顶层 quit 副作用，mark 与 active 状态不变。
 - 未定义键：消费按键、不插入字符，并在 echo area 回显 `<键序列> is undefined`。
-- 自插入：普通可打印字符与 Shift 产生的可打印字符插入自身；普通 control / Meta / super 组合不自插入。AltGr、死键和 IME 依平台输入分类处理。
+- 自插入：默认在 point 插入，不因 region 激活而替换 region（不启用 delete-selection-mode）；普通可打印字符与 Shift 产生的可打印字符插入自身；普通 control / Meta / super 组合不自插入。AltGr、死键和 IME 依平台输入分类处理。
 - point / mark / region：`C-SPC` 设 mark；mark 位置与 region 激活状态独立；移动、编辑、取消及 undo 后分别检查状态；`C-w` / `M-w` 作用于 region。
 - motion 覆盖字符、词、行首/行尾、buffer 首尾、前后行与翻页语义。
 - kill ring：`C-k` / `C-w` / `M-w` / `C-y`、连续 kill 追加规则；正文 buffer 与 minibuffer 共用 kill ring。
@@ -129,8 +129,8 @@ GNU Emacs 31.1 `-Q` / `fundamental-mode` 的 `C-a`、`C-e`、`C-x C-c` 命令名
 | mark 经插入、删除、undo/redo | mark 是 marker：在其前插入后移、在其位置插入不动、覆盖删除塌缩到起点；undo 仅在 mark 仍处于塌缩起点时恢复删除前位置；active 与位置独立 |
 | undo / redo point | 依 Emacs 31.1 基准断言 point；记录分组起点与回放结果 |
 | 保存、编辑、undo / redo | 保存后编辑并 undo 回保存点为 clean；已记录的跨越保存点 undo 场景仍 clean，再输入转 dirty；保存失败不更新保存点 |
-| IME 更新后提交/取消，再 undo | 取消不留下已提交文本、mark 偏移或 dirty 变化；提交按实际替换范围应用一次 |
-| 组合期间编辑、保存、切换目标、关闭 | D17 拒绝命令/前缀并提示；D19 关闭/失焦取消未提交预编辑；不保存临时文本、不改变已提交内容 |
+| IME 更新后提交/取消，再 undo | 普通 point 预编辑丢弃不留下提交或 dirty；平台已明确发生的正文替换不回滚，相关变更经 Edit / history；最终 marked 提交一次 |
+| 组合期间编辑、保存、切换目标、关闭 | D17 拒绝命令/前缀并提示；D19 关闭/失焦取消未提交预编辑；不保存仍 marked 的临时文本，不回滚已发生的正文替换 |
 | pending 前缀期间文本提交及迟到回调 | 文本不绕过解析；回调不可写入不同目标或新会话 |
 | A 设置 point/mark → B 编辑 → A | point、mark、active 按 buffer 语义保持且不串用；不据此承诺多 view |
 | 正文与 minibuffer 编辑 | 共用基础编辑语义及 kill ring；history 独立；prompt 不可编辑 |

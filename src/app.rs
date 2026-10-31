@@ -1,145 +1,112 @@
-use std::path::{Path, PathBuf};
-
 use gpui_kit::component::{ActiveTheme, v_flex};
 use gpui_kit::*;
 
+use crate::buffer::Buffer;
 use crate::echo::EchoArea;
-use crate::files::{DecodedFile, FileFormat};
 use crate::frame;
+use crate::view::BufferView;
 
-pub struct StartupDocument {
-    path: Option<PathBuf>,
-    text: String,
-    format: FileFormat,
-}
-
-impl StartupDocument {
-    pub fn scratch() -> Self {
-        Self {
-            path: None,
-            text: String::new(),
-            format: FileFormat::default(),
-        }
-    }
-
-    pub fn visit(path: PathBuf, file: DecodedFile) -> Self {
-        Self {
-            path: Some(path),
-            text: file.text,
-            format: file.format,
-        }
-    }
-
-    /// Emacs opens a new, empty buffer for a path that does not exist yet.
-    pub fn new_file(path: PathBuf) -> Self {
-        Self {
-            path: Some(path),
-            text: String::new(),
-            format: FileFormat::default(),
-        }
-    }
-
-    pub fn title(&self) -> String {
-        format!("{} - semacs", self.display_name())
-    }
-
-    pub fn display_name(&self) -> String {
-        self.path
-            .as_deref()
-            .and_then(Path::file_name)
-            .map(|name| name.to_string_lossy().into_owned())
-            .unwrap_or_else(|| "*scratch*".to_owned())
-    }
-
-    pub fn path(&self) -> Option<&Path> {
-        self.path.as_deref()
-    }
-
-    pub fn text(&self) -> &str {
-        &self.text
-    }
-
-    pub fn format(&self) -> FileFormat {
-        self.format
-    }
+pub fn init(cx: &mut App) {
+    gpui_kit::init(cx);
+    crate::prompt::init(cx);
 }
 
 pub struct AppShell {
-    document: StartupDocument,
+    editor: Entity<BufferView>,
     echo: EchoArea,
+    _editor_subscription: Subscription,
+    close_pending: bool,
 }
 
 impl AppShell {
-    pub fn new(document: StartupDocument) -> Self {
+    pub fn new(buffer: Buffer, window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let editor = cx.new(|cx| BufferView::new(buffer, cx));
+        let subscription = cx.observe(&editor, |_, _, cx| cx.notify());
+        editor.update(cx, |view, cx| view.install_input_lifecycle(window, cx));
+        window.focus(&editor.focus_handle(cx), cx);
+        let shell = cx.weak_entity();
+        window.on_window_should_close(cx, move |window, cx| {
+            shell
+                .update(cx, |shell, cx| shell.request_close(window, cx))
+                .unwrap_or(true)
+        });
+        let mut echo = EchoArea::default();
+        echo.set("R1 input driver; Emacs commands, undo and save are not connected yet");
         Self {
-            document,
-            echo: EchoArea::default(),
+            editor,
+            echo,
+            _editor_subscription: subscription,
+            close_pending: false,
         }
     }
 
-    pub fn document(&self) -> &StartupDocument {
-        &self.document
+    fn request_close(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        if self.close_pending {
+            return false;
+        }
+        self.editor.update(cx, |view, cx| view.suspend_input(cx));
+        if !self.editor.read(cx).buffer().is_modified() {
+            return true;
+        }
+        self.close_pending = true;
+        let response = window.prompt(
+            PromptLevel::Warning,
+            "Discard unsaved changes?",
+            Some("Saving is not available in the R1 input driver."),
+            &["Cancel", "Discard"],
+            cx,
+        );
+        cx.spawn_in(window, async move |shell, cx| {
+            let discard = response.await == Ok(1);
+            shell
+                .update_in(cx, |shell, window, cx| {
+                    shell.close_pending = false;
+                    if discard {
+                        window.remove_window();
+                    } else {
+                        shell
+                            .editor
+                            .update(cx, |view, cx| view.restore_input(window, cx));
+                        cx.notify();
+                    }
+                })
+                .ok();
+        })
+        .detach();
+        false
+    }
+
+    pub fn editor(&self) -> &Entity<BufferView> {
+        &self.editor
     }
 }
 
 impl Render for AppShell {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let mode_line = frame::mode_line(self.document.display_name(), self.document.format(), cx);
-        let echo_area = frame::echo_area(&self.echo, cx);
-
+        let buffer = self.editor.read(cx).buffer();
+        let position = buffer.line_column();
+        let mode_line = frame::mode_line(
+            buffer.display_name(),
+            buffer.format(),
+            buffer.is_modified(),
+            position,
+            cx,
+        );
+        let mut echo = EchoArea::default();
+        echo.set(
+            self.editor
+                .read(cx)
+                .message()
+                .unwrap_or(self.echo.message()),
+        );
+        let echo_area = frame::echo_area(&echo, cx);
         v_flex()
             .id("app")
             .size_full()
             .bg(cx.theme().background)
             .text_color(cx.theme().foreground)
-            .child(
-                v_flex()
-                    .id("editor-placeholder")
-                    .flex_1()
-                    .min_h_0()
-                    .items_center()
-                    .justify_center()
-                    .text_color(cx.theme().muted_foreground)
-                    .child("Text editing is not implemented yet"),
-            )
+            .child(v_flex().flex_1().min_h_0().child(self.editor.clone()))
             .child(mode_line)
             .child(echo_area)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::StartupDocument;
-    use crate::files::{DecodedFile, FileFormat, LineEnding};
-    use std::path::PathBuf;
-
-    #[test]
-    fn startup_documents_preserve_scratch_file_text_and_format_metadata() {
-        let scratch = StartupDocument::scratch();
-        assert_eq!(scratch.path(), None);
-        assert_eq!(scratch.text(), "");
-        assert_eq!(scratch.format(), FileFormat::default());
-        assert_eq!(scratch.display_name(), "*scratch*");
-
-        let path = PathBuf::from("notes.txt");
-        let file = DecodedFile {
-            text: "hello\nworld".to_owned(),
-            format: FileFormat {
-                bom: true,
-                line_ending: LineEnding::Crlf,
-            },
-        };
-        let expected_format = file.format;
-        let document = StartupDocument::visit(path.clone(), file);
-        assert_eq!(document.path(), Some(path.as_path()));
-        assert_eq!(document.text(), "hello\nworld");
-        assert_eq!(document.format(), expected_format);
-        assert_eq!(document.display_name(), "notes.txt");
-        assert_eq!(document.title(), "notes.txt - semacs");
-
-        let new_file = StartupDocument::new_file(path.clone());
-        assert_eq!(new_file.path(), Some(path.as_path()));
-        assert_eq!(new_file.text(), "");
-        assert_eq!(new_file.format(), FileFormat::default());
     }
 }

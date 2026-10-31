@@ -1,13 +1,14 @@
 # 技术决策
 
 本文件只列当前生效的选择。行为要求见 [Emacs 保真度](emacs-fidelity.md)，实现门禁见 [实施计划](plan.md)。
-编号用于文档引用，不表示对应能力已经实现。当前仅有应用外壳与文件层，编辑能力待 R1–M3 完成。
+编号用于文档引用，不表示对应能力已经实现。当前有文件层、R1 文本 / 输入模型及最小平台编辑驱动；完整 Emacs 命令、保存及原生性能仍待完成；已有首轮真实 Wayland / Pinyin 功能记录（软件渲染）。
 
 ## D1 依赖与构建
 
 - Rust 2024 edition；依赖版本由 `Cargo.lock` 固定。
 - gpui-kit 使用 crates.io 的 `0.8.1`，仅用于外围 UI 和主题。
 - 使用与 gpui-kit 兼容的同一套 GPUI；当前依赖解析为 `gpui-pre 0.3.10`，不混用另一套 GPUI 类型。
+- dev 依赖为同一 gpui-kit 启用 `test-support`，用于 TestPlatform / TestTextSystem 回归与基线；不切换产品平台或混入另一套 GPUI 类型。
 - 本地参考仓库路径不进入构建配置；平台依赖调整先确认，不直接修改 Cargo registry 缓存。
 
 ## D2 平台
@@ -76,15 +77,21 @@ mark 与 region 激活状态分离；停用 region 不删除 mark。所有已提
 - insertion type nil：在 mark 前插入使其后移，在 mark 处或之后插入不动。
 - 删除覆盖 mark 时坍缩到删除起点，记录原塌缩偏移。
 - undo 只在 mark 仍位于该变更的删除起点时恢复偏移，否则按文本位移调整；redo 再按删除规则处理。
-- 预编辑更新 / 取消不调整 mark，提交按实际替换范围更新一次。
+- 仅 marked 临时文本的更新 / 取消不调整 mark；平台显式替换造成的已提交变更和最终输入提交经 Edit 更新 marker。
 - 输入提交、undo / redo 和顶层 `C-g` 停用 region，但保留 mark。
 
 Emacs 参照材料位于 [tests/emacs/](../tests/emacs/README.md)。这些定义是 semacs 的待实现契约，不是产品通过记录。
 
 ## D19 关闭与失焦
 
-窗口关闭或失焦时取消未提交预编辑，不提交、不保存、不改变已有 modified 状态。
-已有 dirty 内容仍需执行关闭确认，取消确认后保留正文和焦点。
+窗口关闭或失焦时丢弃仍 marked 的临时预编辑，不强制提交、不保存。
+普通输入在 point 插入，不把 Emacs region 当作平台替换选区。
+平台显式替换已删除的正文不因取消而恢复；该删除经 Edit 生效，可产生 modified。
+纯预编辑更新 / 丢弃本身不置 dirty，也不清除已有 dirty。
+平台 unmark_text 按解除标记并保留文字处理，与丢弃 marked 不同。
+这是用户确认后的收窄约定，取代原先“非空替换取消也完整回滚”的要求；不为此修改 GPUI。
+已有 dirty 内容仍需执行关闭确认，取消确认后保留已提交正文和焦点。
+外围确认框安全默认 Cancel；Escape / C-g 取消，Tab / 左右键选择，Enter / Space 确认，不改变正文 Escape / Meta 的待决语义。
 所有输入绑定目标 / 会话代次，关闭、切换或重开目标后到达的回调不得污染当前目标。
 
 ## D20 文件格式
@@ -113,20 +120,21 @@ Emacs 参照材料位于 [tests/emacs/](../tests/emacs/README.md)。这些定义
 参考来源为 `https://github.com/zed-industries/zed`，冻结快照：
 `ba63a022c9a22ca66d68ef2a8f0bb9b5b0a9984d`。
 
-- 首批选择 `crates/rope`（GPL-3.0-or-later）和 `crates/sum_tree`（Apache-2.0），计划尚未导入。
+- 首批已导入 `crates/rope`（GPL-3.0-or-later）和 `crates/sum_tree`（Apache-2.0）到 `src/text/`，以及其最小工具函数与纯测试支架。
 - 优先调用当前 GPUI 的 shaping / LineWrapper 等 API；按需要从 Zed 提取换行调度、显示映射、命中测试和 IME 几何算法。
 - 不整体引入 Zed editor / text、MultiBuffer、language 或 project，不依赖 Zed 运行时，不维护外部 fork。
 - 导入前核对实际文件的许可证和版权，保留适用的许可证文本 / NOTICE，记录来源 commit、路径、本地路径、修改范围与测试。
 - 用户接受 GPL-3.0-or-later 组件及其对整合作品分发的要求；不能把 GPL 源码重标 MIT。
   原 Apache 组件保留自身许可，自有代码的额外授权不覆盖第三方代码。
-- 本轮没有导入第三方源码或设置统一 Cargo 许可；首次导入时完成许可、归属和分发准备。
+- 已补齐 [来源 / 修改记录](../THIRD_PARTY.md)、上游许可文本及 [项目许可 / 分发要求](../LICENSE)。
+  Cargo 的整合作品许可为 GPL-3.0-or-later，Apache 文件保留自身许可；二进制发布前仍须审核并附带依赖归属材料与相应源码。
 - 按已验证缺陷选择性吸收上游修复，不持续追随 Zed，也不假设通用代码无需维护。
 
 ## 待决事项
 
 - `ESC` / Meta 的完整交互、基础缩进以及相关 Emacs 选项。
 - kill ring 与系统剪贴板的同步策略。
-- R1 首轮测量后的性能预算；未批准预算前不宣称性能已通过。
+- R1 只读与最小输入驱动 headless 预算均已确认；原生 / IME 性能尚待测量确认，本轮独立窗口 Wayland / fcitx5 功能验证已获授权并执行（软件渲染），不代表硬件 GPU 性能通过。范围与门禁见 [性能记录](performance.md)，不能据此宣称完整性能验收通过。
 - 文件覆盖确认的具体流程和文案；自动保存与备份属于后续增强。
 - v1 后的 split、isearch、`M-y`、`C-u` 和用户配置优先级。
 

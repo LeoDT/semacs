@@ -12,7 +12,7 @@ semacs 将 Emacs 的操作模型带到现代 GPU UI：
 
 ## 2. 当前状态
 
-当前应用包含 GPUI 外壳和文件层，文件读取及编码/换行格式处理已完成；尚无正文编辑能力。R0 产物是文档与组件/许可决策，不提供正文编辑。R1 才开始最小正式编辑纵向切片。
+当前已有文件层、Rope / SumTree、自有 Buffer / 输入会话、正文视图与最小 GPUI 输入驱动，支持文本 / 预编辑输入、换行、逐字符删除、软换行、点击定位、滚动及 dirty 关闭确认。完整 Emacs 命令、undo 和保存尚未实现。headless 输入 / 几何回归、只读性能和首轮输入性能已有独立记录；只读与最小输入驱动 headless 预算均已确认，首轮真实 Wayland / fcitx5 功能验证已在软件渲染下完成，硬件 GPU / 原生性能和完整矩阵仍待完成，见 [原生输入记录](native-input.md)。详见 [当前落地状态](editor-plan.md#当前已落地部分)。
 
 ## 3. 目标（按优先级）
 
@@ -58,7 +58,7 @@ v1 阶段为 R0、R1 后的 M1–M3；M4/M5 保持为后续阶段。`C-u`、`M-y
 - Rust 2024 edition，单 crate（`semacs`）。
 - GPUI 是统一窗口、平台输入/IME 协议、字体 shaping 与绘制基础；gpui-kit 仅承担外围 UI 与主题组件，不承担正文或 minibuffer 编辑模型。
 - semacs 自有 Buffer、View、输入会话、命令集成和 Emacs 编辑语义。预编辑是独立临时状态；已提交变更通过唯一 Edit 入口；异步布局/输入回调绑定目标及版本或会话代次。
-- 首批已选择 Zed Rope 与 SumTree 源码组件，尚未导入。R0/R1 依 [editor-plan.md](editor-plan.md) 完成组件评估与切片；不依赖 Zed 运行时，不维护外部 fork。
+- 首批 Zed Rope 与 SumTree 源码组件已在单 crate 中导入，来源 / 许可见 [THIRD_PARTY.md](../THIRD_PARTY.md)。R1 依 [editor-plan.md](editor-plan.md) 完成纵向切片；不依赖 Zed 运行时，不维护外部 fork。
 - D21 确立自有 editor 路线；D22 定义源码复用与许可证要求。GPL-3.0-or-later 可接受；须记录来源、版本、许可证及本地修改，不宣称整体产品可按 MIT 发布。
 - 平台：Linux 优先，Wayland 为验收环境；X11 基础可用是目标，不代表已验证。具体平台验收以 editor-plan 的门禁为准。
 - 键位：纯 Emacs，不采用 CUA `Ctrl-C / Ctrl-V`；复制/粘贴走 `M-w` / `C-y`。仅保留窗口管理层面的系统键。

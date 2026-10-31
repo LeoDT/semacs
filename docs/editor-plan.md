@@ -1,7 +1,51 @@
 # 编辑器实现计划
 
-状态：首批组件与架构边界已确定，尚未导入第三方源码或实现正文编辑。R1 直接在正式模块中构建最小纵向切片。
-本文是计划与验收要求，不是编辑能力或性能已经通过的证明。
+状态：R1 已完成首批源码导入、Buffer / InputSession、正文 View 与最小 GPUI 平台输入 / 生命周期接线；已完成首轮真实 Wayland / Pinyin 功能验证（软件渲染），硬件 GPU 与完整性能验收仍未完成。
+下述清单仍是整个 R1 的验收要求，不是编辑能力或性能已经通过的证明。
+
+## 当前已落地部分
+
+- `src/text/`：冻结快照的 Rope / SumTree、相关测试及最小工具函数；单 crate，无 Zed 构建路径。
+  完整来源、修改和许可记录见 [THIRD_PARTY.md](../THIRD_PARTY.md)，项目许可见 [LICENSE](../LICENSE)。
+- `src/buffer.rs`：文件 / scratch 的权威正文、UTF-8 字节 point、格式元数据、目标 / 文本版本、唯一 Edit 入口及最小 dirty。
+  空插入不产生编辑；非空替换即使内容相同也推进版本，不以内容比较推断保存点。
+- `src/input.rs`：纯输入会话、独立 Rope 预编辑投影、UTF-16 查询 / 范围调整、提交 / 取消及命令屏障接口。
+  普通 point 预编辑不动已提交正文、point 或 dirty；平台显式替换删除正文时立即经 Edit 生效，取消不回滚。
+  部分 marked 被替换后，未再 marked 的文字进入 committed；最终提交只插入剩余 marked 文本。
+  同长度更新推进显示身份；清空 / 取消 / 组合提交更换 token，结束会话拒绝旧 token。
+  输入校验绑定的正文版本；外部编辑之后必须建立新会话，结束后仍可读取 committed 显示快照。
+  InputUpdate 分别提供 committed Edit 与精确投影 DisplayChange；连续 delta 可合成，取消仅移除当前 marked 范围。
+- `src/display.rs`：流式 extended-grapheme 贪心换行、tab 间距、SumTree 字节 / 显示行索引。
+  WrapJob 接收明确的前后显示身份与替换范围，重排从已有显示行检查点开始；边界和 tab phase 收敛后共享未变后缀。
+  前台预览最多扫描 8 KiB（计入 Unicode lookbehind），不发布未完成行；其余由后台完成，临时 / 完整状态明确区分。
+  布局 key 包含正文 / 预编辑身份、宽度、字体及特性、字号、行高、tab 参数；跨目标或过期 patch 不复用旧索引。
+- `src/view.rs`：BufferView 持有 Buffer / InputSession、viewport / 滚动、可见行 shaping 缓存与几何；AppShell 观察它并提供外围 UI。
+  可显示正文 / 空文档，点击定位光标、横纵滚动，支持宽度和字体参数变更。行列按 Unicode scalar 计列，不按 UTF-8 字节或 grapheme 计列。
+  后台任务有取消标记、弱目标和结果身份校验；稳定帧共享可见 ShapedRow。单条可见行超过 8 KiB 时 shaping 转后台。
+- `tests/buffer_input.rs`：坐标、纯模型和随机投影替换回归，含生产 chunk 配置下的 8 MiB 单行及混合正文。
+- `src/platform.rs`：GPUI InputHandler 绑定弱目标、会话 token 和绘制注册代次，提供 UTF-16 文本 / 范围 / 命中 / 几何查询。
+  同一 handler 只在自身成功回调后推进 token；新绘制、失焦 / 关闭失效旧 handler，不把旧事件改贴新目标。
+- View 将真实投影 delta 传入 WrapJob，多次回调可合成并在后台未完成时保留原完整索引。
+  预编辑有下划线，caret 使用投影 selection；新偏移不能读取旧布局，临时 / 最终可见布局就绪后刷新候选坐标，稳定帧不重复刷新。
+- 最小驱动支持普通输入、换行、前 / 后逐 Unicode scalar 删除；命令尝试受 D17 屏障，无完整 keymap 或前缀系统，不引入 CUA 粘贴。
+  AppShell 在 dirty 窗口关闭时提供 Cancel / Discard，取消后恢复新输入会话与焦点；仍未实现保存。
+  `src/prompt.rs` 通过 GPUI PromptHandle 和 gpui-kit 按钮提供键盘可操作的确认框；统一由 `app::init` 初始化。
+- `tests/display.rs`：InputSession 真实投影 delta / 合成 delta 驱动 WrapJob，覆盖部分提交、取消、显式组合提交与过期 after 身份。
+- `src/view/input_tests.rs`：注册输入、同帧连续协议回调、跨帧旧 handler、D17、失焦、关闭确认、几何空窗 / 刷新及真实输入增量重排。
+- `tests/display.rs`、`tests/view.rs`、view 内部测试：GPUI headless 下覆盖换行 / 合行 patch、grapheme 跨 Rope 块、tab / EOF、滚动、非零原点、改宽 / 字体、任务取消和空帧缓存共享。
+- `examples/perf_view.rs`：六类约 8 MiB 正文的 TestPlatform / TestTextSystem 显示与插入 / 删除 / 换行 / 合行测量，数据与边界见 [性能记录](performance.md)。
+- `examples/native_input.rs`：生产 AppShell 的显式原生诊断入口；真实 Wayland / fcitx5 结果及软件渲染限制见 [原生输入记录](native-input.md)。
+
+尚未完成：完整 Emacs 命令 / keymap / history、保存（按 M1 / M2 推进）、原生字体 / 硬件 GPU / IME 性能及完整原生验证矩阵。
+headless 协议测试使用与注册 handler 相同的适配器，但不模拟原生 IME 事件翻译；几何刷新记录的是调度请求，不是原生候选窗位置。
+只读与最小输入驱动 headless 预算均已由用户确认，见性能记录；原生预算独立管理；本轮独立窗口测试已获授权并留证，不扩大授权范围，R1 保持未完成。
+
+### 已确认的取消语义
+
+默认 Emacs 输入在 point，不将 region 当作平台替换选区。
+用户明确接受：平台正文替换已经发生就不因取消恢复；丢弃仍 marked 文本与 unmark 保留文字分别处理。
+此前将非空替换回滚视为接线阻塞的判断撤销；继续使用现有 GPUI，不新增取消协议或修改依赖。
+关闭 / 失焦仍清理会话，已有 dirty 内容仍须确认。详见 [D19](decisions.md#d19-关闭与失焦)。
 
 ## 1. 组件与来源
 
@@ -48,7 +92,7 @@ R1 恢复正文显示、光标、最小输入 / 替换、滚动和换行。完�
 
 ### 状态与编辑
 
-- 已提交正文、临时预编辑、显示快照分离；预编辑更新 / 取消不改变历史、mark 或 modified。
+- 已提交正文、临时预编辑、显示快照分离；纯 marked 更新 / 丢弃不改变 modified，平台显式正文替换经 Edit 生效且不回滚。
 - 提交经过唯一 Edit 入口，具有明确的替换范围、内容、来源、目标与版本；不以长度差猜测变更。
 - UTF-8 字节、UTF-16 单元、逻辑行列、显示坐标与像素坐标显式转换。
   Emacs 字符运动不等同于 grapheme 运动，不能把显示边界直接当作命令语义。
@@ -71,7 +115,7 @@ R1 恢复正文显示、光标、最小输入 / 替换、滚动和换行。完�
 - 文本 / 预编辑更新到下一次布局完成之间，不能用新偏移读取不兼容的行缓存。
   同长度更新也须使相应内容与几何版本失效。
 - 验证范围查询、反向字符命中、布局就绪后的平台坐标刷新，稳定帧不重复刷新。
-- 提交只应用一次；取消恢复输入前的已提交状态，包含非空替换范围而不仅是空位置插入。
+- 普通组合最终提交只插入一次；取消仅移除仍 marked 文本，不恢复平台已经替换的正文。unmark 保留文字，失焦 / 关闭不强制提交。
 - D17 组合期间拒绝编辑器命令 / 前缀；D19 关闭 / 失焦取消预编辑，已有 dirty 内容仍需确认。
 - headless 与真实 Wayland / fcitx5 分开记录；真实环境测试先征求同意，不将自动化几何结果当作候选窗实机验收。
 

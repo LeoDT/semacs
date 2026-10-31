@@ -2,11 +2,11 @@
 
 ## 当前状态与目标
 
-当前产品是 GPUI 应用外壳和文件层：窗口与外围界面可运行，文件读取及编码/换行格式处理已完成；正文编辑能力尚未提供。本轮目标是为新 editor 路线定义设计，不代表正文编辑已实现。
+当前产品提供文件层、Rope / Buffer / 输入会话、正文 View 与最小 GPUI 输入驱动，支持预编辑 / 提交、软换行、点击定位、滚动及 dirty 关闭确认。已有纯模型与 headless 输入 / 几何 / 生命周期回归；完整 Emacs 命令、undo 和保存尚未实现，已有 headless 输入测量和首轮真实 Wayland / fcitx5 功能记录（软件渲染），原生性能与完整矩阵仍待完成。
 
 产品使用 GPUI 作为统一窗口、平台输入、IME 协议、字体 shaping 与绘制基础；gpui-kit 只承担外围 UI 与主题组件。正文与 minibuffer 编辑模型、命令集成和 Emacs 语义由 semacs 自有实现。
 
-D21 确立自有 editor 路线，D22 定义源码复用与许可要求。首批已选择 Zed 的 Rope 与 SumTree 作为源码组件，尚未导入。可接受 GPL-3.0-or-later 组件；源码复用须在 D22 中记录来源、版本、许可证及本地修改，不宣称整体产品可按 MIT 发布。不依赖 Zed 运行时，不维护外部 fork。
+D21 确立自有 editor 路线，D22 定义源码复用与许可要求。首批 Zed Rope 与 SumTree 已导入 `src/text/`，来源和本地修改记录见 [THIRD_PARTY.md](../THIRD_PARTY.md)。可接受 GPL-3.0-or-later 组件；源码复用须在 D22 中记录来源、版本、许可证及本地修改，不宣称整体产品可按 MIT 发布。不依赖 Zed 运行时，不维护外部 fork。
 
 组件选择、模块划分与分阶段验收详见 [editor-plan.md](editor-plan.md)。
 
@@ -32,7 +32,7 @@ semacs
 
 - **Buffer** 持有已提交文本、文件身份与格式、dirty / 保存点、undo history 及 mark。v1 为单正文 view；point 与 goal column 可暂存于 Buffer，但不据此宣称实现了多 view 的 window-point。
 - **View** 持有 viewport、scroll、布局、可见区域及输入几何。未来若增加 view，须另行定义窗口级 point 与滚动语义；v1 不提供 split。
-- **预编辑**是绑定到目标和会话代次的独立临时状态。更新与取消不污染已提交正文、mark、dirty 或 undo history；提交才进入已提交文本。
+- **预编辑**是绑定到目标和会话代次的独立临时状态。纯 marked 文本的更新 / 丢弃不污染已提交正文或 dirty；平台明确替换的正文删除立即经 Edit 生效，不因取消回退。解除标记 / 最终输入提交才将剩余 marked 文字提交。
 - **唯一 Edit 入口**接收目标、范围、替换内容及来源，按序更新已提交文本与相关语义状态。键盘编辑、命令、自插入、IME 提交和补全均经此入口；undo/redo 也通过同一入口回放。R1 验证最小闭环；完整 undo/history 算法在 M1 实现。
 - 异步布局结果与输入回调关联目标及版本/会话代次。目标或布局版本失效后丢弃或显式取消，不按当前焦点重新解释迟到结果。
 - region 的显示属于 View；point、mark 与激活状态以自有语义模型为准。
@@ -47,7 +47,7 @@ semacs
 
 预编辑和已提交文本分离。保留 D17：组合活动时拒绝命令和前缀并提示；保留 D19：窗口关闭或失焦时取消未提交组合。输入会话绑定原目标和代次，迟到提交不得写入其他 Buffer 或新的 minibuffer 会话。保存只读取已提交文本。
 
-R1 对 GPUI 输入协议、预编辑/提交/取消、目标归属、布局与输入几何以及迟到事件进行真实集成验收。布局与输入几何使用版本化结果；具体实现由纵向切片验证，不预设特定回调补丁。
+平台回调绑定弱目标、会话 token 和绘制注册代次；同一 handler 只在自身成功变更后推进 token，新绘制或生命周期结束拒绝旧 handler。布局与输入几何使用版本化结果，临时 / 最终可见布局就绪后分别刷新候选坐标。headless 回归不等于真实平台回调顺序或候选窗已验收；已执行的原生场景另见 [原生输入记录](native-input.md)。
 
 ## 5. 语义与产品范围
 
@@ -62,11 +62,13 @@ v1 使用单顶层窗口和一个正文 view，不提供 split；不实现 narro
 ```text
 src/
   app.rs          应用外壳、焦点与命令出口
-  platform.rs     GPUI 平台输入、IME 与平台差异
+  platform.rs     目标绑定的 GPUI InputHandler 与 UTF-16 / 几何适配
+  prompt.rs       外围确认框的键盘交互与 GPUI PromptHandle 适配
   keys.rs         键位解析
   command.rs      命令注册
   buffer.rs       已提交文本、编辑状态与文件关联
-  view.rs         布局、输入几何与显示
+  display.rs      流式换行、显示索引、增量 patch 与布局身份
+  view.rs         viewport、可见行 shaping / 绘制、命中与几何
   input.rs        输入会话与临时预编辑
   minibuffer.rs   读入会话与补全
 ```
