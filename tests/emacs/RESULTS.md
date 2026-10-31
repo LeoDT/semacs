@@ -1,9 +1,7 @@
 # Emacs 31.1 对照基准（真实 command loop）
 
-驱动：`drive.py` 在 pty 中启动 `emacs -Q -nw -l baseline.el`，按键作为终端输入注入，
-`post-command-hook` 每执行一条命令后把 text/point/mark/active 追加到 jsonl。
-环境：GNU Emacs 31.1、`-Q`、fundamental-mode、transient-mark-mode 1、`buffer-undo-list` 清空后开始。
-（dumps 里的 index 1 是启动时 *scratch* 的一条噪声记录，忽略。）
+外部行为观察归档，不是 semacs 的通过记录。环境：GNU Emacs 31.1、`-Q`、fundamental-mode、transient-mark-mode 1、初始历史为空；使用 pty 驱动真实 command loop，GUI 复核另列。
+采集和比较陷阱见 [README.md](README.md)；历史 dumps 的 index 1 是启动时 scratch 噪声，忽略。
 
 | 用例 | 操作 | 结果 |
 |---|---|---|
@@ -29,22 +27,9 @@
 | mark-buffers | A mark=4 → 切到 foo 编辑并设 mark → 切回 A 在 mark 前插入 → 回 foo undo | A 的 mark 跟随自己的编辑（4→5），B 的 mark/undo 不受影响 |
 | undo-then-input | 见 `del-then-undo-then-type` | undo 后输入开新组，不复活旧内容 |
 
-### undo / redo 的 point
+### marker 观察的采集限制
 
-- undo 恢复到该组开始前的 point（`undo-del` point=4、`undo-cd` point=1）。
-- redo 不回到组末，而是回到组内**最早变更的起点**：`abc` 末尾输入 `zz` 后 redo，point=4（1-based）；
-  `abc` 输入后再 undo/redo，point=1。
-
-### mark 的 marker 语义（批量探针 + command loop 复核）
-mark 不是普通 offset，而是 marker（insertion type 为 nil）：
-
-- 在 mark 位置插入：mark 不动（插入文本落在 mark 之后）；在 mark 前插入则整体后移，在 mark 后插入不动。
-- 删除范围包含 mark：mark 坍缩到删除起点；mark 恰在删除末端也坍缩到起点。
-- undo 是对文本变更的逆操作，但 Emacs 还会记录被删除范围内 marker 的调整：只有 mark 当前仍在删除起点时，undo 才恢复原来的偏移；
-  如果删除后 mark 已被移到别处，undo 只按文本位移调整（`mark-undo-moved`：mark=7 而不是 1）。
-- active 状态与 mark 位置独立；`C-g` 只停用 region，不移动 mark。
-- `post-command-hook` 里看到的第一条编辑命令后的 active 可能尚未反映 transient-mark 的延迟停用（下一条命令才稳定），
-  比较 active 时要看稳定后的命令，不能把这一拍的 True 当成语义差异。
+上表 mark 场景经批量探针与 command loop 复核。`post-command-hook` 采集的第一条编辑命令后 active 可能尚未反映 transient-mark 的延迟停用，须比较稳定后的命令，不能把这一拍的 True 当成语义差异。
 
 ### C-g 与前缀（重要修正）
 
@@ -55,3 +40,7 @@ mark 不是普通 offset，而是 marker（insertion type 为 nil）：
 
 因此旧记录“按 region 是否有活动区分 Quit / undefined”是采集假象，不是 Emacs 语义。
 真实 PGTK GUI（Hyprland + 真实按键）复核为 `C-x C-g is undefined`。
+
+### 键位查询
+
+GNU Emacs 31.1 `-Q` / fundamental-mode 已核对：`C-a` = `move-beginning-of-line`，`C-e` = `move-end-of-line`，`C-x C-c` = `save-buffers-kill-terminal`。这是三项观察，不代表完整键位表已核对。

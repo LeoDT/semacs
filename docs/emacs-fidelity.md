@@ -1,78 +1,60 @@
 # Emacs 保真度
 
-本文定义 semacs 的 Emacs 行为目标。GNU Emacs 31.1 是行为参照；此处的要求是验收标准，不表示 semacs 已实现或验证对应编辑能力。
-
-分级定义行为要求，不等于发布范围。v1 范围见 [requirements.md](requirements.md)；isearch、`C-u`、mark ring 等即使列为 F2，也不自动纳入 v1。新增 F3 差异须明确批准。
+本文是编辑行为的唯一契约，以 GNU Emacs 31.1 为参照，不表示产品已实现或通过验收。
+发布范围见 [需求与范围](requirements.md)；分级不自动把延后能力纳入 v1。新增 F3 差异须明确批准。
 
 ## 1. 判定方法
 
-按以下顺序比较：
-
-1. **键序列相同**：同样的按键触发同语义命令。
-2. **可观察结果相同**：buffer 文本、point、mark、kill ring、echo area 与 mode line 状态符合基准。
-3. **交互流程相同**：前缀等待、`C-g`、未定义键与 minibuffer 流程符合基准。
-4. **内部实现不构成行为要求**：数据结构和绘制方式可以不同。
+比较同样键序列触发的命令、可观察状态和交互流程：文本、point、mark / active、kill ring、modified、echo、mode line、前缀等待与 minibuffer。
+内部数据结构、绘制方式和算法无需相同。
 
 ## 2. 保真度分级
 
 ### F1：必须一致（不一致即 bug）
 
-- 键序列与命令名：`C-f` = `forward-char`，`C-k` = `kill-line` 等。
-- 前缀键：`C-x`、`C-c`、`M-`、`C-h` 的等待与完成行为。
-- 顶层 `C-g` = `keyboard-quit`：停用 region、echo `Quit`，保留 mark 位置；minibuffer 中取消会话并回显 `Quit`。前缀中 `C-g` 依据当前 keymap 解析；`C-x C-g` 为 undefined，清空前缀但不执行顶层 quit 副作用，mark 与 active 状态不变。
-- 未定义键：消费按键、不插入字符，并在 echo area 回显 `<键序列> is undefined`。
-- 自插入：默认在 point 插入，不因 region 激活而替换 region（不启用 delete-selection-mode）；普通可打印字符与 Shift 产生的可打印字符插入自身；普通 control / Meta / super 组合不自插入。AltGr、死键和 IME 依平台输入分类处理。
-- point / mark / region：`C-SPC` 设 mark；mark 位置与 region 激活状态独立；移动、编辑、取消及 undo 后分别检查状态；`C-w` / `M-w` 作用于 region。
-- motion 覆盖字符、词、行首/行尾、buffer 首尾、前后行与翻页语义。
-- kill ring：`C-k` / `C-w` / `M-w` / `C-y`、连续 kill 追加规则；正文 buffer 与 minibuffer 共用 kill ring。
-- undo 命令边界：原子编辑、连续自插入与删除按固定基准分组；移动及其他命令打断合并；undo / redo 键位一致。不可将“按命令撤销”解释为阻止 Emacs 的合法连续编辑合并。
-- buffer：buffer 名、当前 buffer、dirty、`C-x b` / `C-x k`；A → B → A 时 point / mark 不丢失、不串用，激活状态依基准命令结果判断。
-- minibuffer：`M-x` 读命令名、`C-g` 取消、`RET` 确认；基础 motion / 编辑 / mark / kill / yank 与正文语义一致，undo history 独立，prompt 不可编辑。
-- IME 与命令交错：不保存临时预编辑、不把迟到输入写入新目标；pending 前缀期间文本提交不可绕过按键解析。D17 在组合中拒绝命令/前缀；D19 在关闭/失焦时取消未提交预编辑。
-- 文件与退出：保存失败不清 dirty；modified/save-point 遵循 D16 基准，不用当前文本与磁盘内容比较替代。kill dirty buffer、`C-x C-c` 与窗口关闭按 modified 状态确认；取消后保留 buffer 与焦点。
+- 键序列与命令名、前缀等待、取消、undefined 与自插入，见 [键位解析约定](#3-键位解析约定)。
+- 字符 / 词 / 行 / buffer 首尾移动及翻页的基本语义；Emacs 字符运动不等于 grapheme 显示边界。
+- point / mark / region、kill / yank、历史分组及保存点，见 [编辑行为契约](#6-编辑行为契约)。
+- A → B → A 时文本、point / mark、滚动、history 与显示状态不串用；active 按参照命令结果判断。
+- 正文与 minibuffer 共用基础 motion、编辑、mark、kill / yank 语义及全局 kill ring；undo history 独立，prompt 不可编辑。
+- `M-x` 读命令名、`RET` 确认、`C-g` 取消会话并回显 `Quit`；命令名、路径与 buffer 名提供基础补全。
+- IME、文件与退出遵循第 6 节的已批准策略。
+- echo area 展示 pending 前缀、命令消息与错误。
 
-### F2：尽量一致（允许平台/实现差异，须登记）
+### F2：尽量一致（允许平台 / 实现差异，须登记）
 
-- 词边界与段落边界的精确规则（Emacs 使用 syntax table，可采用明确记录的简化规则）。
-- `C-n` / `C-p` 的 goal column 与软换行行为。
-- D17 / D19 所定 IME 策略属于用户批准的行为；须在用户可见说明中登记。
-- `C-v` / `M-v` / `C-l` 的精确滚动定位。
-- mark ring、`C-x C-x`、`C-u` 数字参数、按键重复。
-- isearch（`C-s` / `C-r`）的增量搜索与高亮。
-- mode line 字段格式可不同，但须有 buffer 名、dirty 与行列信息。
-- `kill-line` 在 buffer 末尾的 `End of buffer` 提示细节。
-- D20 文件格式：v1 支持 UTF-8 有/无 BOM、统一 LF/CRLF，内部 LF、保存恢复原格式；无效 UTF-8 与不支持编码明确报错；混合换行当前明确拒绝，扩展支持须先确认保留 / 转换策略。
+- 词 / 段落边界的精确规则；可以明确登记简化规则，不承诺完整 syntax table。
+- `C-n` / `C-p` 的 goal column 与软换行行为，`C-v` / `M-v` / `C-l` 的精确滚动定位。
+- mark ring、`C-x C-x`、`C-u`、按键重复及 isearch 的保真度；是否实施仍由发布范围决定。
+- mode line 格式可不同，但至少提供 buffer 名、dirty 与行列。
+- `kill-line` 在 EOB 的提示细节，以及第 6 节批准的 IME / 文件格式策略；与 Emacs 的差异须在用户可见说明中登记。
 
 ### F3：明确不同（须登记，必要时提示用户）
 
-- **undo-in-region**：region 激活时执行全局 undo，不限于 region 内变更。
-- **undo 环 / undo tree**：不实现 Emacs undo 环与 undo-in-region。
-- **窗口拆分**：v1 不提供 split；后续评估需先明确不同 buffer split 的键位语义，同 buffer 多 view 不在 v1 承诺内。
-- **外观**：不模拟 Emacs 外观、字体、菜单、工具栏与滚动条。
-- **elisp 与包**：不实现。
-- **syntax table / text property / narrowing / indirect buffer**：不实现。
+- region 激活时仍执行全局 undo；不实现 undo-in-region 或 Emacs undo 环 / undo tree。
+- v1 不提供 split；不承诺同 buffer 多 view。
+- 不模拟 Emacs 外观、字体、菜单、工具栏与滚动条。
+- 不实现 elisp、syntax table、text property、narrowing 或 indirect buffer。
 
 ### F4：不做
 
-- org-mode、dired、tramp、daemon / client / server；
-- 多 frame、tab-bar、GUI 菜单栏与工具栏；
-- 终端复用与 TTY 界面；
-- Emacs 包管理器与配置语言。
+不做的产品能力统一见 [非目标](requirements.md#非目标f4)，与仅延后到 v1 后的能力区分，不另维护一份清单。
 
 ## 3. 键位解析约定
 
-- `C-` = control；`M-` = meta / alt；`S-` = shift；`s-` = super。组合键写作 `C-M-_`、`C-x C-s`。
-- GUI 上 `TAB` 与 `C-i` 是不同事件；Emacs GUI 基准区分 `<tab>` 与 `C-i`，并分别记录绑定。
-- `RET` / `<return>` 与 `C-m` 绑定同一命令。GNU Emacs 31.1 `-Q` 的 `fundamental-mode` 中，`RET` 为 `newline`，`C-j` 为 `electric-newline-and-maybe-indent`，`TAB` 为 `indent-for-tab-command`。对照记录 electric indent 等选项，不以 scratch 绑定代替全局规则。
-- `backspace` 是 DEL，绑定 `delete-backward-char`；`C-h` 是独立前缀，不映射到 backspace。
-- `ESC` / `M-` 的完整交互及 `ESC ESC` 是否映射 `keyboard-quit` 仍待键位细节确认。
-- undefined：当前 keymap 链无绑定且无可用自插入路径时，消费并报错，不落字符。自插入只在空前缀、无绑定、可打印且无 control / Meta / super 时成立；Shift 不阻止文本输入。`key_char` 存在本身不充分；AltGr 须经平台确认，死键与 IME 预编辑不可误判为 undefined。
-- 系统保留键由平台/焦点路由显式处理；编辑目标内其他未绑定命令键报 undefined。
-- undefined 用例须先确认 Emacs 31.1 与 semacs 当前 keymap 均无绑定。`C-x a` 在 Emacs 31.1 是 abbreviation 前缀，不可作双方均 undefined 的例子。
+- `C-` = control；`M-` = meta / alt；`S-` = shift；`s-` = super；组合写作 `C-M-_`、`C-x C-s`。
+- 使用分层 keymap；前缀无超时，命令绑定与前缀冲突须被发现。系统保留键由平台 / 焦点路由处理。
+- 顶层 `C-g` 停用 region、保留 mark，回显 `Quit`；前缀中的 `C-g` 依当前 keymap 解析。`C-x C-g` 为 undefined，清空 pending，保留 mark / active，不执行顶层 quit 副作用。
+- 无绑定且无自插入路径的编辑目标按键被消费，回显 `<键序列> is undefined`，不插入字符。
+- 自插入只在空前缀、无绑定、可打印且无 control / Meta / super 时成立；Shift 不阻止输入，`key_char` 存在本身不充分。AltGr、死键与 IME 须按平台输入分类，不可误报 undefined。
+- 默认在 point 输入，不因 region 激活而替换 region，不启用 delete-selection-mode。复制 / 粘贴走 `M-w` / `C-y`，不提供另一套 CUA 编辑路径。
+- GUI `TAB` / `<tab>` 与 `C-i` 区分；`RET` / `<return>` 与 `C-m` 绑定同一命令。参照 `fundamental-mode` 中 `RET` 为 `newline`，`C-j` 为 `electric-newline-and-maybe-indent`，`TAB` 为 `indent-for-tab-command`；须固定 electric indent 等选项，不用 scratch 绑定代替全局规则。
+- backspace 是 DEL，绑定 `delete-backward-char`；`C-h` 是独立前缀，不映射到 backspace。
+- `ESC` / Meta 的完整交互、`ESC ESC` 和基础缩进仍待确认，不从确认框 Escape 行为推导正文行为。
 
 ## 4. v1 默认键位（草案）
 
-命令名使用 Emacs 名称。正式实现前固定完整表，并在 M1–M2 实现时逐项核对；M3 汇总验收。
+使用 Emacs 命令名；实现前固定完整表，逐项与参照绑定核对。草案不是已经完成的注册表或核验记录。
 
 | 键 | 命令 | v1 |
 |---|---|---|
@@ -99,39 +81,56 @@
 | `C-u` | universal-argument | v1 后评估 |
 | `C-x 1/2/3/o` | window 管理 | 延后 |
 
-GNU Emacs 31.1 `-Q` / `fundamental-mode` 的 `C-a`、`C-e`、`C-x C-c` 命令名已有核对记录。基准导出脚本存在不等于完整键位表已核对；必须在 M1–M3 按正式注册表逐项完成核验。
-
 ## 5. 对照基准与验收
 
-### 固定基准
+- 固定 GNU Emacs 31.1、`emacs -Q`、专用 `fundamental-mode` buffer，显式启用 undo 与 transient mark。
+- 记录初始文本、point / mark / active、kill ring、命令边界与影响行为的选项。真实 command loop、GUI / pty 驱动和直接函数调用须区分。
+- 外部观察与采集陷阱见 [Emacs 对照基准](../tests/emacs/README.md)，不把参照结果当作 semacs 通过记录。
+- undefined 用例须先确认双方均无绑定；`C-x a` 在 Emacs 31.1 是 abbreviation 前缀，不能用作双方均 undefined 的例子。
+- 产品验收走正式 GPUI 输入、命令路由和 Edit 入口，直接 IME 回调路径单独核验；组件单测不能替代真实平台 IME / 候选窗验证。
+- 对无历史 / 重复 undo、undo 后移动或输入再 redo、换行与输入分组、history 容量与清理策略保留参照；不声称自有线性历史的所有分支都等同 Emacs。
+- 阶段验收范围见 [实施计划](plan.md)，性能约束见 [性能预算](performance.md)。
 
-- 使用 GNU Emacs 31.1、`emacs -Q`、专用 `fundamental-mode` buffer，显式启用 undo 与 transient mark。
-- 每个用例记录初始文本、point / mark / 激活状态、kill ring、输入序列、命令边界与影响行为的选项；涉及按键时记录 GUI / batch 驱动方式，不能将直接调用函数等同于真实 command loop。
-- 独立 Emacs 基准用例与脚本集中于 `tests/emacs/`。记录 Emacs 版本、平台、运行命令和实际结果；脚本覆盖不等同于完整键位表核对。涉及用户真实环境的手工验收须事先征求同意。
-- semacs 的行为验收须经真实 GPUI 平台输入、命令路由与编辑入口；组件单测不能代替端到端输入验证。IME 直接输入路径须单独验证目标归属、预编辑/提交/取消及 D17/D19。
-- undefined 用例先断言双方均无绑定；模式特定绑定单独记录。IME 在 Wayland 验收环境验证。
+## 6. 编辑行为契约
 
-### Emacs undo / 编辑基准矩阵
+### 历史与保存点
 
-以下均为待执行的产品验收要求；不得据此宣称 semacs 已实现对应行为。R1 验收输入、预编辑、提交、布局几何及性能的最小切片；完整 undo/history 算法在 M1 实现；M3 完成全表 fidelity 验收。
+- 连续同类自插入、连续后删、连续前删分别合并；移动、换行与其他命令打断合并。
+- 连续 `kill-line` 各自成组，连续 yank 也各自成组；kill ring 追加不等于历史合并。
+- undo / redo 不与输入合并；undo 后输入开新组并清空 redo。
+- undo 恢复组开始前的 point；redo 回到组内最早变更起点，不是组末。
+- 回到保存点为 clean；已固定的保存后 undo 越过保存点场景仍 clean，再输入为 dirty。磁盘内容单独验证，不以当前文本等于磁盘重定义 modified。
+- 历史回放不登记为新的用户编辑；各正文 buffer 和 minibuffer 的历史独立。
 
-| 场景 | Emacs 基准与 semacs 验收要求 |
-|---|---|
-| 连续输入 `abcdef` 后 undo | 固定连续输入的合并条件；检查恢复文本与 point |
-| 输入 `abc`、移动、再输入 `def` 后 undo | 移动打断合并；检查分组与恢复位置 |
-| 连续 `DEL` / `C-d` | 固定连续删除的 undo 分组 |
-| `C-k` 两次后 undo | 每次 kill 的命令边界；kill ring 追加不等于 undo 合并 |
-| `C-k` 后连续 `C-y` | 每次 yank 为独立单元 |
-| 输入 `abc` + `RET` + `def` 后 undo | 固定换行与连续输入边界 |
-| 无历史时继续 undo | 固定提示与重复 undo 行为，不静默失败或意外 redo |
-| undo 后移动/输入，再 redo | 记录线性 history 行为，不声称所有分支等同 Emacs |
-| region 激活时 undo | 记录 Emacs region 行为；semacs 按已登记 F3 执行全局 undo |
-| mark 经插入、删除、undo/redo | mark 是 marker：在其前插入后移、在其位置插入不动、覆盖删除塌缩到起点；undo 仅在 mark 仍处于塌缩起点时恢复删除前位置；active 与位置独立 |
-| undo / redo point | 依 Emacs 31.1 基准断言 point；记录分组起点与回放结果 |
-| 保存、编辑、undo / redo | 保存后编辑并 undo 回保存点为 clean；已记录的跨越保存点 undo 场景仍 clean，再输入转 dirty；保存失败不更新保存点 |
-| IME 更新后提交/取消，再 undo | 普通 point 预编辑丢弃不留下提交或 dirty；平台已明确发生的正文替换不回滚，相关变更经 Edit / history；最终 marked 提交一次 |
-| 组合期间编辑、保存、切换目标、关闭 | D17 拒绝命令/前缀并提示；D19 关闭/失焦取消未提交预编辑；不保存仍 marked 的临时文本，不回滚已发生的正文替换 |
-| pending 前缀期间文本提交及迟到回调 | 文本不绕过解析；回调不可写入不同目标或新会话 |
-| A 设置 point/mark → B 编辑 → A | point、mark、active 按 buffer 语义保持且不串用；不据此承诺多 view |
-| 正文与 minibuffer 编辑 | 共用基础编辑语义及 kill ring；history 独立；prompt 不可编辑 |
-| history 容量 | 记录自有实现的容量与清理策略，不以此声称等同 Emacs |
+### mark 与 region
+
+- mark 位置与 active 独立；停用 region 不删除 mark。
+- mark 为 insertion type nil 的 marker：在其前插入则后移，在其位置或之后插入不动。
+- 删除覆盖 mark（包括删除末端）时坍缩到删除起点；undo 仅在 mark 仍位于该起点时恢复原偏移，否则只按文本位移调整；redo 再按删除规则处理。
+- 纯 marked 更新 / 丢弃不调整 mark；平台已提交替换和最终输入提交按已提交编辑调整。
+- 输入提交、undo / redo 与顶层 `C-g` 停用 region，但保留 mark。
+
+### kill ring
+
+- `C-k` / `C-w` / `M-w` / `C-y` 遵循参照语义；`C-w` / `M-w` 作用于 region。
+- 连续 kill 按命令链追加；非连续 kill 不追加，平台输入提交也打断连续 kill。
+- `kill-line` 在 EOB 回显 `End of buffer`，不建历史组。
+- yank 在插入起点设置 mark，回显 `Mark set`；正文与 minibuffer 共用全局 kill ring。
+
+### IME 与生命周期
+
+- 目标存在未提交预编辑时，拒绝编辑器命令和前缀，回显 `Input method composition is active; finish it first`。IME 自己消费的候选操作不算编辑器命令，组合完成后用户重新触发命令。
+- 纯 marked 更新 / 丢弃不改变 committed、point 或 modified，也不清除已有 dirty；平台显式正文替换立即作为已提交变更，可置 dirty，取消不回滚。
+- 部分 marked 被替换后，未再 marked 的文字成为 committed；最终提交仅插入剩余 marked 文字一次。unmark 保留文字，与丢弃 marked 不同。
+- 窗口失焦 / 关闭丢弃仍 marked 的文字，不强制提交或保存；保存只读取 committed。
+- 输入绑定原目标和会话，切换 / 关闭 / 重开后的迟到回调不写入新目标；pending 前缀与只读约束不能被直接文本输入绕过。
+- caret、命中及候选坐标须对应兼容布局；临时 / 最终可见布局就绪后刷新平台几何。同长度文本更新也不能复用不兼容的旧几何。
+
+### 文件与退出
+
+- 支持 UTF-8 有 / 无 BOM、统一 LF / CRLF；内部无 BOM、使用 LF，保存恢复原始格式，新换行沿用 buffer 格式。
+- 不自动增删末尾换行或重复 BOM；未编辑文件解码 / 编码往返字节一致，读取和格式适配不产生历史或 dirty。
+- 明确拒绝无效 UTF-8、UTF-16 / UTF-32 BOM、含 NUL、混合换行及裸 CR，不猜测编码或静默归一化；扩展支持先决定保留 / 转换策略。
+- 保存失败不清 dirty、不更新文件身份或保存点、不破坏原文件；覆盖确认的具体流程和文案仍待确认。
+- kill dirty buffer、退出与窗口关闭按 modified 确认；取消后保留正文与焦点。组合状态按上一节处理，已有 dirty 不因丢弃预编辑消失。
+- 外围确认框安全默认 Cancel；Escape / `C-g` 取消，Tab / Shift-Tab / 左右键选择，Enter / Space 确认。
