@@ -1,3 +1,6 @@
 /target
 /.pi/tasks/
 /.pi/tmp/
+/spikes/lab/target
+/spikes/lab/log
+/spikes/log

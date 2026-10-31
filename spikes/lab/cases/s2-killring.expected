@@ -1,0 +1,74 @@
+=== focused
+KEY   key="h" key_char=Some("h") ctrl=false alt=false shift=false super=false pref=false
+RESOLVE seq="h" pending="" -> SelfInsert
+TARGET[buffer] replace_text_in_range range_utf16=None bytes=0..0 text="h"
+CHANGE text="h" cursor=1 sel=1..1
+KEY   key="e" key_char=Some("e") ctrl=false alt=false shift=false super=false pref=false
+RESOLVE seq="e" pending="" -> SelfInsert
+TARGET[buffer] replace_text_in_range range_utf16=None bytes=1..1 text="e"
+CHANGE text="he" cursor=2 sel=2..2
+KEY   key="l" key_char=Some("l") ctrl=false alt=false shift=false super=false pref=false
+RESOLVE seq="l" pending="" -> SelfInsert
+TARGET[buffer] replace_text_in_range range_utf16=None bytes=2..2 text="l"
+CHANGE text="hel" cursor=3 sel=3..3
+KEY   key="l" key_char=Some("l") ctrl=false alt=false shift=false super=false pref=false
+RESOLVE seq="l" pending="" -> SelfInsert
+TARGET[buffer] replace_text_in_range range_utf16=None bytes=3..3 text="l"
+CHANGE text="hell" cursor=4 sel=4..4
+KEY   key="o" key_char=Some("o") ctrl=false alt=false shift=false super=false pref=false
+RESOLVE seq="o" pending="" -> SelfInsert
+TARGET[buffer] replace_text_in_range range_utf16=None bytes=4..4 text="o"
+CHANGE text="hello" cursor=5 sel=5..5
+KEY   key="a" key_char=None ctrl=true alt=false shift=false super=false pref=false
+RESOLVE seq="C-a" pending="" -> Execute("move-beginning-of-line")
+CMD   move-beginning-of-line
+KEY   key="k" key_char=None ctrl=true alt=false shift=false super=false pref=false
+RESOLVE seq="C-k" pending="" -> Execute("kill-line")
+CMD   kill-line
+TARGET[buffer] replace_text_in_range range_utf16=Some(0..5) bytes=0..5 text=""
+CHANGE text="" cursor=0 sel=0..0
+KEY   key="s" key_char=None ctrl=true alt=false shift=true super=false pref=false
+RESOLVE seq="C-S-s" pending="" -> Execute("spike-dump")
+CMD   spike-dump
+DUMP  text="" cursor=0 sel=0..0 mark=None active=false echo="" pending="" ring=1 session=Buffer mini="" undo=2 redo=0
+DUMP2 dirty=true mini_undo=0/0
+KEY   key="x" key_char=None ctrl=true alt=false shift=false super=false pref=false
+RESOLVE seq="C-x" pending="" -> Prefix
+PREFIX C-x
+ECHO  C-x
+KEY   key="b" key_char=Some("b") ctrl=false alt=false shift=false super=false pref=false
+RESOLVE seq="b" pending="C-x" -> Execute("switch-to-buffer")
+CMD   switch-to-buffer
+ECHO  switch-to-buffer: 
+KEY   key="y" key_char=None ctrl=true alt=false shift=false super=false pref=false
+RESOLVE seq="C-y" pending="" -> Execute("yank")
+CMD   yank
+TARGET[mini] replace_text_in_range range_utf16=Some(0..0) bytes=0..0 text="hello"
+KEY   key="s" key_char=None ctrl=true alt=false shift=true super=false pref=false
+RESOLVE seq="C-S-s" pending="" -> Execute("spike-dump")
+CMD   spike-dump
+DUMP  text="" cursor=0 sel=0..0 mark=None active=false echo="switch-to-buffer: " pending="" ring=1 session=Minibuffer mini="hello" undo=2 redo=0
+DUMP2 dirty=true mini_undo=1/0
+KEY   key="a" key_char=None ctrl=true alt=false shift=false super=false pref=false
+RESOLVE seq="C-a" pending="" -> Execute("move-beginning-of-line")
+CMD   move-beginning-of-line
+KEY   key="k" key_char=None ctrl=true alt=false shift=false super=false pref=false
+RESOLVE seq="C-k" pending="" -> Execute("kill-line")
+CMD   kill-line
+TARGET[mini] replace_text_in_range range_utf16=Some(0..5) bytes=0..5 text=""
+KEY   key="g" key_char=None ctrl=true alt=false shift=false super=false pref=false
+RESOLVE seq="C-g" pending="" -> Execute("keyboard-quit")
+CMD   keyboard-quit
+MINI  cancelled
+ECHO  Quit
+KEY   key="y" key_char=None ctrl=true alt=false shift=false super=false pref=false
+RESOLVE seq="C-y" pending="" -> Execute("yank")
+CMD   yank
+TARGET[buffer] replace_text_in_range range_utf16=Some(0..0) bytes=0..0 text="hello"
+ECHO  Mark set
+CHANGE text="hello" cursor=5 sel=5..5
+KEY   key="s" key_char=None ctrl=true alt=false shift=true super=false pref=false
+RESOLVE seq="C-S-s" pending="" -> Execute("spike-dump")
+CMD   spike-dump
+DUMP  text="hello" cursor=5 sel=5..5 mark=Some(0) active=false echo="Mark set" pending="" ring=2 session=Buffer mini="" undo=3 redo=0
+DUMP2 dirty=true mini_undo=2/0

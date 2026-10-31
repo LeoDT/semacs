@@ -1,0 +1,869 @@
+//! semacs spike lab (experiment only, not product code).
+//!
+//! Purpose: observe how gpui-kit 0.8.1 behaves on the real paths the plan needs
+//! verified (S1-S5): interceptor gating, key prefix handling, platform text
+//! input observation, own undo, echo area, and a minimal minibuffer target.
+//!
+//! Env:
+//!   SPIKE_LOG      log file (default: log/lab.log)
+//!   SPIKE_INITIAL  initial buffer text
+//!   SPIKE_PASS     comma separated key names that bypass the interceptor
+//!   SPIKE_READONLY accept no platform text input
+
+mod edit;
+mod keys;
+mod target;
+mod undo;
+
+use std::ops::Range;
+use std::sync::atomic::AtomicBool;
+
+use gpui_kit::component::input::{Editor, EditorState, Input, InputEvent, InputState};
+use gpui_kit::component::v_flex;
+use gpui_kit::prelude::FluentBuilder;
+use gpui_kit::*;
+use target::EditTarget;
+use edit::Editable;
+
+/// Spike stand-in for the real key-map pending prefix (e.g. after C-x).
+static PREFIX_PENDING: AtomicBool = AtomicBool::new(false);
+
+pub fn prefix_pending() -> bool {
+    PREFIX_PENDING.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+pub fn readonly_mode() -> bool {
+    std::env::var("SPIKE_READONLY").map(|v| v == "1").unwrap_or(false)
+}
+
+fn log_line(msg: impl AsRef<str>) {
+    use std::io::Write;
+    let path = std::env::var("SPIKE_LOG").unwrap_or_else(|_| "log/lab.log".to_string());
+    if let Some(dir) = std::path::Path::new(&path).parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&path) {
+        let _ = writeln!(f, "{}", msg.as_ref());
+        let _ = f.flush();
+    }
+}
+
+fn snapshot(editor: &Entity<EditorState>, cx: &mut App) -> String {
+    let st = editor.read(cx);
+    format!(
+        "text={:?} cursor={} sel={:?}",
+        st.text().to_string(),
+        st.cursor(),
+        st.selected_range()
+    )
+}
+
+fn utf16_len(s: &str) -> usize {
+    s.encode_utf16().count()
+}
+
+enum Direction {
+    Undo,
+    Redo,
+}
+
+fn replay<S: edit::Editable + EntityInputHandler>(
+    state: &Entity<S>,
+    target: &Entity<EditTarget<S>>,
+    group: &undo::Group,
+    direction: Direction,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    undo::set_replaying(true);
+    match direction {
+        Direction::Undo => {
+            for change in group.changes.iter().rev() {
+                let doc = state.read(cx).text_string();
+                let start = change.range.start;
+                let end = start + change.new.len();
+                let (s, e) = (utf16_len(&doc[..start]), utf16_len(&doc[..end]));
+                log_line(format!("REPLAY undo {start}..{end} <- {:?}", change.old));
+                target.update(cx, |t, cx| {
+                    EntityInputHandler::replace_text_in_range(t, Some(s..e), &change.old, window, cx)
+                });
+            }
+            state.update(cx, |st, cx| st.set_point(group.point_before, cx));
+        }
+        Direction::Redo => {
+            for change in group.changes.iter() {
+                let doc = state.read(cx).text_string();
+                let start = change.range.start;
+                let end = start + change.old.len();
+                let (s, e) = (utf16_len(&doc[..start]), utf16_len(&doc[..end]));
+                log_line(format!("REPLAY redo {start}..{end} <- {:?}", change.new));
+                target.update(cx, |t, cx| {
+                    EntityInputHandler::replace_text_in_range(t, Some(s..e), &change.new, window, cx)
+                });
+            }
+            state.update(cx, |st, cx| st.set_point(group.point_after, cx));
+        }
+    }
+    undo::set_replaying(false);
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Session {
+    Buffer,
+    Minibuffer,
+}
+
+struct Lab {
+    editor: Entity<EditorState>,
+    target: Entity<EditTarget<EditorState>>,
+    focus_handle: FocusHandle,
+
+    minibuffer: Entity<InputState>,
+    mini_target: Entity<EditTarget<InputState>>,
+    mini_focus: FocusHandle,
+
+    session: Session,
+    prompt: String,
+    session_value: String,
+
+    keymap: keys::Keymap,
+    pending: keys::KeySeq,
+    echo: String,
+
+    mark: Option<usize>,
+    mark_active: bool,
+
+    buffer_undo: undo::SharedUndo,
+    mini_undo: undo::SharedUndo,
+
+    ring: edit::SharedKillRing,
+    _subs: Vec<Subscription>,
+}
+
+impl Lab {
+    fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let initial = std::env::var("SPIKE_INITIAL").unwrap_or_default();
+        let editor = cx.new(|cx| {
+            EditorState::new(window, cx)
+                .default_value(initial)
+                .soft_wrap(true)
+                .line_number(false)
+        });
+        let buffer_undo = undo::new_stack();
+        let mini_undo = undo::new_stack();
+        let target = cx.new({
+            let undo = buffer_undo.clone();
+            let editor = editor.clone();
+            move |_| EditTarget::new(editor.clone(), "buffer", undo)
+        });
+        let focus_handle = editor.read(cx).focus_handle(cx).clone();
+        // Emacs baseline starts at point-max; mirror that so both sides compare.
+        let initial_len = editor.read(cx).text().len();
+        if initial_len > 0 {
+            editor.update(cx, |st, cx| st.set_selected_range(initial_len..initial_len, cx));
+        }
+
+        let minibuffer = cx.new(|cx| InputState::new(window, cx).placeholder(""));
+        let mini_target = cx.new({
+            let undo = mini_undo.clone();
+            let minibuffer = minibuffer.clone();
+            move |_| EditTarget::new(minibuffer.clone(), "mini", undo)
+        });
+        let mini_focus = minibuffer.read(cx).focus_handle(cx).clone();
+
+        buffer_undo.borrow_mut().mark_saved();
+
+        log_line(format!(
+            "=== lab start pid={} log={:?}",
+            std::process::id(),
+            std::env::var("SPIKE_LOG").unwrap_or_default()
+        ));
+
+        let mut keymap = keys::Keymap::default();
+        for (seq, name) in COMMANDS {
+            keymap.bind(seq, keys::Binding::Command(name));
+        }
+        for (seq, _) in PREFIXES {
+            keymap.bind(seq, keys::Binding::Prefix);
+        }
+
+        let weak = cx.entity().downgrade();
+        let subs = vec![
+            cx.intercept_keystrokes(move |event: &KeystrokeEvent, window, cx: &mut App| {
+                let ks = keys::KeyStroke::from_platform(&event.keystroke);
+                log_line(format!(
+                    "KEY   key={:?} key_char={:?} ctrl={} alt={} shift={} super={} pref={}",
+                    event.keystroke.key,
+                    event.keystroke.key_char,
+                    ks.ctrl,
+                    ks.alt,
+                    ks.shift,
+                    ks.super_,
+                    matches!(event.input_preference, InputPreference::CharacterInput)
+                ));
+                let consumed = match weak.update(cx, |lab, cx| lab.handle_keystroke(&ks, window, cx))
+                {
+                    Ok(consumed) => consumed,
+                    Err(_) => false,
+                };
+                if consumed {
+                    cx.stop_propagation();
+                }
+            }),
+            cx.observe_window_activation(window, |lab, window, cx| {
+                log_line(format!(
+                    "WINDOW active={} buffer_focused={} mini_focused={}",
+                    window.is_window_active(),
+                    lab.focus_handle.is_focused(window),
+                    lab.mini_focus.is_focused(window)
+                ));
+            }),
+            cx.subscribe_in(
+                &editor,
+                window,
+                |lab, _source, ev: &InputEvent, _window, cx| {
+                    if matches!(ev, InputEvent::Change) {
+                        log_line(format!("CHANGE {}", snapshot(&lab.editor, cx)));
+                    }
+                    cx.notify();
+                },
+            ),
+        ];
+
+        let deferred_focus = focus_handle.clone();
+        window.defer(cx, move |window, cx| {
+            deferred_focus.focus(window, cx);
+            log_line("=== focused");
+        });
+
+        Self {
+            editor,
+            target,
+            focus_handle,
+            minibuffer,
+            mini_target,
+            mini_focus,
+            session: Session::Buffer,
+            prompt: String::new(),
+            session_value: String::new(),
+            keymap,
+            pending: Vec::new(),
+            echo: String::new(),
+            mark: None,
+            mark_active: false,
+            buffer_undo,
+            mini_undo,
+            ring: std::rc::Rc::new(std::cell::RefCell::new(edit::KillRing::default())),
+            _subs: subs,
+        }
+    }
+
+    fn stack(&self) -> undo::SharedUndo {
+        match self.session {
+            Session::Buffer => self.buffer_undo.clone(),
+            Session::Minibuffer => self.mini_undo.clone(),
+        }
+    }
+
+    fn is_dirty(&self) -> bool {
+        self.buffer_undo.borrow().is_dirty()
+    }
+
+    fn text_input_available(&self) -> bool {
+        !readonly_mode()
+    }
+
+    fn echo(&mut self, message: impl Into<String>, cx: &mut Context<Self>) {
+        self.echo = message.into();
+        log_line(format!("ECHO  {}", self.echo));
+        cx.notify();
+    }
+
+    /// Interceptor entry point: resolve the keystroke and run the command.
+    fn handle_keystroke(&mut self, ks: &keys::KeyStroke, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        let pass = std::env::var("SPIKE_PASS")
+            .map(|list| list.split(',').any(|p| p.trim() == ks.key))
+            .unwrap_or(false);
+
+        // Emacs quits an active prefix with C-g instead of reporting the
+        // combination as undefined.
+        if !self.pending.is_empty() && ks.ctrl && !ks.alt && ks.key == "g" {
+            self.pending.clear();
+            self.set_pending(false);
+            log_line("CMDQ  keyboard-quit (from prefix)".to_string());
+            self.run_command("keyboard-quit", window, cx);
+            return true;
+        }
+
+        // Pending prefix wins over text input: text is parsed, never inserted.
+        let (resolution, pending) = self.keymap.resolve(&self.pending, ks);
+
+        log_line(format!(
+            "RESOLVE seq={:?} pending={:?} -> {:?}",
+            keys::describe(std::slice::from_ref(ks)),
+            keys::describe(&self.pending),
+            resolution
+        ));
+
+        match resolution {
+            keys::Resolution::Execute(name) => {
+                self.pending.clear();
+                self.set_pending(false);
+                log_line(format!("CMD   {name}"));
+                self.run_command(name, window, cx);
+                true
+            }
+            keys::Resolution::Prefix => {
+                self.pending = pending;
+                self.set_pending(true);
+                log_line(format!("PREFIX {}", keys::describe(&self.pending)));
+                self.echo(keys::describe(&self.pending), cx);
+                true
+            }
+            keys::Resolution::Undefined => {
+                let seq = keys::describe(&self.pending) + " " + &ks.to_string();
+                self.pending.clear();
+                self.set_pending(false);
+                self.echo(format!("{} is undefined", seq.trim()), cx);
+                true
+            }
+            keys::Resolution::SelfInsert => {
+                if pass {
+                    return false;
+                }
+                if !self.text_input_available() {
+                    self.pending.clear();
+                    self.set_pending(false);
+                    self.echo("Buffer is read-only", cx);
+                    return true;
+                }
+                self.pending.clear();
+                self.set_pending(false);
+                // Text goes to the platform path; a self-insert deactivates the mark.
+                self.mark_active = false;
+                self.ring.borrow_mut().break_chain();
+                false
+            }
+        }
+    }
+
+    fn set_pending(&mut self, pending: bool) {
+        PREFIX_PENDING.store(pending, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    fn region(&self, cx: &mut Context<Self>) -> Option<Range<usize>> {
+        if !self.mark_active {
+            return None;
+        }
+        let point = self.editor.read(cx).point();
+        let mark = self.mark?;
+        Some(mark.min(point)..mark.max(point))
+    }
+
+    fn run_command(&mut self, name: &str, window: &mut Window, cx: &mut Context<Self>) {
+        let ring = self.ring.clone();
+        // Emacs appends only when the previous command was also a kill.
+        if !matches!(name, "kill-line" | "kill-region") {
+            self.ring.borrow_mut().break_chain();
+        }
+        match (name, self.session) {
+            // ---- keyboard-quit -------------------------------------------------
+            ("keyboard-quit", _) => {
+                self.pending.clear();
+                self.set_pending(false);
+                if self.session == Session::Minibuffer {
+                    self.cancel_minibuffer(window, cx);
+                } else {
+                    self.mark_active = false;
+                    self.echo("Quit", cx);
+                }
+            }
+
+            // ---- spikes --------------------------------------------------------
+            ("spike-dump", _) => {
+                let (undo_depth, redo_depth) = self.buffer_undo.borrow().depth();
+                let (mini_undo, mini_redo) = self.mini_undo.borrow().depth();
+                let dirty = self.is_dirty();
+                let mini = self
+                    .minibuffer
+                    .read(cx)
+                    .text()
+                    .to_string();
+                log_line(format!(
+                    "DUMP  {} mark={:?} active={} echo={:?} pending={:?} ring={} session={:?} mini={:?} undo={undo_depth} redo={redo_depth}",
+                    snapshot(&self.editor, cx),
+                    self.mark,
+                    self.mark_active,
+                    self.echo,
+                    keys::describe(&self.pending),
+                    self.ring.borrow().len(),
+                    self.session,
+                    mini
+                ));
+                log_line(format!(
+                    "DUMP2 dirty={dirty} mini_undo={mini_undo}/{mini_redo}"
+                ));
+            }
+            ("spike-undo", _) => self.command_undo(window, cx),
+            ("spike-redo", _) => self.command_redo(window, cx),
+            ("spike-delete-backward", Session::Buffer) => {
+                edit::delete_backward(&self.editor, &self.target, &self.stack(), window, cx);
+            }
+            ("spike-insert-z", Session::Buffer) => {
+                edit::insert_text(
+                    &self.editor,
+                    &self.target, &self.stack(),
+                    "z",
+                    undo::Kind::Typing,
+                    window,
+                    cx,
+                );
+            }
+            ("spike-forward-char", Session::Buffer) => {
+                let doc = self.editor.read(cx).text_string();
+                let point = self.editor.read(cx).point();
+                let next = doc[point..]
+                    .char_indices()
+                    .nth(1)
+                    .map(|(i, _)| point + i)
+                    .unwrap_or(point);
+                edit::move_to(&self.editor, next, &self.stack(), cx);
+            }
+            ("spike-beginning-of-line", Session::Buffer) => {
+                let doc = self.editor.read(cx).text_string();
+                let point = self.editor.read(cx).point();
+                let start = edit::line_start(&doc, point);
+                edit::move_to(&self.editor, start, &self.stack(), cx);
+            }
+            ("spike-insert-typing", Session::Buffer) => {
+                let point = self.editor.read(cx).point();
+                let doc = self.editor.read(cx).text_string();
+                let utf16 = utf16_len(&doc[..point]);
+                self.editor.update(cx, |st, cx| {
+                    EntityInputHandler::replace_text_in_range(
+                        st,
+                        Some(utf16..utf16),
+                        "y",
+                        window,
+                        cx,
+                    )
+                });
+            }
+            ("spike-backspace-action", Session::Buffer) => {
+                window.dispatch_action(
+                    Box::new(gpui_kit::component::input::Backspace),
+                    cx,
+                );
+            }
+            ("spike-toggle-prefix", _) => {
+                let next = !prefix_pending();
+                self.set_pending(next);
+                log_line(format!("PREFIX pending={next}"));
+            }
+            ("spike-preedit", _) => {
+                log_line("PREEDIT start");
+                self.target.update(cx, |t, cx| {
+                    EntityInputHandler::replace_and_mark_text_in_range(
+                        t,
+                        None,
+                        "nihao",
+                        None,
+                        window,
+                        cx,
+                    );
+                    EntityInputHandler::unmark_text(t, window, cx);
+                });
+            }
+
+            // ---- editing (S2) --------------------------------------------------
+            ("forward-char", Session::Buffer) => {
+                let doc = self.editor.read(cx).text_string();
+                let point = self.editor.read(cx).point();
+                let next = doc[point..]
+                    .char_indices()
+                    .nth(1)
+                    .map(|(i, _)| point + i)
+                    .unwrap_or(point);
+                edit::move_to(&self.editor, next, &self.stack(), cx);
+            }
+            ("backward-char", Session::Buffer) => {
+                let doc = self.editor.read(cx).text_string();
+                let point = self.editor.read(cx).point();
+                let prev = doc[..point]
+                    .char_indices()
+                    .next_back()
+                    .map(|(i, _)| i)
+                    .unwrap_or(0);
+                edit::move_to(&self.editor, prev, &self.stack(), cx);
+            }
+            ("move-beginning-of-line", Session::Buffer) => {
+                let doc = self.editor.read(cx).text_string();
+                let point = self.editor.read(cx).point();
+                let start = edit::line_start(&doc, point);
+                edit::move_to(&self.editor, start, &self.stack(), cx);
+            }
+            ("move-end-of-line", Session::Buffer) => {
+                let doc = self.editor.read(cx).text_string();
+                let point = self.editor.read(cx).point();
+                let end = edit::line_end(&doc, point);
+                edit::move_to(&self.editor, end, &self.stack(), cx);
+            }
+            ("next-line", Session::Buffer) => {
+                let doc = self.editor.read(cx).text_string();
+                let point = self.editor.read(cx).point();
+                let next = next_line(&doc, point);
+                edit::move_to(&self.editor, next, &self.stack(), cx);
+            }
+            ("previous-line", Session::Buffer) => {
+                let doc = self.editor.read(cx).text_string();
+                let point = self.editor.read(cx).point();
+                let prev = previous_line(&doc, point);
+                edit::move_to(&self.editor, prev, &self.stack(), cx);
+            }
+            ("delete-backward-char", Session::Buffer) => {
+                self.mark_active = false;
+                edit::delete_backward(&self.editor, &self.target, &self.stack(), window, cx);
+            }
+            ("delete-char", Session::Buffer) => {
+                self.mark_active = false;
+                edit::delete_forward(&self.editor, &self.target, &self.stack(), window, cx);
+            }
+            ("kill-line", Session::Buffer) => {
+                self.mark_active = false;
+                if edit::kill_line(&self.editor, &self.target, &self.stack(), &ring, window, cx)
+                    .is_err()
+                {
+                    self.echo("End of buffer", cx);
+                }
+            }
+            ("yank", Session::Buffer) => {
+                let start = self.editor.read(cx).point();
+                if edit::yank(&self.editor, &self.target, &self.stack(), &ring, window, cx) {
+                    // Emacs sets the mark at the start of the yanked text.
+                    self.mark = Some(start);
+                    self.mark_active = false;
+                    self.echo("Mark set", cx);
+                } else {
+                    self.echo("Kill ring is empty", cx);
+                }
+            }
+            ("kill-region", Session::Buffer) | ("kill-ring-save", Session::Buffer) => {
+                let save_only = name == "kill-ring-save";
+                match self.region(cx) {
+                    Some(region) if !region.is_empty() => {
+                        edit::kill_region(
+                            &self.editor,
+                            &self.target, &self.stack(),
+                            &ring,
+                            region,
+                            save_only,
+                            window,
+                            cx,
+                        );
+                        self.mark_active = false;
+                    }
+                    _ => {
+                        self.echo(
+                            "The mark is not set now, so there is no region",
+                            cx,
+                        );
+                        self.stack().borrow_mut().end_command(false);
+                    }
+                }
+            }
+            ("set-mark-command", Session::Buffer) => {
+                self.mark = Some(self.editor.read(cx).point());
+                self.mark_active = true;
+                self.ring.borrow_mut().break_chain();
+                self.stack().borrow_mut().end_command(false);
+                self.echo("Mark set", cx);
+            }
+            ("newline", Session::Buffer) => {
+                self.mark_active = false;
+                edit::insert_text(
+                    &self.editor,
+                    &self.target, &self.stack(),
+                    "\n",
+                    undo::Kind::Other,
+                    window,
+                    cx,
+                );
+            }
+            ("indent-for-tab-command", Session::Buffer) => {
+                self.echo("indent-for-tab-command (spike: no-op)", cx);
+                self.stack().borrow_mut().end_command(false);
+            }
+            ("save-buffer", Session::Buffer) => {
+                let chars = self.editor.read(cx).text().chars().count();
+                self.buffer_undo.borrow_mut().mark_saved();
+                self.echo(format!("Saving file (spike): {chars} chars"), cx);
+                self.stack().borrow_mut().end_command(false);
+            }
+            ("save-buffers-kill-terminal", Session::Buffer) => {
+                log_line("=== quit requested");
+                cx.quit();
+            }
+            ("switch-to-buffer", Session::Buffer) | ("find-file", Session::Buffer) => {
+                self.start_minibuffer(name, window, cx);
+            }
+
+            // ---- minibuffer editing, same commands ---------------------------
+            ("move-beginning-of-line", Session::Minibuffer) => {
+                edit::move_to(&self.minibuffer, 0, &self.stack(), cx);
+            }
+            ("move-end-of-line", Session::Minibuffer) => {
+                let len = self.minibuffer.read(cx).text().len();
+                edit::move_to(&self.minibuffer, len, &self.stack(), cx);
+            }
+            ("forward-char", Session::Minibuffer) => {
+                let doc = self.minibuffer.read(cx).text_string();
+                let point = self.minibuffer.read(cx).point();
+                let next = doc[point..]
+                    .char_indices()
+                    .nth(1)
+                    .map(|(i, _)| point + i)
+                    .unwrap_or(point);
+                edit::move_to(&self.minibuffer, next, &self.stack(), cx);
+            }
+            ("backward-char", Session::Minibuffer) => {
+                let doc = self.minibuffer.read(cx).text_string();
+                let point = self.minibuffer.read(cx).point();
+                let prev = doc[..point]
+                    .char_indices()
+                    .next_back()
+                    .map(|(i, _)| i)
+                    .unwrap_or(0);
+                edit::move_to(&self.minibuffer, prev, &self.stack(), cx);
+            }
+            ("delete-backward-char", Session::Minibuffer) => {
+                edit::delete_backward(&self.minibuffer, &self.mini_target, &self.stack(), window, cx);
+            }
+            ("delete-char", Session::Minibuffer) => {
+                edit::delete_forward(&self.minibuffer, &self.mini_target, &self.stack(), window, cx);
+            }
+            ("kill-line", Session::Minibuffer) => {
+                if edit::kill_line(&self.minibuffer, &self.mini_target, &self.stack(), &ring, window, cx)
+                    .is_err()
+                {
+                    self.echo("End of buffer", cx);
+                }
+            }
+            ("yank", Session::Minibuffer) => {
+                if !edit::yank(&self.minibuffer, &self.mini_target, &self.stack(), &ring, window, cx) {
+                    self.echo("Kill ring is empty", cx);
+                }
+            }
+            ("newline", Session::Minibuffer) => self.finish_minibuffer(true, window, cx),
+            ("undo", _) => self.command_undo(window, cx),
+            ("undo-redo", _) => self.command_redo(window, cx),
+
+            (other, _) => {
+                self.echo(format!("{other} is not implemented in the spike"), cx);
+                self.stack().borrow_mut().end_command(false);
+            }
+        }
+    }
+
+    fn command_undo(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let before = snapshot(&self.editor, cx);
+        match self.stack().borrow_mut().undo_group() {
+            Some(group) => {
+                match self.session {
+                    Session::Buffer => replay(
+                        &self.editor,
+                        &self.target,
+                        &group,
+                        Direction::Undo,
+                        window,
+                        cx,
+                    ),
+                    Session::Minibuffer => replay(
+                        &self.minibuffer,
+                        &self.mini_target,
+                        &group,
+                        Direction::Undo,
+                        window,
+                        cx,
+                    ),
+                }
+                log_line(format!("OWNUNDO {before} -> {}", snapshot(&self.editor, cx)));
+            }
+            None => self.echo("No further undo information", cx),
+        }
+    }
+
+    fn command_redo(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        match self.stack().borrow_mut().redo_group() {
+            Some(group) => {
+                replay(
+                    &self.editor,
+                    &self.target,
+                    &group,
+                    Direction::Redo,
+                    window,
+                    cx,
+                );
+            }
+            None => self.echo("No further redo information", cx),
+        }
+    }
+
+    fn start_minibuffer(&mut self, command: &str, window: &mut Window, cx: &mut Context<Self>) {
+        self.session = Session::Minibuffer;
+        self.prompt = format!("{command}: ");
+        self.session_value.clear();
+        self.minibuffer.update(cx, |st, cx| st.set_value("", window, cx));
+        self.mini_undo.borrow_mut().clear();
+        let focus = self.mini_focus.clone();
+        focus.focus(window, cx);
+        self.echo(self.prompt.clone(), cx);
+    }
+
+    fn cancel_minibuffer(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        log_line("MINI  cancelled");
+        self.session = Session::Buffer;
+        self.prompt.clear();
+        let focus = self.focus_handle.clone();
+        focus.focus(window, cx);
+        self.echo("Quit", cx);
+    }
+
+    fn finish_minibuffer(&mut self, confirm: bool, window: &mut Window, cx: &mut Context<Self>) {
+        let value = self.minibuffer.read(cx).text().to_string();
+        log_line(format!("MINI  value={value:?} confirm={confirm}"));
+        self.session = Session::Buffer;
+        self.session_value = value.clone();
+        self.prompt.clear();
+        let focus = self.focus_handle.clone();
+        focus.focus(window, cx);
+        self.echo(format!("minibuffer value: {value}"), cx);
+    }
+}
+
+fn next_line(doc: &str, point: usize) -> usize {
+    let start = edit::line_start(doc, point);
+    let column = point - start;
+    let end = edit::line_end(doc, point);
+    if end >= doc.len() {
+        return point;
+    }
+    let next_start = end + 1;
+    let next_end = edit::line_end(doc, next_start);
+    (next_start + column).min(next_end)
+}
+
+fn previous_line(doc: &str, point: usize) -> usize {
+    let start = edit::line_start(doc, point);
+    if start == 0 {
+        return point;
+    }
+    let column = point - start;
+    let prev_end = start - 1;
+    let prev_start = edit::line_start(doc, prev_end);
+    (prev_start + column).min(prev_end)
+}
+
+impl Render for Lab {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let buffer_target = self.target.clone();
+        let buffer_focus = self.focus_handle.clone();
+        let mini_target = self.mini_target.clone();
+        let mini_focus = self.mini_focus.clone();
+        let show_mini = self.session == Session::Minibuffer;
+        let prompt = self.prompt.clone();
+        let echo = self.echo.clone();
+
+        v_flex()
+            .id("lab")
+            .size_full()
+            .child(Editor::new(&self.editor).into_any_element())
+            .child(canvas(
+                |_, _, _| (),
+                move |bounds, _, window, cx| {
+                    window.handle_input(
+                        &buffer_focus,
+                        gpui_kit::ElementInputHandler::new(bounds, buffer_target.clone()),
+                        cx,
+                    );
+                },
+            ))
+            .when(show_mini, |this| {
+                this.child(
+                    v_flex()
+                        .child(prompt.clone())
+                        .child(Input::new(&self.minibuffer))
+                        .child(canvas(
+                            |_, _, _| (),
+                            move |bounds, _, window, cx| {
+                                window.handle_input(
+                                    &mini_focus,
+                                    gpui_kit::ElementInputHandler::new(bounds, mini_target.clone()),
+                                    cx,
+                                );
+                            },
+                        )),
+                )
+            })
+            .child(div().child(echo))
+    }
+}
+
+const PREFIXES: &[(&str, ())] = &[
+    ("C-x", ()),
+    ("C-c", ()),
+    ("C-h", ()),
+    ("M-", ()),
+];
+
+const COMMANDS: &[(&str, &str)] = &[
+    // probes (spike-*)
+    ("C-S-s", "spike-dump"),
+    ("C-S-u", "spike-undo"),
+    ("C-S-r", "spike-redo"),
+    ("C-S-d", "spike-delete-backward"),
+    ("C-S-z", "spike-insert-z"),
+    ("C-S-f", "spike-forward-char"),
+    ("C-S-a", "spike-beginning-of-line"),
+    ("C-S-y", "spike-insert-typing"),
+    ("C-S-b", "spike-backspace-action"),
+    ("C-S-p", "spike-toggle-prefix"),
+    ("C-S-e", "spike-preedit"),
+    // v1 default keys (S2 subset)
+    ("C-f", "forward-char"),
+    ("C-b", "backward-char"),
+    ("C-n", "next-line"),
+    ("C-p", "previous-line"),
+    ("C-a", "move-beginning-of-line"),
+    ("C-e", "move-end-of-line"),
+    ("C-d", "delete-char"),
+    ("backspace", "delete-backward-char"),
+    ("C-k", "kill-line"),
+    ("C-y", "yank"),
+    ("C-w", "kill-region"),
+    ("M-w", "kill-ring-save"),
+    ("C-SPC", "set-mark-command"),
+    ("C-@", "set-mark-command"),
+    ("C-g", "keyboard-quit"),
+    ("C-/", "undo"),
+    ("C-_", "undo"),
+    ("C-x u", "undo"),
+    ("C-M-_", "undo-redo"),
+    ("enter", "newline"),
+    ("tab", "indent-for-tab-command"),
+    ("C-x C-s", "save-buffer"),
+    ("C-x C-c", "save-buffers-kill-terminal"),
+    ("C-x b", "switch-to-buffer"),
+    ("C-x C-f", "find-file"),
+];
+
+fn main() {
+    log_line("=== process starting");
+    gpui_kit::application().run(|cx| {
+        gpui_kit::init(cx);
+        gpui_kit::open_window(WindowOptions::default(), cx, |window, cx| {
+            cx.new(|cx| Lab::new(window, cx))
+        })
+        .expect("failed to open window");
+    });
+    log_line("=== process exited");
+}

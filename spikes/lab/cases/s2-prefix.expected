@@ -1,0 +1,27 @@
+=== focused
+KEY   key="x" key_char=None ctrl=true alt=false shift=false super=false pref=false
+RESOLVE seq="C-x" pending="" -> Prefix
+PREFIX C-x
+ECHO  C-x
+KEY   key="s" key_char=None ctrl=true alt=false shift=false super=false pref=false
+RESOLVE seq="C-s" pending="C-x" -> Execute("save-buffer")
+CMD   save-buffer
+ECHO  Saving file (spike): 0 chars
+KEY   key="s" key_char=None ctrl=true alt=false shift=true super=false pref=false
+RESOLVE seq="C-S-s" pending="" -> Execute("spike-dump")
+CMD   spike-dump
+DUMP  text="" cursor=0 sel=0..0 mark=None active=false echo="Saving file (spike): 0 chars" pending="" ring=0 session=Buffer mini="" undo=0 redo=0
+DUMP2 dirty=false mini_undo=0/0
+KEY   key="x" key_char=None ctrl=true alt=false shift=false super=false pref=false
+RESOLVE seq="C-x" pending="" -> Prefix
+PREFIX C-x
+ECHO  C-x
+KEY   key="u" key_char=Some("u") ctrl=false alt=false shift=false super=false pref=false
+RESOLVE seq="u" pending="C-x" -> Execute("undo")
+CMD   undo
+ECHO  No further undo information
+KEY   key="s" key_char=None ctrl=true alt=false shift=true super=false pref=false
+RESOLVE seq="C-S-s" pending="" -> Execute("spike-dump")
+CMD   spike-dump
+DUMP  text="" cursor=0 sel=0..0 mark=None active=false echo="No further undo information" pending="" ring=0 session=Buffer mini="" undo=0 redo=0
+DUMP2 dirty=false mini_undo=0/0

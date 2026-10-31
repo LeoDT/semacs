@@ -1,0 +1,82 @@
+=== focused
+KEY   key="x" key_char=None ctrl=true alt=false shift=false super=false pref=false
+RESOLVE seq="C-x" pending="" -> Prefix
+PREFIX C-x
+ECHO  C-x
+KEY   key="b" key_char=Some("b") ctrl=false alt=false shift=false super=false pref=false
+RESOLVE seq="b" pending="C-x" -> Execute("switch-to-buffer")
+CMD   switch-to-buffer
+ECHO  switch-to-buffer: 
+KEY   key="s" key_char=None ctrl=true alt=false shift=true super=false pref=false
+RESOLVE seq="C-S-s" pending="" -> Execute("spike-dump")
+CMD   spike-dump
+DUMP  text="" cursor=0 sel=0..0 mark=None active=false echo="switch-to-buffer: " pending="" ring=0 session=Minibuffer mini="" undo=0 redo=0
+DUMP2 dirty=false mini_undo=0/0
+KEY   key="a" key_char=Some("a") ctrl=false alt=false shift=false super=false pref=false
+RESOLVE seq="a" pending="" -> SelfInsert
+TARGET[mini] replace_text_in_range range_utf16=None bytes=0..0 text="a"
+KEY   key="b" key_char=Some("b") ctrl=false alt=false shift=false super=false pref=false
+RESOLVE seq="b" pending="" -> SelfInsert
+TARGET[mini] replace_text_in_range range_utf16=None bytes=1..1 text="b"
+KEY   key="c" key_char=Some("c") ctrl=false alt=false shift=false super=false pref=false
+RESOLVE seq="c" pending="" -> SelfInsert
+TARGET[mini] replace_text_in_range range_utf16=None bytes=2..2 text="c"
+KEY   key="s" key_char=None ctrl=true alt=false shift=true super=false pref=false
+RESOLVE seq="C-S-s" pending="" -> Execute("spike-dump")
+CMD   spike-dump
+DUMP  text="" cursor=0 sel=0..0 mark=None active=false echo="switch-to-buffer: " pending="" ring=0 session=Minibuffer mini="abc" undo=0 redo=0
+DUMP2 dirty=false mini_undo=1/0
+KEY   key="g" key_char=None ctrl=true alt=false shift=false super=false pref=false
+RESOLVE seq="C-g" pending="" -> Execute("keyboard-quit")
+CMD   keyboard-quit
+MINI  cancelled
+ECHO  Quit
+KEY   key="s" key_char=None ctrl=true alt=false shift=true super=false pref=false
+RESOLVE seq="C-S-s" pending="" -> Execute("spike-dump")
+CMD   spike-dump
+DUMP  text="" cursor=0 sel=0..0 mark=None active=false echo="Quit" pending="" ring=0 session=Buffer mini="abc" undo=0 redo=0
+DUMP2 dirty=false mini_undo=1/0
+KEY   key="x" key_char=None ctrl=true alt=false shift=false super=false pref=false
+RESOLVE seq="C-x" pending="" -> Prefix
+PREFIX C-x
+ECHO  C-x
+KEY   key="b" key_char=Some("b") ctrl=false alt=false shift=false super=false pref=false
+RESOLVE seq="b" pending="C-x" -> Execute("switch-to-buffer")
+CMD   switch-to-buffer
+ECHO  switch-to-buffer: 
+KEY   key="x" key_char=Some("x") ctrl=false alt=false shift=false super=false pref=false
+RESOLVE seq="x" pending="" -> SelfInsert
+TARGET[mini] replace_text_in_range range_utf16=None bytes=0..0 text="x"
+KEY   key="y" key_char=Some("y") ctrl=false alt=false shift=false super=false pref=false
+RESOLVE seq="y" pending="" -> SelfInsert
+TARGET[mini] replace_text_in_range range_utf16=None bytes=1..1 text="y"
+KEY   key="z" key_char=Some("z") ctrl=false alt=false shift=false super=false pref=false
+RESOLVE seq="z" pending="" -> SelfInsert
+TARGET[mini] replace_text_in_range range_utf16=None bytes=2..2 text="z"
+KEY   key="a" key_char=None ctrl=true alt=false shift=false super=false pref=false
+RESOLVE seq="C-a" pending="" -> Execute("move-beginning-of-line")
+CMD   move-beginning-of-line
+KEY   key="s" key_char=None ctrl=true alt=false shift=true super=false pref=false
+RESOLVE seq="C-S-s" pending="" -> Execute("spike-dump")
+CMD   spike-dump
+DUMP  text="" cursor=0 sel=0..0 mark=None active=false echo="switch-to-buffer: " pending="" ring=0 session=Minibuffer mini="xyz" undo=0 redo=0
+DUMP2 dirty=false mini_undo=1/0
+KEY   key="enter" key_char=None ctrl=false alt=false shift=false super=false pref=false
+RESOLVE seq="enter" pending="" -> Execute("newline")
+CMD   newline
+MINI  value="xyz" confirm=true
+ECHO  minibuffer value: xyz
+KEY   key="s" key_char=None ctrl=true alt=false shift=true super=false pref=false
+RESOLVE seq="C-S-s" pending="" -> Execute("spike-dump")
+CMD   spike-dump
+DUMP  text="" cursor=0 sel=0..0 mark=None active=false echo="minibuffer value: xyz" pending="" ring=0 session=Buffer mini="xyz" undo=0 redo=0
+DUMP2 dirty=false mini_undo=1/0
+KEY   key="q" key_char=Some("q") ctrl=false alt=false shift=false super=false pref=false
+RESOLVE seq="q" pending="" -> SelfInsert
+TARGET[buffer] replace_text_in_range range_utf16=None bytes=0..0 text="q"
+CHANGE text="q" cursor=1 sel=1..1
+KEY   key="s" key_char=None ctrl=true alt=false shift=true super=false pref=false
+RESOLVE seq="C-S-s" pending="" -> Execute("spike-dump")
+CMD   spike-dump
+DUMP  text="q" cursor=1 sel=1..1 mark=None active=false echo="minibuffer value: xyz" pending="" ring=0 session=Buffer mini="xyz" undo=1 redo=0
+DUMP2 dirty=true mini_undo=1/0
