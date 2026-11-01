@@ -99,7 +99,7 @@ impl AppShell {
         if self.exiting() {
             return false;
         }
-        self.file_task = None;
+        self.cancel_file_open();
         self.end_all_input(cx);
         let remaining: Vec<_> = self
             .buffers

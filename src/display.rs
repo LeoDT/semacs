@@ -277,6 +277,8 @@ impl WrapJob {
         max_rows: usize,
         max_bytes: usize,
     ) -> WrapIndex {
+        #[cfg(feature = "native-profiler")]
+        let _trace = crate::preparation_trace::Span::new("wrap-preview", max_bytes);
         self.build(metrics, max_rows, max_bytes, None)
             .expect("uncancelled preview")
     }
@@ -358,6 +360,8 @@ pub struct FontMeasure {
 
 impl FontMeasure {
     pub fn new(system: Arc<TextSystem>, settings: LayoutSettings) -> Self {
+        #[cfg(feature = "native-profiler")]
+        let _trace = crate::preparation_trace::Span::new("font-init", 0);
         settings.validate();
         let mut result = Self {
             settings,
@@ -396,6 +400,8 @@ impl FontMeasure {
     }
 
     fn measure(&mut self, text: &str) -> Pixels {
+        #[cfg(feature = "native-profiler")]
+        let _trace = crate::preparation_trace::Span::detail("measure-grapheme", text.len());
         if self.measurements == 256 {
             self.system = WindowTextSystem::new(self.system.clone());
             self.measurements = 0;

@@ -23,8 +23,12 @@ use semacs::view::BufferView;
 #[path = "support/samples.rs"]
 mod samples;
 
+#[path = "support/native_diagnostic.rs"]
+mod diagnostic;
 #[path = "support/native_m1.rs"]
 mod m1;
+#[path = "support/native_m2.rs"]
+mod m2;
 #[path = "support/m1_workload.rs"]
 mod workload;
 
@@ -594,7 +598,7 @@ fn main() {
     let mut args = std::env::args_os().skip(1);
     let input =
         PathBuf::from(args.next().expect(
-            "expected MIXED_SAMPLE SAMPLE NEW_REPORT [--allow-software] [--external | --m1]",
+            "expected MIXED_SAMPLE SAMPLE NEW_REPORT [--allow-software] [--external | --m1 | --m2-directory NEW_DIRECTORY]",
         ));
     let sample = args.next().expect("expected SAMPLE").into_string().unwrap();
     assert!(samples::NAMES.contains(&sample.as_str()));
@@ -603,6 +607,8 @@ fn main() {
     let mut allow_software = false;
     let mut external = false;
     let mut m1_mode = false;
+    let mut m2_directory = None;
+    let mut m2_open_diagnostic = false;
     let mut config = m1::Config::default();
     let mut pacing_options = false;
     while let Some(arg) = args.next() {
@@ -610,6 +616,10 @@ fn main() {
             "--allow-software" => allow_software = true,
             "--external" => external = true,
             "--m1" => m1_mode = true,
+            "--m2-open-diagnostic" => m2_open_diagnostic = true,
+            "--m2-directory" => {
+                m2_directory = Some(PathBuf::from(args.next().expect("new M2 work directory")));
+            }
             "--duration-seconds" => {
                 config.seconds = args
                     .next()
@@ -634,23 +644,37 @@ fn main() {
         }
     }
     assert!(
-        !(external && m1_mode),
-        "--m1 and --external are separate measurements"
+        usize::from(external) + usize::from(m1_mode) + usize::from(m2_directory.is_some()) <= 1,
+        "external, M1 and M2 are separate measurements"
     );
     assert!(!pacing_options || m1_mode, "pacing options require --m1");
+    assert!(
+        !m2_open_diagnostic || m2_directory.is_some(),
+        "open diagnostic requires --m2-directory"
+    );
     config.validate().expect("valid M1 settings");
     let mixed = files::read(&input)
         .expect("read deterministic mixed sample")
         .text;
     let text = samples::build(&sample, &mixed);
+    let m2_directory = m2_directory.map(|directory| {
+        m2::prepare(&directory, &text);
+        directory
+            .canonicalize()
+            .expect("absolute M2 work directory")
+    });
     let model_start = Instant::now();
-    let buffer = Buffer::new(
-        None,
-        DecodedFile {
-            text: text.clone(),
-            format: FileFormat::default(),
-        },
-    );
+    let buffer = if m2_directory.is_some() {
+        Buffer::scratch()
+    } else {
+        Buffer::new(
+            None,
+            DecodedFile {
+                text: text.clone(),
+                format: FileFormat::default(),
+            },
+        )
+    };
     let model_ms = millis(model_start.elapsed());
     let commands = external.then(|| {
         let (tx, rx) = mpsc::channel();
@@ -665,6 +689,7 @@ fn main() {
     });
     let succeeded = Rc::new(Cell::new(false));
     let outcome = succeeded.clone();
+    let require_success = m1_mode || m2_directory.is_some();
     gpui_kit::application().run(move |cx| {
         semacs::app::init(cx);
         profiler::set_trace_enabled(true);
@@ -684,8 +709,7 @@ fn main() {
             cx,
             move |window, cx| cx.new(|cx| {
                 let shell = cx.new(|cx| AppShell::new(buffer, window, cx));
-                let editor = shell.read(cx).active_view().clone();
-                let subscription = cx.observe(&editor, |_, _, cx| cx.notify());
+                let subscription = cx.observe(&shell, |_, _, cx| cx.notify());
                 Probe { shell, paints: probe_paints, _subscription: subscription }
             }),
         ).expect("open native performance window");
@@ -695,7 +719,15 @@ fn main() {
             assert!(allow_software || !specs.is_software_emulated,
                 "hardware GPU required; --allow-software is diagnostic only");
             let header = format!("# sample={sample}; model_ms={model_ms:.3}; external={external}; graphics={specs:?}\n# release={}; native {}; soft wrap enabled\n# first/ready end at CPU platform submission, NOT screen presentation; external includes driver/IPC/IME overhead",
-                !cfg!(debug_assertions), if m1_mode { "monospace 16px/24px, fixed dimensions" } else { "monospace 16px/24px -> bold 18px/27px" });
+                !cfg!(debug_assertions), if m1_mode || m2_directory.is_some() { "monospace 16px/24px, fixed dimensions" } else { "monospace 16px/24px -> bold 18px/27px" });
+            if let Some(directory) = m2_directory {
+                m2::start(m2::Session {
+                    shell: probe.read(cx).shell.clone(), paints, collector,
+                    directory, original: open.expected, report, header, open_diagnostic: m2_open_diagnostic,
+                    succeeded: outcome, hardware: !specs.is_software_emulated,
+                }, window, cx);
+                return;
+            }
             if m1_mode {
                 m1::start(config, m1::Session {
                     editor, paints, collector, original: open.expected, opened_at: open.start,
@@ -719,7 +751,7 @@ fn main() {
             schedule(Rc::new(RefCell::new(run)), window);
         }).unwrap();
     });
-    if m1_mode && !succeeded.get() {
+    if require_success && !succeeded.get() {
         std::process::exit(2);
     }
 }

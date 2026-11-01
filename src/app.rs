@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 
 use gpui_kit::component::{ActiveTheme, v_flex};
+use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 
 use crate::buffer::Buffer;
@@ -42,6 +43,7 @@ pub struct AppShell {
     next_session_id: u64,
     closing: Option<Closing>,
     file_task: Option<Task<()>>,
+    opening: Option<documents::Opening>,
     _keys_subscription: Subscription,
 }
 
@@ -85,6 +87,7 @@ impl AppShell {
             next_session_id: 0,
             closing: None,
             file_task: None,
+            opening: None,
             _keys_subscription: keys,
         }
     }
@@ -278,12 +281,29 @@ impl Render for AppShell {
             .minibuffer
             .as_ref()
             .map(|minibuffer| minibuffer.view.clone());
+        let shell = cx.weak_entity();
         v_flex()
             .id("app")
             .size_full()
             .bg(cx.theme().background)
             .text_color(cx.theme().foreground)
-            .child(v_flex().flex_1().min_h_0().child(editor))
+            .child(
+                v_flex()
+                    .flex_1()
+                    .min_h_0()
+                    .child(editor)
+                    .when(self.opening.is_some(), |body| {
+                        body.on_children_prepainted(move |bounds, window, cx| {
+                            if let Some(bounds) = bounds.first() {
+                                shell
+                                    .update(cx, |shell, cx| {
+                                        shell.prepare_opening(*bounds, window, cx)
+                                    })
+                                    .ok();
+                            }
+                        })
+                    }),
+            )
             .child(mode_line)
             .children(minibuffer)
             .child(echo_area)

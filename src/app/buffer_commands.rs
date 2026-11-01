@@ -17,6 +17,14 @@ impl AppShell {
         cx: &mut Context<Self>,
     ) -> usize {
         let view = Self::create_view(buffer, window, cx);
+        self.insert_view(view, cx)
+    }
+
+    pub(super) fn insert_view(
+        &mut self,
+        view: Entity<BufferView>,
+        cx: &mut Context<Self>,
+    ) -> usize {
         let subscription = cx.observe(&view, |_, _, cx| cx.notify());
         let index = self.buffers.push(BufferSlot::new(view, subscription));
         self.rename_buffer(index, cx);
@@ -117,7 +125,7 @@ impl AppShell {
         if index >= self.buffers.len() || self.minibuffer.is_some() {
             return false;
         }
-        self.file_task = None;
+        self.cancel_file_open();
         self.buffers.set_active(index);
         let view = self.buffers.active_view().clone();
         self.buffers.touch(&view);

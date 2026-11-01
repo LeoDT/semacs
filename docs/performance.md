@@ -75,6 +75,8 @@ RUNS=3 target/release/examples/perf_m1 .pi/tmp/perf-sample.txt
 
 文件层独立入口为 `examples/perf_load.rs` / `scripts/perf_baseline.sh`。
 
+M2 正式文件读入 / 保存、切换、补全及短周期资源基线复用原生入口的 `--m2` 模式；宿主 fish 脚本、操作顺序与完整测量边界见 [宿主验收](acceptance.md)。M2 新指标尚无批准时延预算，先记录基线，不把预载正文窗口的冷打开预算套到含文件 I/O 的完整读入。既有输入 / draw 预算仍适用；结果不能由历史 M1 数据替代。
+
 以下命令仅在另行获得真实桌面测试同意后，在正常宿主终端运行；输入使用可丢弃样本，输出目录必须尚不存在：
 
 ```sh

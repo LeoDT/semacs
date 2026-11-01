@@ -23,11 +23,25 @@ use crate::keymap::Keymap;
 use crate::platform::{BufferInputHandler, InputOperation};
 use crate::text::ByteOffset;
 
+mod initial;
 mod motion;
+
+pub(crate) use initial::InitialViewport;
 
 const PREVIEW_BYTES: usize = 8192;
 const SYNC_SHAPE_BYTES: usize = 8192;
 const PADDING: Pixels = px(8.);
+
+fn text_bounds(bounds: Bounds<Pixels>) -> Bounds<Pixels> {
+    let mut bounds = bounds.inset(PADDING);
+    bounds.size.width = bounds.size.width.max(px(1.));
+    bounds.size.height = bounds.size.height.max(px(1.));
+    bounds
+}
+
+fn visible_row_count(height: Pixels, line_height: Pixels) -> usize {
+    (f32::from(height) / f32::from(line_height)).ceil() as usize + 1
+}
 
 pub(crate) enum KeyLayers<'a> {
     Edit(Option<&'a Keymap>),
@@ -77,6 +91,8 @@ impl ShapedRow {
         system: &WindowTextSystem,
         color: Hsla,
     ) -> Self {
+        #[cfg(feature = "native-profiler")]
+        let _trace = crate::preparation_trace::Span::detail("shape-row", row.row.content_len);
         let text: String = index
             .text()
             .chunks_in_range(row.start.0..row.start.0 + row.row.content_len)
@@ -95,12 +111,17 @@ impl ShapedRow {
             if !content.is_empty() {
                 let mut run = metrics.run(content.len());
                 run.color = color;
-                let line = system.shape_line(
-                    content.to_owned().into(),
-                    metrics.settings().font_size,
-                    &[run],
-                    None,
-                );
+                let line = {
+                    #[cfg(feature = "native-profiler")]
+                    let _trace =
+                        crate::preparation_trace::Span::detail("shape-line", content.len());
+                    system.shape_line(
+                        content.to_owned().into(),
+                        metrics.settings().font_size,
+                        &[run],
+                        None,
+                    )
+                };
                 let width = line.width();
                 parts.push(RowPart {
                     range: ByteOffset(row.start.0 + offset)
@@ -707,6 +728,8 @@ impl BufferView {
     }
 
     fn ensure_index(&mut self, bounds: Bounds<Pixels>, cx: &mut Context<Self>) {
+        #[cfg(feature = "native-profiler")]
+        let _trace = crate::preparation_trace::Span::new("ensure-index", 0);
         self.settings.wrap_width = bounds.size.width.max(px(1.));
         let snapshot = self.display_snapshot();
         let key = LayoutKey {
@@ -737,9 +760,7 @@ impl BufferView {
             self.reflow_base.as_ref().or(self.index.as_ref()),
             self.pending_change.as_ref(),
         );
-        let visible_rows = (f32::from(bounds.size.height) / f32::from(self.settings.line_height))
-            .ceil() as usize
-            + 2;
+        let visible_rows = visible_row_count(bounds.size.height, self.settings.line_height) + 1;
         let preview = job.preview(self.metrics.as_mut().unwrap(), visible_rows, PREVIEW_BYTES);
         let complete = preview.is_complete();
         if let Some(previous) = self.index.replace(preview) {
@@ -753,11 +774,21 @@ impl BufferView {
             self.clear_reflow(cx);
             return;
         }
+        self.finish_index(job, cx);
+    }
+
+    fn finish_index(&mut self, job: WrapJob, cx: &mut Context<Self>) {
         let cancelled = Arc::new(AtomicBool::new(false));
         let worker_cancel = cancelled.clone();
         let system = cx.text_system().clone();
         let settings = self.settings.clone();
+        #[cfg(feature = "native-profiler")]
+        let trace = crate::preparation_trace::Context::worker("wrap-worker");
         let worker = cx.background_executor().spawn(async move {
+            #[cfg(feature = "native-profiler")]
+            let _recording = trace.map(crate::preparation_trace::Context::enter);
+            #[cfg(feature = "native-profiler")]
+            let _trace = crate::preparation_trace::Span::new("wrap-worker", 0);
             job.finish(&mut FontMeasure::new(system, settings), &worker_cancel)
         });
         let task = cx.spawn(async move |view, cx| {
@@ -798,12 +829,13 @@ impl BufferView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        #[cfg(feature = "native-profiler")]
+        let _trace =
+            crate::preparation_trace::Span::new("prepare", self.display_snapshot().text().len());
         if !self.focus.is_focused(window) && self.target.snapshot_for(self.target.token()).is_ok() {
             self.end_input(cx);
         }
-        let mut bounds = bounds.inset(PADDING);
-        bounds.size.width = bounds.size.width.max(px(1.));
-        bounds.size.height = bounds.size.height.max(px(1.));
+        let bounds = text_bounds(bounds);
         self.content_bounds = Some(bounds);
         self.ensure_index(bounds, cx);
         let index = self.index.as_ref().unwrap();
@@ -843,13 +875,13 @@ impl BufferView {
         }
         let first =
             (f32::from(self.scroll.y) / f32::from(self.settings.line_height)).floor() as usize;
-        let count = (f32::from(bounds.size.height) / f32::from(self.settings.line_height)).ceil()
-            as usize
-            + 1;
+        let count = visible_row_count(bounds.size.height, self.settings.line_height);
         let range = first..first.saturating_add(count);
         self.cache.retain(|row, _| range.contains(row));
         let rows = index.visible_rows(range.clone());
         let mut large = Vec::new();
+        #[cfg(feature = "native-profiler")]
+        let visible_trace = crate::preparation_trace::Span::new("shape-visible", 0);
         for row in &rows {
             if self.cache.contains_key(&row.index) {
                 continue;
@@ -867,6 +899,8 @@ impl BufferView {
                 self.cache.insert(row.index, Arc::new(shaped));
             }
         }
+        #[cfg(feature = "native-profiler")]
+        drop(visible_trace);
         let key = index.key().clone();
         if self
             .shape_range
@@ -881,7 +915,13 @@ impl BufferView {
                 let settings = self.settings.clone();
                 let cancelled = Arc::new(AtomicBool::new(false));
                 let worker_cancel = cancelled.clone();
+                #[cfg(feature = "native-profiler")]
+                let trace = crate::preparation_trace::Context::worker("shape-worker");
                 let worker = cx.background_executor().spawn(async move {
+                    #[cfg(feature = "native-profiler")]
+                    let _recording = trace.map(crate::preparation_trace::Context::enter);
+                    #[cfg(feature = "native-profiler")]
+                    let _trace = crate::preparation_trace::Span::new("shape-worker", 0);
                     let shaper = WindowTextSystem::new(system.clone());
                     let mut metrics = FontMeasure::new(system, settings);
                     let mut result = Vec::new();

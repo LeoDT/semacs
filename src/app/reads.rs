@@ -19,7 +19,7 @@ impl AppShell {
         if self.session.is_some() {
             return None;
         }
-        self.file_task = None;
+        self.cancel_file_open();
         let prompt = kind.prompt();
         self.mount_minibuffer(&prompt, initial, window, cx)?;
         let id = self

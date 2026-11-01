@@ -3,12 +3,107 @@ use crate::buffer::Buffer;
 use crate::files::{self, ReadError};
 use crate::saves::{SaveCompletion, SaveIntent, SaveOutcome, SaveRequest};
 use crate::session::ReadKind;
-use crate::view::BufferView;
-use gpui_kit::{Context, Entity, Window};
+use crate::view::{BufferView, InitialViewport};
+use gpui_kit::component::ActiveTheme;
+use gpui_kit::{AppContext, Bounds, Context, Entity, Pixels, Window};
 use std::io;
 use std::path::{Path, PathBuf};
 
+#[cfg(test)]
+#[path = "opening_tests.rs"]
+mod tests;
+
+pub(super) struct Opening {
+    origin: Entity<BufferView>,
+    view: Entity<BufferView>,
+    viewport: Option<InitialViewport>,
+}
+
 impl AppShell {
+    pub(super) fn cancel_file_open(&mut self) {
+        self.file_task = None;
+        self.opening = None;
+    }
+
+    pub(super) fn prepare_opening(
+        &mut self,
+        bounds: Bounds<Pixels>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(opening) = &self.opening else { return };
+        if self.minibuffer.is_some() || self.active_view() != &opening.origin {
+            self.cancel_file_open();
+            return;
+        }
+        let view = opening.view.clone();
+        let viewport = view
+            .read(cx)
+            .initial_viewport(bounds, cx.theme().foreground, window);
+        if opening.viewport.as_ref() == Some(&viewport) {
+            return;
+        }
+        self.file_task = None;
+        self.opening.as_mut().unwrap().viewport = Some(viewport.clone());
+        let preparation = view.read(cx).prepare_initial(viewport.clone(), cx);
+        self.file_task = Some(cx.spawn_in(window, async move |shell, cx| {
+            let Some(prepared) = preparation.ready().await else {
+                return;
+            };
+            let mut prepared = Some(prepared);
+            shell
+                .update_in(cx, |shell, window, cx| {
+                    let Some(opening) = &shell.opening else {
+                        return;
+                    };
+                    if opening.view != view || opening.viewport.as_ref() != Some(&viewport) {
+                        return;
+                    }
+                    if shell.minibuffer.is_some()
+                        || shell.active_view() != &opening.origin
+                        || shell.buffers.index_of(&opening.origin).is_none()
+                    {
+                        shell.cancel_file_open();
+                        return;
+                    }
+                    if !viewport.matches_window(window, cx.theme().foreground) {
+                        shell.opening.as_mut().unwrap().viewport = None;
+                        cx.notify();
+                        return;
+                    }
+                    let buffer = view.read(cx).buffer();
+                    let existing = shell.buffers.iter().position(|slot| {
+                        let other = slot.view.read(cx).buffer();
+                        other.path() == buffer.path()
+                            || (buffer.identity().is_some()
+                                && other.identity() == buffer.identity())
+                    });
+                    if let Some(index) = existing {
+                        shell.activate(index, window, cx);
+                        return;
+                    }
+                    if !view.update(cx, |view, cx| {
+                        view.install_initial(prepared.take().unwrap(), &viewport, cx)
+                    }) {
+                        shell.opening.as_mut().unwrap().viewport = None;
+                        cx.notify();
+                        return;
+                    }
+                    view.update(cx, |view, cx| view.install_input_lifecycle(window, cx));
+                    let index = shell.insert_view(view, cx);
+                    shell.activate(index, window, cx);
+                })
+                .ok();
+            if let Some(prepared) = prepared {
+                cx.background_executor()
+                    .spawn(async move {
+                        drop(prepared);
+                    })
+                    .detach();
+            }
+        }));
+    }
+
     pub(super) fn visit_file(
         &mut self,
         path: PathBuf,
@@ -16,6 +111,7 @@ impl AppShell {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.cancel_file_open();
         let existing = self
             .buffers
             .iter()
@@ -41,7 +137,7 @@ impl AppShell {
                 .await;
             shell
                 .update_in(cx, |shell, window, cx| {
-                    if shell.session.is_some()
+                    if shell.minibuffer.is_some()
                         || shell.active_view() != &origin
                         || shell.buffers.index_of(&origin).is_none()
                     {
@@ -55,9 +151,17 @@ impl AppShell {
                                 other.path() == buffer.path()
                                     || (identity.is_some() && other.identity() == identity)
                             });
-                            let index =
-                                existing.unwrap_or_else(|| shell.create_buffer(buffer, window, cx));
-                            shell.activate(index, window, cx);
+                            if let Some(index) = existing {
+                                shell.activate(index, window, cx);
+                            } else {
+                                let view = cx.new(|cx| BufferView::new(buffer, cx));
+                                shell.opening = Some(Opening {
+                                    origin: origin.clone(),
+                                    view,
+                                    viewport: None,
+                                });
+                                cx.notify();
+                            }
                         }
                         Err(message) => shell.show_message(&origin, message, cx),
                     }

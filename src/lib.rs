@@ -11,6 +11,8 @@ pub mod input;
 pub mod keymap;
 pub mod minibuffer;
 mod platform;
+#[cfg(feature = "native-profiler")]
+pub mod preparation_trace;
 mod saves;
 pub mod session;
 pub mod text;
