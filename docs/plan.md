@@ -10,7 +10,7 @@
 
 ## M1 键位、编辑语义与历史
 
-状态：尚未实施，下一阶段。
+状态：准备实施，键位、基础缩进与 kill ring 的前置策略已确认。
 
 - 自有分层 keymap、无超时前缀、命令注册与统一目标路由；处理绑定冲突和 undefined / self-insert 分类。
 - 基础 motion、翻页、换行 / 基础缩进、删除、kill / yank、mark / region 与 quit。

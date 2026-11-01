@@ -50,7 +50,8 @@
 - 默认在 point 输入，不因 region 激活而替换 region，不启用 delete-selection-mode。复制 / 粘贴走 `M-w` / `C-y`，不提供另一套 CUA 编辑路径。
 - GUI `TAB` / `<tab>` 与 `C-i` 区分；`RET` / `<return>` 与 `C-m` 绑定同一命令。参照 `fundamental-mode` 中 `RET` 为 `newline`，`C-j` 为 `electric-newline-and-maybe-indent`，`TAB` 为 `indent-for-tab-command`；须固定 electric indent 等选项，不用 scratch 绑定代替全局规则。
 - backspace 是 DEL，绑定 `delete-backward-char`；`C-h` 是独立前缀，不映射到 backspace。
-- `ESC` / Meta 的完整交互、`ESC ESC` 和基础缩进仍待确认，不从确认框 Escape 行为推导正文行为。
+- 支持 Alt / Meta 与传统 `ESC` 前缀，前缀无超时；正文 `ESC` 不等同 `C-g`，`ESC ESC` 等序列按 Emacs 31.1 参照核对，不从确认框行为推导。
+- M1 基础缩进以 `emacs -Q` 的 `fundamental-mode` 为基线，核对并固定相关选项；不包含语言智能缩进或格式化。
 
 ## 4. v1 默认键位（草案）
 
@@ -115,7 +116,7 @@
 - `C-k` / `C-w` / `M-w` / `C-y` 遵循参照语义；`C-w` / `M-w` 作用于 region。
 - 连续 kill 按命令链追加；非连续 kill 不追加，平台输入提交也打断连续 kill。
 - `kill-line` 在 EOB 回显 `End of buffer`，不建历史组。
-- yank 在插入起点设置 mark，回显 `Mark set`；正文与 minibuffer 共用全局 kill ring。
+- yank 在插入起点设置 mark，回显 `Mark set`；正文与 minibuffer 共用全局 kill ring，暂不读写系统剪贴板。
 
 ### IME 与生命周期
 
