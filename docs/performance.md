@@ -1,12 +1,12 @@
 # 性能预算与测量边界
 
-这里维护已批准预算、指标含义与必要入口，不维护样本配方、实现阈值或脚本断言清单。
+这里维护已批准预算、指标含义与适用条件，不维护执行步骤、实现进度、样本配方或脚本断言清单。
 预算适用的固定环境、尺寸与历史数据见 [R1 验收归档](records/r1.md)。
 
 ## 适用原则
 
 - 既定预算不通过调宽阈值掩盖回退；环境、样本或构建条件变化时先明确可比性，不直接套用或改写旧结论。
-- 六类约 8 MiB 正文、软换行开启，区分冷首帧与最终精确布局；不能以截断正文、关换行、漏绘或额外热重绘换取数字。
+- 基准样本为六类约 8 MiB 正文、软换行开启，复测范围按改动影响选择，不将代表性样本外推为完整矩阵。区分冷首帧与最终精确布局，不能以截断正文、关换行、漏绘或额外热重绘换取数字。
 - 各项至少三次，记录波动；原生预算每次运行分别判定，不以平均值掩盖超限。
 - headless 仅用于 CPU 回归，不代表原生字体、GPU 或真实 IME；软件渲染自检与宿主硬件验收分开。
 
@@ -21,6 +21,9 @@
 - `observed_elapsed_ms` 包含驱动后续观察及计时外断言，不是 ready 或输入延迟。
 - headless forced frame 是无文本变化的强制重绘均值，empty draw 是未主动 invalidation 的 draw 均值；原生 idle 只观察是否实际 draw，不能据此报告 0 ms 帧或空闲功耗。
 - 这些入口没有 GPU timestamp 或实际呈现反馈；CPU 提交、候选截图和 on_next_frame 均不证明屏幕呈现完成，也不额外加一个刷新周期估算呈现时间。
+- 文件 / buffer 流程从最终确认或补全动作计时，不包含完整路径逐字输入；普通保存、补全与取消可能只报告 UI 观察结果，不自动解释成目标正文提交。文件缓存不受控，不宣称冷磁盘读取。
+- `save_ack_before_edit=false` 只说明该键之前尚未观察到保存确认，不证明与实际磁盘 I/O 重叠；短周期 RSS 与 view 释放不证明长期无泄漏或 GPU / allocator 缓存全回收。
+- 诊断中的嵌套墙钟区间不能相加作为整帧成本，worker 重叠不证明锁等待；未完成区间保留未完成状态。诊断本身有开销，不将一次诊断替代验收。
 
 ## 已确认的 headless 预算
 
@@ -51,41 +54,12 @@
 
 持续输入验收口径（用户于 2026-11-01 确认）：每键同步更新 ≤2 ms、首次目标提交 ≤16 ms；被后续输入取代的旧版本不要求继续完成完整布局，其 ready 保留为未测，不填 0 或计作逐键完成。停止输入后的最终有效版本完整就绪提交须 ≤300 ms，实际观测到的 ready 仍按对应预算判定。该口径明确过期目标的适用范围，不调宽任何数值阈值。
 
-同回调 32 键不是长时间持续输入；完整命令链和持续输入的阶段补测见 [实施计划](plan.md)。
-GPU 执行 / 实际呈现可在出现瓶颈或需要端到端延迟承诺时另定方案，不预先扩大为 M1 硬门禁。
+同回调 32 键不是长时间持续输入。GPU 执行 / 实际呈现不属于上述 CPU / 提交流程预算，如需承诺须另行确认测量方案与预算。
+
+文件打开 / 保存、buffer 切换与补全等尚无批准时延门限的新指标只作基线，不擅自套用预载正文冷窗口或单键预算；已有输入与 draw 预算仍按实际覆盖路径判定。
 
 ## 测量入口
 
-样本定义见 `scripts/perf_sample.py` 与 `examples/support/samples.rs`，参数和校验以程序为准。
+本地检查、headless 命令、用户运行 fish 的宿主分工及失败停止规则统一见 [验收流程](acceptance.md)。入口、参数和样本以 `examples/perf_*.rs`、`scripts/perf_native.py`、`scripts/perf_sample.py` 及 `examples/support/samples.rs` 为准。
 
-```sh
-python3 scripts/perf_sample.py .pi/tmp/perf-sample.txt
-cargo build --release --example perf_view
-RUNS=3 target/release/examples/perf_view .pi/tmp/perf-sample.txt
-```
-
-M1 有界命令链 / 连续前台更新的 CPU 补测入口：
-
-```sh
-cargo build --release --example perf_m1
-RUNS=3 target/release/examples/perf_m1 .pi/tmp/perf-sample.txt
-```
-
-该入口遇到超预算立即停止；连续段只报告每键前台更新和末键恢复，不是原生长时间持续输入，也不提供平台提交时延。验收结果与未测边界见 [M1 性能记录](records/m1-performance.md)。
-
-文件层独立入口为 `examples/perf_load.rs` / `scripts/perf_baseline.sh`。
-
-M2 正式文件读入 / 保存、切换、补全及短周期资源基线复用原生入口的 `--m2` 模式；宿主 fish 脚本、操作顺序与完整测量边界见 [宿主验收](acceptance.md)。M2 新指标尚无批准时延预算，先记录基线，不把预载正文窗口的冷打开预算套到含文件 I/O 的完整读入。既有输入 / draw 预算仍适用；结果不能由历史 M1 数据替代。
-
-以下命令仅在另行获得真实桌面测试同意后，在正常宿主终端运行；输入使用可丢弃样本，输出目录必须尚不存在：
-
-```sh
-cargo build --release --example perf_native --features native-profiler
-python3 -B scripts/perf_native.py .pi/tmp/perf-sample.txt .pi/tmp/native-report --consent
-python3 -B scripts/perf_native.py .pi/tmp/perf-sample.txt .pi/tmp/native-ime-report --consent --ime
-python3 -B scripts/perf_native.py .pi/tmp/perf-sample.txt .pi/tmp/native-m1-report --consent --m1 --sample mixed --runs 1
-```
-
-原生 M1 命令链 / 持续输入入口为同一驱动的 `--m1` 模式，默认 60 秒 / 50 ms，硬件超预算立即保存部分报告并停止。工具将被后续输入取代的 ready 明确记为未测，并要求末键完整就绪；最终验收按上文已确认口径逐项核对，不仅凭工具成功退出判断。不把调度迟到当成实体按键延迟。Base Root 路由冲突已修复，当前代码的 headless 收尾及用户宿主六类各三轮 M1 矩阵已完成，结果与被取代 ready / 真实 OS / IME / GPU 未测边界见 [验收记录](records/m1-performance.md)。后续复测仍先做小范围检查，出现超预算先汇报，不自动调优重测。
-
-硬件验收不强制软件渲染；`--software` 仅用于诊断，不代表硬件通过。原生功能诊断入口为 `examples/native_input.rs`，不能将其状态日志时间戳当作性能数据。
+本文不记录某次矩阵的完成情况。历史环境、实测与批准结论按需从 [冻结记录](README.md#按需参考与冻结记录) 查阅；它们不替代后续代码的验证。原生功能诊断入口 `examples/native_input.rs` 的状态日志也不是性能计时。

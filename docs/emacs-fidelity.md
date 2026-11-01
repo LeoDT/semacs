@@ -42,7 +42,7 @@
 
 不做的产品能力统一见 [非目标](requirements.md#非目标f4)，与仅延后到 v1 后的能力区分，不另维护一份清单。
 
-### M1 已登记的 F2 motion 差异
+### 已登记的 F2 motion 差异
 
 - 词由连续 Unicode 字母 / 数字组成；其余字符作为分隔符，不实现 syntax table 或按文字系统细分词。下划线、组合附加符号和 emoji 均为分隔符；例如 `M-f` 在 `éclair` 中先停在 `e` 后，在 `🙂last` 中直接到 `last` 后，与 Emacs 的精确边界不同。
 - `C-n` / `C-p` 按逻辑行移动，不按软换行显示行；连续上下行共用临时目标列，其他命令、指针定位和平台输入提交打断。列宽复用基础缩进的 Unicode 宽度与 tab-width=8；目标列落在 TAB / 宽字符内时越过该字符，不实现行尾特殊 goal 或像素目标列。
@@ -61,11 +61,11 @@
 - GUI `TAB` / `<tab>` 与 `C-i` 区分；`RET` / `<return>` 与 `C-m` 绑定同一命令。参照 `fundamental-mode` 中 `RET` 为 `newline`，`C-j` 为 `electric-newline-and-maybe-indent`，`TAB` 为 `indent-for-tab-command`；须固定 electric indent 等选项，不用 scratch 绑定代替全局规则。
 - backspace 是 DEL，绑定 `delete-backward-char`；`C-h` 是独立前缀，不映射到 backspace。
 - 支持 Alt / Meta 与传统 `ESC` 前缀，前缀无超时；正文 `ESC` 不等同 `C-g`，`ESC ESC` 等序列按 Emacs 31.1 参照核对，不从确认框行为推导。
-- M1 基础缩进以 `emacs -Q` 的 `fundamental-mode` 为基线，核对并固定相关选项；不包含语言智能缩进或格式化。
+- 基础缩进以 `emacs -Q` 的 `fundamental-mode` 为基线，核对并固定相关选项；不包含语言智能缩进或格式化。
 
-## 4. v1 默认键位（草案）
+## 4. v1 默认键位
 
-使用 Emacs 命令名。M1 编辑命令与 M2 应用命令的标识、作用域和默认绑定已固定于 [注册表](../src/command.rs)，并与 [Emacs 绑定查询](../tests/emacs/m1-bindings.tsv) 逐项核对；注册不表示执行已接入或通过验收。下表仍包含 M2 与延后能力。
+使用 Emacs 命令名；命令标识、作用域和默认绑定以 [注册表](../src/command.rs) 为唯一实现来源，Emacs 参照见 [绑定查询](../tests/emacs/m1-bindings.tsv)。下表固定 v1 的键位范围，并列出相关延后能力，不维护执行接入或验收进度；阶段状态只见 [实施计划](plan.md)。
 
 | 键 | 命令 | v1 |
 |---|---|---|
@@ -132,7 +132,7 @@
 
 ### 只读前缀与 field
 
-- 只读文本范围与整个 buffer 只读分开判断。M1 先支持固定只读前缀，不引入完整 text-property 或任意可变 field 系统。
+- 只读文本范围与整个 buffer 只读分开判断。支持固定只读前缀，不包含完整 text-property 或任意可变 field 系统。
 - minibuffer 的 prompt 是 committed 文本中的只读前缀，point / mark 可以进入，region / copy 可以包含；不使用外置 label 替代。在前缀内插入或删除 / 替换其文字均被拒绝，在前缀末端插入允许。统一 Edit 校验及平台预编辑 / 提交路径都执行保护，undo / redo 不能绕过。
 - 字段边界独立于只读属性，由共享命令层使用。目前支持在不可变前缀中固定的分界：C-a 从输入字段移到当前逻辑行首，但不进入 prompt；已在 prompt 内时仍可移到该字段内的行首。C-k 的范围止于所在字段的行尾 / 末端。字符移动和 buffer 跳转不统一截断到输入区；C-e 仍到逻辑行末，不能把所有 motion 都限制在字段内。
 - 删除 prompt 的 kill 先复制，再报告只读文本错误；C-k 还移到复制范围末端。yank 的整个 buffer 只读检查发生在设置 mark 前；仅插入位置为只读文本时，非空 yank 设置 mark 后因插入受保护而失败。空 ring 和空字符串 yank 保留既定的 mark 副作用，不创建文本编辑。

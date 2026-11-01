@@ -1,113 +1,62 @@
-# 宿主验收
+# 验收流程
 
-预算与证据边界见 [性能预算](performance.md)，产品行为以 [Emacs 保真度](emacs-fidelity.md) 为准。本页是执行说明，不代表通过记录。
-
-## 显示设置：定向原生性能复测
-
-阶段 A 的基本外观 / 交互及改字体 / 字号后的正文与 minibuffer IME 已由用户人工确认；定向原生性能批次 `.pi/tmp/a-display-host-perf/` 也已执行并核对通过，详见 [验收记录](records/a-display-local.md#宿主定向原生性能复测)。无需重复人工检查、自动 IME 注键或原样重跑本批。
-
-以下为已执行命令的记录，不要覆盖或原样重跑；未来确需复测时先另行征求同意，使用尚不存在的新目录，在正常 fish / Wayland 宿主终端执行：
-
-```fish
-fish scripts/acceptance.fish display-perf .pi/tmp/a-display-host-perf --consent
-```
-
-输出目录必须尚不存在；已有同名产物时换一个新名字，不删除覆盖或自动重跑。脚本自动构建 release / native-profiler 并生成样本，随后运行 mixed、single-ascii 两类约 8 MiB 正文各三轮，共六个独立测试窗口。mixed 覆盖混合文字，single-ascii 覆盖编辑后需要重建索引的单条超长行；这是代表性复测，不代表其余四类完成本轮原生复测。
-
-- 复用既有原生基础流程：打开预载正文、滚动、改宽、字体变化、强制重绘 / 空闲、四类输入及 32 键批量。不运行 M1 持续输入或 M2 文件 / 保存矩阵。
-- 不注入 OS 按键或操作输入法；测试期间不要输入、移动 / 调整或关闭测试窗口。驱动内部使用合成 GPUI 输入，结束时按现有机制恢复原焦点。
-- 要求硬件渲染，缺少 `/dev/dri` 或识别为软件渲染就停止，不自动降级；测量仍是 CPU draw / 平台提交流程，不是 GPU timestamp 或实际屏幕呈现。
-- 字体阶段沿用 monospace 16px / 24px → bold 18px / 27px 的既有 view 入口，覆盖真实字体布局与绘制，不宣称测到了完整新 `M-x` 命令和所有视图传播的端到端耗时。
-- 按 [既有预算](performance.md) 逐运行检查，任何失败停止后续运行；基础驱动在每份窗口报告完成后判定。保留所有产物，把输出目录交回核对，不自行调参重试。
-
-保留构建日志、Git 版本 / 状态、包含未跟踪源码的差异、fixture，以及 `native-display/` 下的环境、逐项 CSV、stdout / stderr 和摘要。需结合硬件、字体、实际正文尺寸及逐项值复核，不能只凭 `COMPLETED.txt` 宣告阶段通过。
-
-以下章节为 M2 / M3 的既有验收说明，不因本次显示设置复测重新执行。
+本文维护可执行流程，不记录历史批次的通过状态或诊断经过。预算与指标含义见 [性能预算](performance.md)，行为以 [保真度契约](emacs-fidelity.md) 为准，历史证据按需从 [文档导航](README.md#按需参考与冻结记录) 查阅。
 
 ## 分工与执行顺序
 
-隔离环境负责 Rust / Python / Emacs 参照、headless 回归及工具自检。原生窗口、硬件字体 / CPU 提交、真实 Wayland / IME 和 OS 关闭须在用户宿主执行；没有 `/dev/dri` 不回退到软件渲染冒充通过。
+1. 助手完成受影响的代码 / 工具自检与 headless 回归，提出必要的宿主复测范围；按影响选择路径，不默认重跑完整历史矩阵。
+2. 每次真实环境测试先征求用户同意。助手准备或检查 fish 入口，用户在仓库根目录的正常 fish / Wayland 宿主终端运行；隔离环境没有 `/dev/dri` 时不尝试绕过或用软件渲染冒充通过。
+3. 脚本要求尚不存在的新输出目录，保留构建日志、版本 / 源码差异、环境、fixture、报告及停止原因。用户回传目录，即使失败也保留产物，不只报告退出码。
+4. 助手离线核对源码 / 二进制 / 驱动 / fixture 身份、覆盖范围、硬件 / 字体 / 实际尺寸、原始数据及预算；自动结果与用户观察共同形成结论，未测项明确保留。
 
-首屏修复后，正式 `perf` 矩阵已由用户执行并完成逐项核对，产物 `.pi/tmp/m2-host-perf-after-layout/`，结果与尺寸可比性见 [收尾记录](records/m2-m3-local.md#修复后的正式宿主性能矩阵)。不要覆盖该目录或原样重跑。
+历史授权不延伸到下一次测试。不要覆盖旧目录、自动重试、调宽阈值或出现超限后自行调优重测；先回报现象和产物。诊断及代表性复测不外推为完整验收；按预算判定前核对适用条件，环境不同先说明可比性。
 
-另行授权的真实 IME 代表性复测也已执行并核对，产物 `.pi/tmp/m2-host-ime/`，详见 [IME核对记录](records/m2-m3-local.md#正式宿主-ime-代表性复测)。不要覆盖或原样重跑；自动结果和截图抽查不代替完整人工观察。
+## 本地检查与 headless 入口
 
-另行授权的人工验收也已由用户完成并核对，产物 `.pi/tmp/m2-host-manual/`；五组观察与四个文件精确字节通过，最终结论见 [验收记录](records/m2-m3-local.md#阶段最终结论)。本轮三类入口均已完成，不需要原样重跑。
+实现阶段收尾执行 `cargo test --all-targets`、`cargo clippy --all-targets -- -D warnings`、`cargo fmt --check` 和差异检查；若改动 profiler / 驱动，还检查相应 feature 和工具。日常小改动按影响检查，纯文档整理不机械重跑产品测试。
 
-以下仅为**已执行命令的记录**：
+有输入 / 布局性能影响时，可在不访问桌面的 TestPlatform / TestTextSystem 上运行：
 
-```fish
-fish scripts/acceptance.fish manual .pi/tmp/m2-host-manual --consent
+```sh
+python3 scripts/perf_sample.py .pi/tmp/perf-sample.txt
+cargo build --release --example perf_view --example perf_m1
+RUNS=3 target/release/examples/perf_view .pi/tmp/perf-sample.txt
+RUNS=3 target/release/examples/perf_m1 .pi/tmp/perf-sample.txt
 ```
 
-以后如需复测，须另行取得用户同意，在仓库根目录的正常 **fish / Wayland 宿主终端**执行，并使用尚不存在的新输出目录。`manual` 会自动生成 `OUTPUT/files/` 下的 alpha / beta / overwrite / close 文件并打开窗口，不需要自行准备fixture；不能覆盖旧报告。
+`perf_view` 测视图布局 / 绘制与基础输入；`perf_m1` 测有界命令链与未等待布局的输入段，ready 只代表末键恢复，不是原生长时间持续输入。文件层入口为 `examples/perf_load.rs` / `scripts/perf_baseline.sh`。具体参数、样本和断言以工具为准；headless 结果不替代原生字体、GPU 或真实 IME 证据。
 
-按顺序执行，任一步失败就停止，回传输出目录，不自动重测。脚本保留构建日志、版本 / 差异、环境、逐项 CSV、摘要和失败原因，不删除产物。原生驱动还记录二进制 / 驱动 SHA-256、字体和 fixture 摘要。结束后将目录路径交回核对，不只报告退出码。
+## 宿主 fish 入口
 
-- `perf` 不注入 OS 按键，但会打开测试窗口。不要输入、关闭或调整它们；先测 mixed 的 M2 三轮，正常才继续其余矩阵。整批约数分钟，其中 M1 持续输入固定六分钟；M2 fixture 产物约 600 MiB。
-- `ime` 会用 wtype / fcitx5 Pinyin 注入真实输入，需 Hyprland、wtype、fcitx5-remote；grim 可选，用于候选截图。测试期间不要操作键鼠。驱动在注键前检查焦点，结束时恢复原焦点和输入法状态。
-- `manual` 不自动注键，打开两个正式 semacs 窗口，按下节操作。每组需在终端明确输入 `yes`，最终还独立核对磁盘字节；未观察到的项目不可答 yes。
-
-硬件门限适用前仍须核对与 R1 / M1 的硬件、字体、尺寸、构建可比性。环境不同先报告，不擅自改变阈值。
-
-## 首轮超限后的单次诊断
-
-完整验收在首个 mixed 文件打开时超预算停止；子调用诊断将主要停顿定位到同步换行预览的一次未缓存文本测量，早于 wrap worker 启动。实现已将新文件的实际首屏索引 / shaping 准备移至后台，就绪前保留原正文；没有改预算，也未判定 GPUI 内部存在缺陷。
-
-修复后的单次 mixed 宿主核对已完成，draw最大3.142005 ms、目标首帧prepaint0.117187 ms、无空白，首屏提交70.676942 ms、完整就绪提交234.461781 ms。仅支持该样本的draw修复有效，不证明整体打开变快或完整验收通过。详见 [本地收尾记录](records/m2-m3-local.md#修复后的单次宿主核对)。
-
-保留 `.pi/tmp/m2-host-perf/`、`.pi/tmp/m2-open-diagnostic/`、`.pi/tmp/m2-prepaint-diagnostic/` 与 `.pi/tmp/m2-layout-fix-diagnostic/`。以下为**已执行命令的记录，不要原样重跑**：
+仅在对应测试已获同意后，将 `MODE` 和 `NEW_OUTPUT_DIRECTORY` 替换为选定模式及新目录：
 
 ```fish
-fish scripts/acceptance.fish open-diagnostic .pi/tmp/m2-layout-fix-diagnostic --consent
+fish scripts/acceptance.fish MODE NEW_OUTPUT_DIRECTORY --consent
 ```
 
-此入口只执行 scratch 准备与一次正式文件打开，不继续其他正文、编辑 / 保存或完整矩阵，不自动重试。未来如需再诊断，须另行征得用户同意并使用尚不存在的新目录。仍保留原 fixture 配方和准备方式，不预热目标正文；既有预算不变，超限会非零退出，这也是有效的诊断产物。
+脚本自动构建并准备可丢弃样本，不操作用户工作文件。当前模式以 [脚本](../scripts/acceptance.fish) 为准：
 
-`open-diagnostic/mixed-1.*` 包含：
+| 模式 | 适用范围 |
+|---|---|
+| `display-perf` | mixed / single-ascii 各三轮的原生基础性能代表性复测，包含字体变化与绘制；不跑 M1 持续输入或 M2 文件矩阵。 |
+| `perf` | 文件 / buffer M2 六类矩阵、普通原生六类矩阵及 M1 两类代表性持续输入；开销较大，不作为每次改动的默认检查。 |
+| `ime` | mixed / single-ascii 各三轮真实正文 IME；需要 Hyprland、wtype、fcitx5-remote，grim 可选。完整 minibuffer IME 仍需人工观察。 |
+| `manual` | 两个正式窗口的键盘文件 / IME / OS 关闭流程，按下文操作，脚本核对观察回答与磁盘字节。 |
+| `open-diagnostic` | 一次 mixed 文件打开的定向诊断，不继续其他样本或编辑矩阵，不作为验收。 |
 
-- `csv`：两步聚合报告，ready 未观察到时保留空值。
-- `frames.csv`：包括 setup 的逐帧 request-layout / prepaint / paint、draw 剩余成本、平台提交及提交前间隔；携带目标身份匹配、正文尺寸、扫描范围、布局就绪等状态。
-- `views.csv`：最慢帧所属 view 的阶段与 self / total 时间。profiler 只保留 self ≥0.5 ms 的条目；嵌套 total 会重叠，不能相加当作整帧成本。
-- `preparation.csv`：首屏嵌套调用（prepare / ensure-index、字体初始化、wrap-preview、可见行 / 单行 shaping、未缓存 grapheme 测量）及 initial / wrap / shape worker 区间。`parent` 关联调用树，只有前台区间关联 `frame`；worker 以同一时间轴观察重叠，不强塞入某个帧。`bytes` 是输入字节数（wrap-preview 为扫描上限，其余无对应输入时为0），不是新增扫描量。无正文内容落盘。
-- `diagnostic.json`：核对逐帧与聚合值后提取最慢打开帧、慢 view、首屏子调用分组及与该帧重叠的 worker；另外列出所有 initial-worker 区间，包含目标首帧之前的准备耗时；预算失败时同样生成。旧版没有子调用数据时 `preparation=null`，不补造证据。
-- stdout / stderr 与 environment：含版本、二进制 / 驱动摘要、恢复状态及停止原因。
+自动性能模式打开测试窗口，内部使用合成 GPUI 输入；不要输入、移动 / 调整或关闭测试窗口。只有 `ime` 注入真实 OS 按键：期间不要操作键鼠，驱动注键前检查目标焦点并恢复原焦点 / 输入法。`manual` 不自动注键，按提示操作，不可将未观察到的项目答 yes。
 
-数据先缓存在内存，结束后写盘，避免在被测 draw 内输出文件。子调用记录仅在 `native-profiler` 构建且单次诊断显式启用时采集；默认构建不包含计时钩子。最多保留16384个区间，溢出作无效报告；后台只记录粗粒度区间，不逐 grapheme 记录。停止时仍运行的 worker 标为 `complete=false`，end 是观察截止而非完成时刻。
+原生性能验收要求硬件渲染；软件诊断不能套用硬件验收结论。fish 入口不提供软件降级；底层驱动的 `--software` 仅供另行授权的诊断。普通原生 / IME 模式在每份窗口报告完成后判定，M1 / M2 还会在测量过程中检查既有预算；失败停止后续运行。模式与参数含义见 [驱动](../scripts/perf_native.py)，不以本页重述完整动作矩阵。
 
-嵌套子调用耗时不能相加作为整帧成本；worker 重叠只说明并行发生，不证明锁等待。计时、内存分配与短临界区也有诊断开销，不从一次诊断宣告性能通过。CPU draw 剩余成本不能直接归因于 GPU；分阶段时间包含各阶段内可能的等待，不是 CPU 周期。没有 GPU timestamp 或屏幕呈现反馈。
+## 显示设置：定向原生性能复测
 
-诊断模式明确 `acceptance=false`。即使这次未复现超限，也不能据此撤销原失败、宣告 M2 通过或继续后续矩阵；将输出目录交回分析。
+`display-perf` 覆盖真实字体布局、绘制和输入的代表性路径，不表示其余四类原生样本或长时间持续输入已复测。字体阶段沿用 monospace 16px / 24px → bold 18px / 27px 的既有 view 入口，不是完整新 `M-x` 配置命令及所有视图传播的端到端时延测量。
 
-## 自动矩阵与解释
+<a id="首轮超限后的单次诊断"></a>
 
-### M2：六类正文，各三轮
+## 单次打开诊断
 
-复用 `perf_native --m2-directory NEW_DIRECTORY`，由 `scripts/perf_native.py --m2` 管理，每轮 31 步：
-
-- 从正式 `C-x C-f` 确认路径，依次读入三个约 8 MiB 文件并完成布局。
-- buffer 切换、编辑、保存后下一 frame-demand tick 继续输入，再保存最终版本；独立核对请求快照、dirty 与磁盘。
-- 七次已打开 buffer 的切换，记录提交与完整就绪。
-- 2000 项目录补全，以及 TAB 后继续输入、取消并重开读入会话。
-- 关闭三个文件，再做三轮打开 / 编辑 / 保存 / 关闭；记录 RSS、buffer 数与已关闭 view 的弱引用存活情况。
-
-测量起点为最终 RET / TAB，而非完整路径逐字输入。准备 prompt、预生成 fixture、全文断言和磁盘断言不计入动作区间。文件缓存不受控，不宣称冷磁盘读取。
-
-- 打开 / 切换的 first / ready 要求目标显示身份、兼容布局及完整索引，不能由旧 buffer 的保留正文冒充。
-- `save-edit` 的 first / ready 从下一 tick 的 y 输入开始；`save_observed_ms` 从保存命令开始到 UI 可观察完成。记录 `save_ack_before_edit`：如果为 true，保存已在该键之前确认；false 也只说明尚未观察到确认，不证明 worker 正在执行磁盘 I/O。这不是长时间写盘并发输入压测。
-- 普通保存只报告 UI 可观察完成；补全 / 取消只报告 UI 结果观察，不填目标提交时延。
-- 只对已有输入 2 / 16 / 300 ms 与 draw 16 ms 预算判定；**不为 M2 打开、保存、切换或补全凭空设门限，也不套用旧的预载正文冷窗口门限**。
-- RSS 为短周期趋势，不是内存泄漏判定；弱引用消失只证明对应 view 不再存活，不证明 GPU / allocator 缓存全部回收。
-
-### 既有性能回归
-
-普通原生预算：六类各三轮，包含打开预载正文窗口、滚动、改宽、字体、强制重绘、空闲、四类输入及 32 键批量。驱动逐行复核既定预算，任一运行失败停止后续矩阵。普通 / IME 模式在每份窗口报告完成后判定；M1 / M2 还会在测量过程中检查既有预算。
-
-M1：mixed 与 single-ascii 各三轮、60 秒 / 50 ms。它是当前版本的代表性回归，**不替代历史六类完整 M1 矩阵，也不代表其他四类完成了本轮持续输入复测**。过期目标 ready 继续按批准口径保留未测。
-
-IME：mixed 与 single-ascii 各三轮，覆盖正文预编辑、取消、提交、滚动 / 改宽 / 字体 / 点击后的组合。它不包含完整 minibuffer IME，后者由人工补齐。
-
-所有时间仍是 CPU / 平台提交或 UI 观察，不是 GPU 执行或实际屏幕呈现。
+`open-diagnostic` 只运行 scratch 准备和一次正式文件打开；既有预算仍适用，`acceptance=false`，诊断成功也不自动继续矩阵。保留 CSV、逐帧 / 慢 view / 子调用报告与 diagnostic.json，即使失败也交回分析。报告字段与关联校验以 [诊断实现](../examples/support/native_diagnostic.rs) 及 [驱动](../scripts/perf_native.py) 为准；历史超限、定位与修复经过已冻结于 [验收记录](records/m2-m3-local.md#首轮宿主停止与诊断交付)。
 
 ## 人工：第一个窗口
 
@@ -135,8 +84,8 @@ IME：mixed 与 single-ascii 各三轮，覆盖正文预编辑、取消、提交
 
 若平台只能走已批准的窗口级确认例外，记录实际流程、安全默认取消与焦点情况，先回报，不直接把不符上述预期的步骤勾成通过。
 
-## 验收仍须人工核对的边界
+## 结论与证据边界
 
-- 自动脚本成功不证明候选窗口肉眼位置正确，也不证明每个 F1 / F2 / F3 项均已核对。
-- 真实用户按键延迟、GPU timestamp、实际屏幕呈现、长时间内存趋势与未覆盖平台 / 键盘布局不由这些入口推断。
-- 通过、失败与未测项须结合本地回归、宿主环境、逐项报告和用户观察汇总，不仅凭脚本退出码判断。本轮结论见 [验收记录](records/m2-m3-local.md#阶段最终结论)。
+- 只有获批、实际覆盖的范围才可写为通过。原生硬件路径仍测 CPU / 平台提交，不是 GPU 执行时间或实际屏幕呈现。
+- 自动成功不证明所有候选位置、字体或 F1 / F2 / F3 行为均正确；人工反馈按实际观察范围记录，不冒充助手独立重现。
+- 报告核对结果按需要进入 `docs/records/`，完成状态只在计划维护；不把具体批次目录、实测和失败经过持续追加到本执行手册。
