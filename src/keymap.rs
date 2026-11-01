@@ -4,7 +4,7 @@ use std::collections::HashMap;
 
 use gpui_kit::{KeyDownEvent, Keystroke, Modifiers};
 
-use crate::command::{COMMANDS, Command};
+use crate::command::{COMMANDS, Command, Scope};
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Key {
@@ -177,13 +177,15 @@ impl Keymap {
         })
     }
 
-    pub fn m1_defaults() -> Self {
+    /// Default bindings for one command scope. Layers combine scopes at dispatch
+    /// time; a single map never mixes edit, application and session commands.
+    pub fn for_scope(scope: Scope) -> Self {
         let mut map = Self::default();
         for prefix in ["ctrl-x", "ctrl-h", "escape"] {
             map.define_prefix(&parse_sequence(prefix).expect("valid default prefix"))
                 .expect("nonconflicting default prefix");
         }
-        for spec in COMMANDS {
+        for spec in COMMANDS.iter().filter(|spec| spec.scope == scope) {
             for binding in spec.bindings {
                 map.bind(
                     &parse_sequence(binding.keys).expect("valid default binding"),

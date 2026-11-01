@@ -83,7 +83,7 @@ fn main() {
                 eprintln!("Native probe graphics: {:?}", window.gpu_specs());
             })
             .expect("inspect native graphics");
-        let editor = shell.read(cx).editor().clone();
+        let editor = shell.read(cx).active_view().clone();
         record(editor.read(cx), start, &mut log.borrow_mut());
         cx.observe(&editor, move |editor, cx| {
             record(editor.read(cx), start, &mut log.borrow_mut());

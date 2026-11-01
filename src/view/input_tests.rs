@@ -32,7 +32,7 @@ pub(super) fn open(text: &str, cx: &mut TestAppContext) -> (VisualTestContext, E
                 .downcast::<AppShell>()
                 .unwrap()
                 .read(cx)
-                .editor()
+                .active_view()
                 .clone()
         })
         .unwrap();

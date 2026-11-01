@@ -12,6 +12,7 @@ use gpui_kit::*;
 use unicode_segmentation::UnicodeSegmentation;
 
 use crate::buffer::Buffer;
+use crate::command::{Command, Scope};
 use crate::display::{FontMeasure, IndexedRow, LayoutKey, LayoutSettings, WrapIndex, WrapJob};
 use crate::editing::{
     CommandOutcome, CommandViewport, EditTarget, InputDisposition, KillRing, RecenterPosition,
@@ -27,6 +28,17 @@ mod motion;
 const PREVIEW_BYTES: usize = 8192;
 const SYNC_SHAPE_BYTES: usize = 8192;
 const PADDING: Pixels = px(8.);
+
+/// Result of routing one keystroke through a buffer view.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum KeyRoute {
+    /// The view consumed the key sequence; stop further propagation.
+    Handled,
+    /// A command owned by a layer above the edit target; the owner executes it.
+    Requested(Command),
+    /// Leave the key to platform text input or framework handlers.
+    Unhandled,
+}
 
 struct BackgroundWork {
     cancelled: Arc<AtomicBool>,
@@ -328,7 +340,7 @@ impl BufferView {
     pub fn with_target(target: EditTarget, cx: &mut Context<Self>) -> Self {
         Self {
             target,
-            keymap: Keymap::m1_defaults(),
+            keymap: Keymap::for_scope(Scope::Edit),
             focus: cx.focus_handle(),
             settings: LayoutSettings {
                 font: font("monospace"),
@@ -419,6 +431,13 @@ impl BufferView {
         self.message.as_deref()
     }
 
+    pub(crate) fn set_message(&mut self, message: impl Into<String>, cx: &mut Context<Self>) {
+        self.message = Some(SharedString::from(message.into()));
+        cx.notify();
+    }
+
+    /// Owns the platform input session lifetime. Keyboard routing itself lives
+    /// in `AppShell`, which supplies the layers above this target.
     pub(crate) fn install_input_lifecycle(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let focus = cx.on_focus(&self.focus, window, |view, _, cx| {
             if view.accepting_input {
@@ -433,23 +452,7 @@ impl BufferView {
                 view.resume_input(cx);
             }
         });
-        let owner = window.window_handle();
-        let editor = cx.weak_entity();
-        let keys = cx.intercept_keystrokes(move |event, window, cx| {
-            if window.window_handle() == owner {
-                editor
-                    .update(cx, |view, cx| {
-                        view.route_key(
-                            &event.keystroke,
-                            event.input_preference == InputPreference::CharacterInput,
-                            window,
-                            cx,
-                        );
-                    })
-                    .ok();
-            }
-        });
-        self._input_subscriptions = vec![focus, blur, activation, keys];
+        self._input_subscriptions = vec![focus, blur, activation];
     }
 
     fn queue_change(&mut self, change: DisplayChange, cx: &mut Context<Self>) {
@@ -959,18 +962,29 @@ impl BufferView {
 
     #[cfg(test)]
     fn key_down(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
-        self.route_key(&event.keystroke, event.prefer_character_input, window, cx);
+        let outer = Keymap::default();
+        self.route_key(
+            &event.keystroke,
+            event.prefer_character_input,
+            &outer,
+            window,
+            cx,
+        );
     }
 
-    fn route_key(
+    /// Routes one keystroke through `outer` (application or session commands)
+    /// and this view's edit keymap. Commands in a higher layer are only reported,
+    /// never executed here.
+    pub(crate) fn route_key(
         &mut self,
         stroke: &Keystroke,
         prefer_character_input: bool,
+        outer: &Keymap,
         window: &mut Window,
         cx: &mut Context<Self>,
-    ) {
+    ) -> KeyRoute {
         if !self.accepting_input || !self.focus.is_focused(window) {
-            return;
+            return KeyRoute::Unhandled;
         }
         let display = self.display_snapshot().id();
         let viewport = self.index.as_ref().and_then(|index| {
@@ -991,19 +1005,23 @@ impl BufferView {
             self.target.token(),
             stroke,
             prefer_character_input,
-            &[&self.keymap],
+            &[outer, &self.keymap],
             viewport
                 .as_ref()
                 .map(|viewport| viewport as &dyn CommandViewport),
         );
         match result {
             Ok(route) => match route.disposition {
-                InputDisposition::TextInput => return,
+                InputDisposition::TextInput => return KeyRoute::Unhandled,
                 InputDisposition::Handled => {
                     self.invalidate_input_registration();
                     self.finish_command(route.outcome, window, cx);
                 }
-                InputDisposition::Ignored => return,
+                InputDisposition::Requested(command) => {
+                    self.invalidate_input_registration();
+                    return KeyRoute::Requested(command);
+                }
+                InputDisposition::Ignored => return KeyRoute::Unhandled,
             },
             Err(error) => {
                 if !self.target.input().is_composing() {
@@ -1018,7 +1036,7 @@ impl BufferView {
                 cx.notify();
             }
         }
-        cx.stop_propagation();
+        KeyRoute::Handled
     }
 
     fn scroll_wheel(&mut self, event: &ScrollEvent, _: &mut Window, cx: &mut Context<Self>) {
@@ -1266,7 +1284,7 @@ mod tests {
         cx.update_window(window.into(), |_, window, cx| window.draw(cx).clear(cx))
             .unwrap();
         let editor = window
-            .read_with(cx, |shell, _| shell.editor().clone())
+            .read_with(cx, |shell, _| shell.active_view().clone())
             .unwrap();
         let before = editor.read_with(cx, |view, _| view.geometry.as_ref().unwrap().rows.clone());
         cx.update_window(window.into(), |_, window, cx| {

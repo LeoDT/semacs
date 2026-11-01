@@ -6,7 +6,7 @@ use std::ops::Range;
 use gpui_kit::{KeyDownEvent, Keystroke};
 
 use crate::buffer::{Buffer, EditError, EditGroup, SnapshotId};
-use crate::command::Command;
+use crate::command::{Command, Scope};
 use crate::input::{
     DisplayChange, DisplaySnapshot, InputError, InputSession, InputUpdate, SessionToken,
 };
@@ -103,6 +103,9 @@ impl CommandOutcome {
 pub enum InputDisposition {
     TextInput,
     Handled,
+    /// The command belongs to a layer above the edit target. The owner must
+    /// execute it; the target has not changed any state for it.
+    Requested(Command),
     Ignored,
 }
 
@@ -117,6 +120,13 @@ impl Route {
         Self {
             disposition: InputDisposition::Handled,
             outcome,
+        }
+    }
+
+    fn requested(command: Command) -> Self {
+        Self {
+            disposition: InputDisposition::Requested(command),
+            outcome: CommandOutcome::default(),
         }
     }
 
@@ -305,9 +315,16 @@ impl EditTarget {
             return Err(InputError::CompositionActive.into());
         }
         match dispatch {
-            Dispatch::Command(command) => self
-                .execute_with_viewport(token, command, viewport)
-                .map(Route::handled),
+            Dispatch::Command(command) => match command.scope() {
+                Scope::Edit => self
+                    .execute_with_viewport(token, command, viewport)
+                    .map(Route::handled),
+                Scope::Application | Scope::ReadSession => {
+                    self.buffer.break_history_group();
+                    self.interrupt_command_chain();
+                    Ok(Route::requested(command))
+                }
+            },
             Dispatch::Pending(message) => {
                 self.last_command = None;
                 Ok(Route::handled(CommandOutcome::message(message)))
@@ -345,6 +362,9 @@ impl EditTarget {
         command: Command,
         viewport: Option<&dyn CommandViewport>,
     ) -> Result<CommandOutcome, RouteError> {
+        if command.scope() != Scope::Edit {
+            return Err(RouteError::Unavailable(command));
+        }
         self.input.guard_command(&self.buffer, token)?;
         if self.is_pending() {
             return Err(RouteError::PrefixPending);
@@ -548,7 +568,8 @@ impl EditTarget {
                     ..CommandOutcome::default()
                 });
             }
-            Command::SelfInsert => return Err(RouteError::Unavailable(command)),
+            // Every other command is owned by a layer above the edit target.
+            _ => return Err(RouteError::Unavailable(command)),
         }
         Ok(CommandOutcome {
             reveal_point: true,

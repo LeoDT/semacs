@@ -1,7 +1,7 @@
 use gpui_kit::{KeyDownEvent, Keystroke};
 use proptest::prelude::*;
 use semacs::buffer::{Buffer, Edit, EditError, EditSource};
-use semacs::command::Command;
+use semacs::command::{Command, Scope};
 use semacs::editing::{CommandOutcome, EditTarget, KillRing, RouteError};
 use semacs::files::{DecodedFile, FileFormat};
 use semacs::input::InputError;
@@ -424,7 +424,7 @@ fn yank_into_protected_text_keeps_its_mark_side_effect_without_editing_prompt() 
 
 #[test]
 fn self_insert_keys_inside_prompt_are_rejected_before_platform_input() {
-    let map = Keymap::m1_defaults();
+    let map = Keymap::for_scope(Scope::Edit);
     let mut target = target("P: ", "");
     at(&mut target, 1);
     let event = KeyDownEvent {

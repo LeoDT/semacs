@@ -64,7 +64,7 @@ fn measure(sample: &str, text: &str, run: usize) {
                 .downcast::<AppShell>()
                 .unwrap()
                 .read(cx)
-                .editor()
+                .active_view()
                 .clone()
         })
         .unwrap();

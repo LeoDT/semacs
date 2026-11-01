@@ -1,6 +1,6 @@
 use gpui_kit::{KeyDownEvent, Keystroke};
 use semacs::buffer::{Buffer, EditError, EditSource};
-use semacs::command::Command;
+use semacs::command::{Command, Scope};
 use semacs::editing::{CommandOutcome, EditTarget, KillRing, RouteError};
 use semacs::files::{DecodedFile, FileFormat};
 use semacs::input::InputError;
@@ -240,7 +240,7 @@ fn rejected_readonly_typing_breaks_a_preceding_kill_chain() {
     };
     assert_eq!(
         target
-            .key_down(target.token(), &event, &[&Keymap::m1_defaults()])
+            .key_down(target.token(), &event, &[&Keymap::for_scope(Scope::Edit)])
             .unwrap_err(),
         RouteError::Input(InputError::Edit(EditError::ReadOnly))
     );
@@ -338,7 +338,7 @@ fn global_command_chain_is_broken_by_other_targets_commands_and_input() {
                 first.resume_input();
             }
             5 => {
-                press(&mut first, &Keymap::m1_defaults(), "ctrl-z");
+                press(&mut first, &Keymap::for_scope(Scope::Edit), "ctrl-z");
             }
             _ => {
                 run(&mut first, Command::Undo);
@@ -354,7 +354,7 @@ fn global_command_chain_is_broken_by_other_targets_commands_and_input() {
 fn prefixes_are_not_commands_and_do_not_break_a_contiguous_kill() {
     let ring = KillRing::default();
     let mut target = target("abc\ndef", &ring);
-    let mut map = Keymap::m1_defaults();
+    let mut map = Keymap::for_scope(Scope::Edit);
     map.bind(
         &semacs::keymap::parse_sequence("ctrl-x k").unwrap(),
         Command::KillLine,
@@ -371,7 +371,7 @@ fn prefixes_are_not_commands_and_do_not_break_a_contiguous_kill() {
 fn prefix_composition_and_stale_tokens_cannot_write_the_ring() {
     let ring = KillRing::default();
     let mut target = target("abc", &ring);
-    let map = Keymap::m1_defaults();
+    let map = Keymap::for_scope(Scope::Edit);
     press(&mut target, &map, "ctrl-x");
     assert_eq!(
         target

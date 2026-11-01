@@ -63,7 +63,7 @@ fn print_help() {
     println!("Usage: semacs [FILE]");
     println!();
     println!("Load FILE, or prepare an empty *scratch* document.");
-    println!("M1 supports basic Emacs editing and undo/redo; saving is not connected yet.");
+    println!("Basic Emacs editing and undo/redo are available; saving is not connected yet.");
 }
 
 fn startup_buffer(path: Option<PathBuf>) -> Result<Buffer, String> {

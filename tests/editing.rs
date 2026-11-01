@@ -1,6 +1,6 @@
 use gpui_kit::{KeyDownEvent, Keystroke};
 use semacs::buffer::{Buffer, Edit, EditError, EditSource};
-use semacs::command::Command;
+use semacs::command::{Command, Scope};
 use semacs::editing::{CommandOutcome, EditTarget, InputDisposition, Route, RouteError};
 use semacs::files::{DecodedFile, FileFormat};
 use semacs::input::InputError;
@@ -89,7 +89,7 @@ fn command_and_platform_edits_use_the_same_buffer_with_distinct_sources() {
 
 #[test]
 fn undefined_suffix_does_not_invoke_top_level_quit_or_deactivate_the_region() {
-    let map = Keymap::m1_defaults();
+    let map = Keymap::for_scope(Scope::Edit);
     let mut target = target("abc");
     execute(&mut target, Command::SetMark);
     execute(&mut target, Command::ForwardChar);
@@ -117,7 +117,7 @@ fn undefined_suffix_does_not_invoke_top_level_quit_or_deactivate_the_region() {
 
 #[test]
 fn pending_prefix_blocks_every_direct_input_mutation() {
-    let map = Keymap::m1_defaults();
+    let map = Keymap::for_scope(Scope::Edit);
     let mut target = target("abc");
     let initial = target.buffer().snapshot_id();
     press(&mut target, "ctrl-x", &map).unwrap();
@@ -154,7 +154,7 @@ fn pending_prefix_blocks_every_direct_input_mutation() {
 
 #[test]
 fn composition_rejects_commands_without_consuming_prefix_state_or_the_preedit() {
-    let map = Keymap::m1_defaults();
+    let map = Keymap::for_scope(Scope::Edit);
     let mut target = target("tail");
     execute(&mut target, Command::SetMark);
     target
@@ -183,7 +183,7 @@ fn composition_rejects_commands_without_consuming_prefix_state_or_the_preedit() 
 
 #[test]
 fn readonly_targets_allow_motion_and_mark_but_reject_input_and_edits() {
-    let map = Keymap::m1_defaults();
+    let map = Keymap::for_scope(Scope::Edit);
     let mut target = target("abc");
     target.set_read_only(true);
     let initial = target.buffer().snapshot_id();
@@ -244,7 +244,7 @@ fn failed_unmark_is_transactional_and_does_not_discard_the_preedit() {
 
 #[test]
 fn lifecycle_reset_clears_prefix_and_rejects_callbacks_and_commands_from_old_sessions() {
-    let map = Keymap::m1_defaults();
+    let map = Keymap::for_scope(Scope::Edit);
     let mut first = target("first");
     let mut second = target("second");
     let old = first.token();
@@ -297,7 +297,7 @@ fn marker_tracks_committed_edits_but_not_marked_updates_or_discard() {
 
 #[test]
 fn repeated_mark_and_escape_quit_do_not_delete_the_mark() {
-    let map = Keymap::m1_defaults();
+    let map = Keymap::for_scope(Scope::Edit);
     let mut target = target("abc");
     execute(&mut target, Command::SetMark);
     let outcome = execute(&mut target, Command::SetMark);
@@ -416,7 +416,7 @@ fn readonly_is_enforced_at_the_authoritative_edit_entry() {
 
 #[test]
 fn word_motion_skips_separators_and_clamps_at_buffer_edges() {
-    let map = Keymap::m1_defaults();
+    let map = Keymap::for_scope(Scope::Edit);
     let mut target = target("one_two foo-bar 中中文 🙂last!\n");
     let id = target.display_snapshot().id();
     for expected in [3, 7, 11, 15, 25, 34, 36, 36] {
@@ -444,7 +444,7 @@ fn word_motion_uses_the_registered_f2_combining_mark_rule() {
 
 #[test]
 fn vertical_motion_retains_columns_across_short_lines_and_direction_changes() {
-    let map = Keymap::m1_defaults();
+    let map = Keymap::for_scope(Scope::Edit);
     let mut target = target("abcdef\nx\nabcdef\n");
     target
         .set_point_from_pointer(target.token(), ByteOffset(4))
@@ -510,7 +510,7 @@ fn vertical_boundary_errors_still_move_to_the_buffer_edge() {
 
 #[test]
 fn platform_input_pointer_and_undefined_keys_interrupt_the_vertical_goal() {
-    let map = Keymap::m1_defaults();
+    let map = Keymap::for_scope(Scope::Edit);
     for interruption in 0..3 {
         let mut target = target("abcdef\nx\nabcdef");
         target
@@ -540,7 +540,7 @@ fn platform_input_pointer_and_undefined_keys_interrupt_the_vertical_goal() {
 
 #[test]
 fn buffer_jumps_set_an_inactive_mark_but_preserve_an_active_region() {
-    let map = Keymap::m1_defaults();
+    let map = Keymap::for_scope(Scope::Edit);
     let mut target = target("中abc");
     execute(&mut target, Command::ForwardChar);
     let outcome = press(&mut target, "alt->", &map).unwrap().outcome;
@@ -607,7 +607,7 @@ fn paging_requires_a_viewport_and_still_obeys_all_target_guards() {
     assert_eq!(target.buffer().point(), ByteOffset(2));
     assert!(target.buffer().mark_active());
     assert!(!target.buffer().is_modified());
-    press(&mut target, "ctrl-x", &Keymap::m1_defaults()).unwrap();
+    press(&mut target, "ctrl-x", &Keymap::for_scope(Scope::Edit)).unwrap();
     assert_eq!(
         target
             .execute_with_viewport(target.token(), Command::ScrollDown, Some(&Page))
@@ -631,7 +631,7 @@ fn paging_requires_a_viewport_and_still_obeys_all_target_guards() {
 
 #[test]
 fn undo_without_history_reports_an_error_without_editing_the_target() {
-    let map = Keymap::m1_defaults();
+    let map = Keymap::for_scope(Scope::Edit);
     let mut target = target("abc");
     let before = target.buffer().snapshot_id();
     press(&mut target, "ctrl-x", &map).unwrap();
@@ -642,4 +642,50 @@ fn undo_without_history_reports_an_error_without_editing_the_target() {
     assert!(!target.is_pending());
     assert_eq!(target.buffer().snapshot_id(), before);
     assert!(!target.buffer().is_modified());
+}
+
+#[test]
+fn commands_above_the_edit_target_are_reported_not_executed() {
+    let application = Keymap::for_scope(Scope::Application);
+    let edit = Keymap::for_scope(Scope::Edit);
+    let layers = [&application, &edit];
+    let mut target = target("abc");
+    for (keys, command) in [
+        ("ctrl-x ctrl-f", Command::FindFile),
+        ("ctrl-x ctrl-s", Command::SaveBuffer),
+        ("alt-x", Command::ExecuteExtendedCommand),
+    ] {
+        let mut route = None;
+        for key in keys.split_whitespace() {
+            route = Some(
+                target
+                    .key_down(
+                        target.token(),
+                        &KeyDownEvent {
+                            keystroke: Keystroke::parse(key).unwrap().with_simulated_ime(),
+                            is_held: false,
+                            prefer_character_input: false,
+                        },
+                        &layers,
+                    )
+                    .unwrap(),
+            );
+        }
+        let route = route.unwrap();
+        assert_eq!(
+            route.disposition,
+            InputDisposition::Requested(command),
+            "{keys}"
+        );
+        assert_eq!(target.buffer().text().to_string(), "abc");
+        assert_eq!(target.buffer().point(), ByteOffset(0));
+        assert!(!target.buffer().is_modified());
+        assert!(!target.is_pending());
+    }
+    assert_eq!(
+        target
+            .execute(target.token(), Command::FindFile)
+            .unwrap_err(),
+        RouteError::Unavailable(Command::FindFile)
+    );
 }

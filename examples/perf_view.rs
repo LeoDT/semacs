@@ -67,7 +67,7 @@ fn measure(sample: &str, text: &str, run: usize) {
         AppShell::new(buffer, window, cx)
     });
     let editor = window
-        .read_with(&app, |shell, _| shell.editor().clone())
+        .read_with(&app, |shell, _| shell.active_view().clone())
         .unwrap();
     let mut cx = VisualTestContext::from_window(window.into(), &app);
     draw(&mut cx, false);

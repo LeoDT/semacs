@@ -1,7 +1,7 @@
 use gpui_kit::{KeyDownEvent, Keystroke};
 use proptest::prelude::*;
 use semacs::buffer::{Buffer, Edit, EditError, EditSource};
-use semacs::command::Command;
+use semacs::command::{Command, Scope};
 use semacs::editing::{CommandOutcome, EditTarget, KillRing, RouteError};
 use semacs::files::{DecodedFile, FileFormat};
 use semacs::input::InputError;
@@ -41,7 +41,7 @@ fn press(target: &mut EditTarget, key: &'static str) -> Result<CommandOutcome, R
                 is_held: false,
                 prefer_character_input: false,
             },
-            &[&Keymap::m1_defaults()],
+            &[&Keymap::for_scope(Scope::Edit)],
         )
         .map(|route| route.outcome)
 }

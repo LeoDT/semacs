@@ -24,7 +24,7 @@ fn open(text: &str, cx: &mut TestAppContext) -> (VisualTestContext, Entity<Buffe
         AppShell::new(buffer, window, cx)
     });
     let editor = window
-        .read_with(cx, |shell, _| shell.editor().clone())
+        .read_with(cx, |shell, _| shell.active_view().clone())
         .unwrap();
     let mut visual = VisualTestContext::from_window(window.into(), cx);
     visual.run_until_parked();

@@ -130,7 +130,7 @@ struct Probe {
 
 impl Render for Probe {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let editor = self.shell.read(cx).editor().clone();
+        let editor = self.shell.read(cx).active_view().clone();
         let paints = self.paints.clone();
         div().size_full().child(self.shell.clone()).child(
             canvas(
@@ -684,12 +684,12 @@ fn main() {
             cx,
             move |window, cx| cx.new(|cx| {
                 let shell = cx.new(|cx| AppShell::new(buffer, window, cx));
-                let editor = shell.read(cx).editor().clone();
+                let editor = shell.read(cx).active_view().clone();
                 let subscription = cx.observe(&editor, |_, _, cx| cx.notify());
                 Probe { shell, paints: probe_paints, _subscription: subscription }
             }),
         ).expect("open native performance window");
-        let editor = probe.read(cx).shell.read(cx).editor().clone();
+        let editor = probe.read(cx).shell.read(cx).active_view().clone();
         window.update(cx, move |_, window, cx| {
             let specs = window.gpu_specs().expect("renderer must identify itself");
             assert!(allow_software || !specs.is_software_emulated,

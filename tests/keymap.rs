@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 
 use gpui_kit::{KeyDownEvent, Keystroke};
-use semacs::command::{COMMANDS, Command};
+use semacs::command::{COMMANDS, Command, Scope};
 use semacs::keymap::{
     BindError, Dispatch, Key, Keymap, KeymapState, Lookup, lookup, parse_sequence,
 };
@@ -44,12 +44,18 @@ fn every_default_binding_matches_the_fixed_emacs_reference() {
         .filter(|line| !line.starts_with('#'))
         .map(|line| line.split_once('\t').unwrap())
         .collect();
-    let map = Keymap::m1_defaults();
+    let application = Keymap::for_scope(Scope::Application);
+    let edit = Keymap::for_scope(Scope::Edit);
+    let body = [&application, &edit];
     for spec in COMMANDS {
         for binding in spec.bindings {
             assert_eq!(reference.get(binding.reference), Some(&spec.name));
+            let layers: &[&Keymap] = match spec.scope {
+                Scope::Application | Scope::Edit => &body,
+                Scope::ReadSession => continue,
+            };
             assert_eq!(
-                lookup(&[&map], &keys(binding.keys)),
+                lookup(layers, &keys(binding.keys)),
                 Lookup::Command(spec.command),
                 "{}",
                 binding.keys
@@ -57,8 +63,11 @@ fn every_default_binding_matches_the_fixed_emacs_reference() {
         }
     }
     for sequence in ["ctrl-x", "ctrl-h", "escape", "escape escape", "alt-escape"] {
-        assert_eq!(lookup(&[&map], &keys(sequence)), Lookup::Prefix);
+        assert_eq!(lookup(&body, &keys(sequence)), Lookup::Prefix);
     }
+    // Application bindings live only in the application layer used by the body.
+    assert_eq!(lookup(&[&edit], &keys("ctrl-x ctrl-f")), Lookup::Unbound);
+    assert_eq!(lookup(&[&application], &keys("ctrl-f")), Lookup::Unbound);
 }
 
 #[test]
@@ -143,7 +152,7 @@ fn meta_and_escape_share_one_binding_and_conflict_namespace() {
 
 #[test]
 fn layers_override_commands_and_merge_prefix_children() {
-    let global = Keymap::m1_defaults();
+    let global = Keymap::for_scope(Scope::Edit);
     let mut local = Keymap::default();
     local.bind(&keys("ctrl-f"), Command::BackwardChar).unwrap();
     local.bind(&keys("ctrl-x z"), Command::Yank).unwrap();
@@ -180,7 +189,7 @@ fn layers_override_commands_and_merge_prefix_children() {
 
 #[test]
 fn prefix_state_is_target_owned_and_waits_until_a_following_key() {
-    let map = Keymap::m1_defaults();
+    let map = Keymap::for_scope(Scope::Edit);
     let mut first = KeymapState::default();
     let mut second = KeymapState::default();
     assert_eq!(
@@ -199,7 +208,7 @@ fn prefix_state_is_target_owned_and_waits_until_a_following_key() {
 
 #[test]
 fn quit_is_looked_up_in_the_current_prefix_not_handled_as_a_global_interrupt() {
-    let map = Keymap::m1_defaults();
+    let map = Keymap::for_scope(Scope::Edit);
     let mut state = KeymapState::default();
     assert_eq!(
         dispatch(&mut state, "ctrl-g", &map),
@@ -221,7 +230,7 @@ fn quit_is_looked_up_in_the_current_prefix_not_handled_as_a_global_interrupt() {
 
 #[test]
 fn escape_sequences_and_meta_events_resolve_to_the_same_commands() {
-    let map = Keymap::m1_defaults();
+    let map = Keymap::for_scope(Scope::Edit);
     let mut state = KeymapState::default();
     assert_eq!(
         dispatch(&mut state, "alt-f", &map),
@@ -256,7 +265,7 @@ fn escape_sequences_and_meta_events_resolve_to_the_same_commands() {
 
 #[test]
 fn tab_return_and_backspace_keep_their_distinct_key_identities() {
-    let map = Keymap::m1_defaults();
+    let map = Keymap::for_scope(Scope::Edit);
     for (key, command) in [
         ("tab", Command::Indent),
         ("ctrl-i", Command::Indent),
@@ -289,7 +298,7 @@ fn tab_return_and_backspace_keep_their_distinct_key_identities() {
 
 #[test]
 fn only_printable_unmodified_or_shifted_input_can_self_insert() {
-    let map = Keymap::m1_defaults();
+    let map = Keymap::for_scope(Scope::Edit);
     for key in ["a", "shift-a", "中", "space", "!", "shift-!"] {
         assert_eq!(
             dispatch(&mut KeymapState::default(), key, &map),
@@ -330,7 +339,7 @@ fn explicit_bindings_take_precedence_over_self_insert_and_ignore_key_char_metada
         dispatch(&mut KeymapState::default(), "shift-a", &map),
         Dispatch::SelfInsert
     );
-    let global = Keymap::m1_defaults();
+    let global = Keymap::for_scope(Scope::Edit);
     assert_eq!(
         dispatch(&mut KeymapState::default(), "alt-shift-<", &global),
         Dispatch::Command(Command::BeginningOfBuffer)
@@ -339,7 +348,7 @@ fn explicit_bindings_take_precedence_over_self_insert_and_ignore_key_char_metada
 
 #[test]
 fn platform_character_input_is_not_mistaken_for_an_editor_command() {
-    let map = Keymap::m1_defaults();
+    let map = Keymap::for_scope(Scope::Edit);
     let mut altgr = event("ctrl-alt-q");
     altgr.prefer_character_input = true;
     altgr.keystroke.key_char = Some("@".into());
@@ -360,7 +369,7 @@ fn platform_character_input_is_not_mistaken_for_an_editor_command() {
 
 #[test]
 fn undefined_printable_suffix_does_not_fall_through_to_text_input() {
-    let map = Keymap::m1_defaults();
+    let map = Keymap::for_scope(Scope::Edit);
     let mut state = KeymapState::default();
     dispatch(&mut state, "ctrl-x", &map);
     assert_eq!(
@@ -377,7 +386,7 @@ fn undefined_printable_suffix_does_not_fall_through_to_text_input() {
 
 #[test]
 fn modifier_only_events_preserve_prefix_and_explicit_clear_ends_it() {
-    let map = Keymap::m1_defaults();
+    let map = Keymap::for_scope(Scope::Edit);
     let mut state = KeymapState::default();
     dispatch(&mut state, "ctrl-x", &map);
     for key in ["shift", "ctrl", "alt", "super", "fn"] {

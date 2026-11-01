@@ -240,7 +240,7 @@ fn root_tab_traversal_and_framework_actions_still_work_outside_editor_focus(
     let controls = controls.unwrap();
     let mut visual = VisualTestContext::from_window(window.into(), cx);
     redraw(&mut visual);
-    let body = visual.read(|cx| controls.read(cx).shell.read(cx).editor().clone());
+    let body = visual.read(|cx| controls.read(cx).shell.read(cx).active_view().clone());
     let calls = Rc::new(Cell::new(0));
     visual.update(|window, cx| {
         let calls = calls.clone();
