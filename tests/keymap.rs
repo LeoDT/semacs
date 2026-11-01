@@ -90,6 +90,54 @@ fn every_default_binding_matches_the_fixed_emacs_reference() {
 }
 
 #[test]
+fn named_keys_without_key_char_stay_keymap_commands_instead_of_ime_text() {
+    let edit = Keymap::for_scope(Scope::Edit);
+    let session = Keymap::for_scope(Scope::ReadSession);
+    for (key, command) in [
+        ("enter", Command::Newline),
+        ("return", Command::Newline),
+        ("tab", Command::Indent),
+        ("backspace", Command::DeleteBackwardChar),
+    ] {
+        let event = KeyDownEvent {
+            keystroke: Keystroke::parse(key).unwrap(),
+            is_held: false,
+            prefer_character_input: false,
+        };
+        assert_eq!(
+            KeymapState::default().dispatch(&event, &[&edit]),
+            Dispatch::Command(command),
+            "{key}"
+        );
+    }
+    for (key, command) in [
+        ("enter", Command::MinibufferCompleteAndExit),
+        ("tab", Command::MinibufferComplete),
+    ] {
+        let event = KeyDownEvent {
+            keystroke: Keystroke::parse(key).unwrap(),
+            is_held: false,
+            prefer_character_input: false,
+        };
+        assert_eq!(
+            KeymapState::default().dispatch(&event, &[&session, &edit]),
+            Dispatch::Command(command),
+            "{key}"
+        );
+    }
+
+    let plain = KeyDownEvent {
+        keystroke: Keystroke::parse("a").unwrap(),
+        is_held: false,
+        prefer_character_input: false,
+    };
+    assert_eq!(
+        KeymapState::default().dispatch(&plain, &[&edit]),
+        Dispatch::PlatformInput
+    );
+}
+
+#[test]
 fn command_prefix_and_duplicate_conflicts_are_rejected_without_changing_bindings() {
     for (first, second) in [("ctrl-x", "ctrl-x u"), ("ctrl-x u", "ctrl-x")] {
         let mut map = Keymap::default();

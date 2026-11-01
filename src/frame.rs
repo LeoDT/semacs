@@ -3,8 +3,6 @@
 use gpui_kit::component::{ActiveTheme, h_flex, v_flex};
 use gpui_kit::*;
 
-use crate::echo::EchoArea;
-
 pub fn mode_line(
     name: String,
     format: crate::files::FileFormat,
@@ -31,7 +29,7 @@ pub fn mode_line(
         .child(position)
 }
 
-pub fn echo_area(echo: &EchoArea, cx: &App) -> impl IntoElement {
+pub fn echo_area(message: &str, cx: &App) -> impl IntoElement {
     v_flex()
         .id("echo-area")
         .h(px(24.0))
@@ -41,5 +39,5 @@ pub fn echo_area(echo: &EchoArea, cx: &App) -> impl IntoElement {
         .bg(cx.theme().background)
         .text_color(cx.theme().muted_foreground)
         .text_sm()
-        .child(echo.message().to_owned())
+        .child(message.to_owned())
 }

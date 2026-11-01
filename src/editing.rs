@@ -5,7 +5,7 @@ use std::ops::Range;
 
 use gpui_kit::{KeyDownEvent, Keystroke};
 
-use crate::buffer::{Buffer, EditError, EditGroup, SnapshotId};
+use crate::buffer::{Buffer, EditError, EditGroup, SavePoint};
 use crate::command::{Command, Scope};
 use crate::input::{
     DisplayChange, DisplaySnapshot, InputError, InputSession, InputUpdate, SessionToken,
@@ -209,8 +209,24 @@ impl EditTarget {
         self.buffer.set_read_only(read_only);
     }
 
-    pub fn mark_saved(&mut self, snapshot: SnapshotId) -> Result<(), EditError> {
-        self.buffer.mark_saved(snapshot)
+    pub fn mark_saved_at(&mut self, point: SavePoint) -> Result<(), EditError> {
+        self.buffer.mark_saved_at(point)
+    }
+
+    pub fn begin_save(&mut self) -> SavePoint {
+        self.buffer.begin_save()
+    }
+
+    pub(crate) fn set_file_path(&mut self, path: std::path::PathBuf) {
+        self.buffer.set_path(path);
+    }
+
+    pub(crate) fn set_disk_stamp(&mut self, stamp: Option<crate::files::FileStamp>) {
+        self.buffer.set_disk_stamp(stamp);
+    }
+
+    pub(crate) fn set_display_name(&mut self, name: String) {
+        self.buffer.set_display_name(name);
     }
 
     pub fn display_snapshot(&self) -> DisplaySnapshot {

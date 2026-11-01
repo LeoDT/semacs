@@ -15,7 +15,7 @@ pub struct Key {
 impl Key {
     pub fn from_keystroke(stroke: &Keystroke) -> Self {
         let key = match stroke.key.as_str() {
-            "return" => "enter",
+            "return" | "linefeed" | "kp-enter" => "enter",
             _ => &stroke.key,
         };
         let mut modifiers = stroke.modifiers;
@@ -198,6 +198,24 @@ impl Keymap {
     }
 }
 
+/// Named keys such as RET and TAB arrive without `key_char` from the platform.
+/// They are commands, not unfinished IME text; only empty / single-scalar keys
+/// and dead-key composition events belong to the platform input path.
+///
+/// This deliberately does not call `Keystroke::is_ime_in_progress`: that helper
+/// classifies named keys through `is_printable_key`, which treats RET, TAB and
+/// space as preedit when `key_char` is absent and would hide them from keymaps.
+/// Real Wayland / IME behavior still has to be verified in M2-F.
+fn is_ime_in_progress(stroke: &Keystroke) -> bool {
+    let key = stroke.key.as_str();
+    stroke.key_char.is_none()
+        && (key.is_empty() || key.chars().count() == 1 || key.starts_with("dead_"))
+        && !(stroke.modifiers.platform
+            || stroke.modifiers.control
+            || stroke.modifiers.function
+            || stroke.modifiers.alt)
+}
+
 /// Layers are ordered from most specific to global. Prefix children may fall
 /// through to lower layers, but a higher command shadows the entire lower prefix.
 pub fn lookup(layers: &[&Keymap], sequence: &[Key]) -> Lookup {
@@ -255,7 +273,7 @@ impl KeymapState {
         ) {
             return Dispatch::Ignored;
         }
-        if prefer_character_input || stroke.is_ime_in_progress() {
+        if prefer_character_input || is_ime_in_progress(stroke) {
             return if self.is_pending() {
                 Dispatch::InputBlocked
             } else {

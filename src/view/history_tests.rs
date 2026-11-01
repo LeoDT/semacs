@@ -164,7 +164,8 @@ fn region_kill_yank_and_history_have_independent_ring_and_saved_boundaries(
         );
     });
     editor.update(&mut visual, |view, _| {
-        view.target.mark_saved(view.buffer().snapshot_id()).unwrap();
+        let point = view.target.begin_save();
+        view.target.mark_saved_at(point).unwrap();
     });
     visual.simulate_keystrokes("ctrl-/ ctrl-/ ctrl-/ ctrl-/");
     redraw(&mut visual);

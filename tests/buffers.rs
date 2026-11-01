@@ -173,37 +173,45 @@ fn activating_buffers_only_moves_rendering_and_focus(cx: &mut TestAppContext) {
 #[gpui::test]
 fn application_commands_are_requests_and_never_edit_the_wrong_target(cx: &mut TestAppContext) {
     let (mut visual, shell, first) = open("alpha\n", None, cx);
+    visual.simulate_input("Z");
+    redraw(&mut visual);
     visual.simulate_keystrokes("ctrl-x ctrl-s");
+    redraw(&mut visual);
     visual.read(|cx| {
+        assert!(shell.read(cx).session().is_some());
         assert_eq!(
-            first.read(cx).message(),
-            Some("save-buffer is not available yet")
+            shell.read(cx).minibuffer().unwrap().read(cx).prompt(cx),
+            "Write file: "
         );
-        assert_eq!(first.read(cx).buffer().text().to_string(), "alpha\n");
-        assert!(!first.read(cx).buffer().is_modified());
+        assert_eq!(first.read(cx).buffer().text().to_string(), "Zalpha\n");
+        assert!(first.read(cx).buffer().is_modified());
     });
-    visual.simulate_keystrokes("ctrl-x b");
-    visual.read(|cx| {
-        assert_eq!(
-            first.read(cx).message(),
-            Some("switch-to-buffer is not available yet")
-        );
-    });
-
+    visual.simulate_keystrokes("ctrl-g");
+    redraw(&mut visual);
+    visual.read(|cx| assert!(shell.read(cx).session().is_none()));
     let second = create(&mut visual, &shell, "beta\n", None);
     activate(&mut visual, &shell, second);
     visual.simulate_keystrokes("ctrl-x ctrl-f");
+    redraw(&mut visual);
     visual.read(|cx| {
-        let view = shell.read(cx).active_view();
+        let shell = shell.read(cx);
+        assert!(shell.session().is_some());
         assert_eq!(
-            view.read(cx).message(),
-            Some("find-file is not available yet")
+            shell.minibuffer().unwrap().read(cx).prompt(cx),
+            "Find file: "
         );
+        let view = shell.active_view();
         assert_eq!(view.read(cx).buffer().text().to_string(), "beta\n");
-        assert_eq!(first.read(cx).buffer().text().to_string(), "alpha\n");
+        assert_eq!(first.read(cx).buffer().text().to_string(), "Zalpha\n");
+        assert_eq!(first.read(cx).message(), Some("Quit"));
+    });
+    visual.simulate_keystrokes("ctrl-g");
+    redraw(&mut visual);
+    visual.read(|cx| {
+        assert!(shell.read(cx).session().is_none());
         assert_eq!(
-            first.read(cx).message(),
-            Some("switch-to-buffer is not available yet")
+            shell.read(cx).active_view().read(cx).message(),
+            Some("Quit")
         );
     });
     visual.simulate_input("Z");

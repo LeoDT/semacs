@@ -11,7 +11,7 @@ use gpui_kit::component::ActiveTheme;
 use gpui_kit::*;
 use unicode_segmentation::UnicodeSegmentation;
 
-use crate::buffer::Buffer;
+use crate::buffer::{Buffer, EditError, SavePoint};
 use crate::command::{Command, Scope};
 use crate::display::{FontMeasure, IndexedRow, LayoutKey, LayoutSettings, WrapIndex, WrapJob};
 use crate::editing::{
@@ -28,6 +28,11 @@ mod motion;
 const PREVIEW_BYTES: usize = 8192;
 const SYNC_SHAPE_BYTES: usize = 8192;
 const PADDING: Pixels = px(8.);
+
+pub(crate) enum KeyLayers<'a> {
+    Edit(Option<&'a Keymap>),
+    Exclusive(&'a Keymap),
+}
 
 /// Result of routing one keystroke through a buffer view.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -376,6 +381,45 @@ impl BufferView {
 
     pub fn buffer(&self) -> &Buffer {
         self.target.buffer()
+    }
+
+    pub(crate) fn mark_saved_at(
+        &mut self,
+        point: SavePoint,
+        cx: &mut Context<Self>,
+    ) -> Result<(), EditError> {
+        let result = self.target.mark_saved_at(point);
+        cx.notify();
+        result
+    }
+
+    pub(crate) fn set_read_only(&mut self, read_only: bool, cx: &mut Context<Self>) {
+        self.target.set_read_only(read_only);
+        self.invalidate_input_registration();
+        cx.notify();
+    }
+
+    pub(crate) fn begin_save(&mut self) -> SavePoint {
+        self.target.begin_save()
+    }
+
+    pub(crate) fn set_file_path(&mut self, path: std::path::PathBuf, cx: &mut Context<Self>) {
+        self.target.set_file_path(path);
+        cx.notify();
+    }
+
+    pub(crate) fn set_disk_stamp(
+        &mut self,
+        stamp: Option<crate::files::FileStamp>,
+        cx: &mut Context<Self>,
+    ) {
+        self.target.set_disk_stamp(stamp);
+        cx.notify();
+    }
+
+    pub(crate) fn set_display_name(&mut self, name: String, cx: &mut Context<Self>) {
+        self.target.set_display_name(name);
+        cx.notify();
     }
     pub fn display_snapshot(&self) -> DisplaySnapshot {
         self.target.display_snapshot()
@@ -965,24 +1009,26 @@ impl BufferView {
         self.route_key(
             &event.keystroke,
             event.prefer_character_input,
-            None,
+            KeyLayers::Edit(None),
+            true,
             window,
             cx,
         );
     }
 
-    /// Routes one keystroke through the optional layer above this view (body:
-    /// application commands, session: minibuffer commands) and this view's edit
-    /// keymap. Commands in a higher layer are only reported, never executed here.
+    /// Routes through an edit keymap with an optional outer layer, or an
+    /// exclusive outer layer for non-editing queries. Higher-layer commands
+    /// are only reported; their owner executes them.
     pub(crate) fn route_key(
         &mut self,
         stroke: &Keystroke,
         prefer_character_input: bool,
-        outer: Option<&Keymap>,
+        layers: KeyLayers<'_>,
+        require_focus: bool,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> KeyRoute {
-        if !self.accepting_input || !self.focus.is_focused(window) {
+        if !self.accepting_input || (require_focus && !self.focus.is_focused(window)) {
             return KeyRoute::Unhandled;
         }
         let display = self.display_snapshot().id();
@@ -995,8 +1041,8 @@ impl BufferView {
         );
         let before_point = self.target.buffer().point();
         let token = self.target.token();
-        let result = match outer {
-            Some(outer) => self.target.dispatch_keystroke(
+        let result = match layers {
+            KeyLayers::Edit(Some(outer)) => self.target.dispatch_keystroke(
                 token,
                 stroke,
                 prefer_character_input,
@@ -1005,7 +1051,7 @@ impl BufferView {
                     .as_ref()
                     .map(|viewport| viewport as &dyn CommandViewport),
             ),
-            None => self.target.dispatch_keystroke(
+            KeyLayers::Edit(None) => self.target.dispatch_keystroke(
                 token,
                 stroke,
                 prefer_character_input,
@@ -1013,6 +1059,13 @@ impl BufferView {
                 viewport
                     .as_ref()
                     .map(|viewport| viewport as &dyn CommandViewport),
+            ),
+            KeyLayers::Exclusive(layer) => self.target.dispatch_keystroke(
+                token,
+                stroke,
+                prefer_character_input,
+                &[layer],
+                None,
             ),
         };
         match result {
@@ -1023,7 +1076,8 @@ impl BufferView {
                     self.finish_command(route.outcome, window, cx);
                 }
                 InputDisposition::Requested(command) => {
-                    self.invalidate_input_registration();
+                    // The owner revokes input when it changes the target. An
+                    // asynchronous request alone must not drop ongoing typing.
                     return KeyRoute::Requested(command);
                 }
                 InputDisposition::Ignored => return KeyRoute::Unhandled,

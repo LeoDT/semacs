@@ -63,16 +63,17 @@ fn print_help() {
     println!("Usage: semacs [FILE]");
     println!();
     println!("Load FILE, or prepare an empty *scratch* document.");
-    println!("Basic Emacs editing and undo/redo are available; saving is not connected yet.");
+    println!("Emacs editing, undo/redo, minibuffer commands, files and buffers are available.");
 }
 
 fn startup_buffer(path: Option<PathBuf>) -> Result<Buffer, String> {
     let Some(path) = path else {
         return Ok(Buffer::scratch());
     };
+    let path = files::absolute(&path).map_err(|error| format!("{}: {error}", path.display()))?;
 
-    match files::read(&path) {
-        Ok(file) => Ok(Buffer::new(Some(path), file)),
+    match files::load(&path) {
+        Ok(loaded) => Ok(Buffer::visiting(path, loaded.file, loaded.stamp)),
         Err(ReadError::Io(error)) if error.kind() == ErrorKind::NotFound => {
             Ok(Buffer::new_file(path))
         }

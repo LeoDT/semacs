@@ -121,3 +121,28 @@ GNU Emacs 31.1 `-Q` / fundamental-mode 的绑定查询与缩进选项已固定�
 `minibuffer-complete-and-exit` 的源码与探针共同确认：空输入直接退出；精确匹配直接退出；否则先补全，只有补全后成为唯一精确匹配才在同一次 RET 退出；已在公共前缀且仍多候选时 RET 不产生可见消息；无候选时报告 `No match`。`simple.el` 的 `execute-extended-command` 使用 `` `%s' is not a valid command name ``，显示层按 text-quoting-style 呈现为弯引号，上述记录按显示结果书写。
 
 候选集合在 Emacs 中是全部 `commandp` 符号；semacs 使用自己的注册表并排除会话命令，候选列表显示在 echo area 而不是 `*Completions*` buffer。这些差异属于产品已登记的实现边界，不是 Emacs 行为差异。本记录不证明真实 Wayland / IME 或 semacs 的 `M-x` 已通过验收。
+
+### M2 文件 / buffer / 退出参照
+
+[m2-files.el](m2-files.el) 用 6 项 ERT 固定文件与 buffer 查询语义；它只替换用户查询本身（`y-or-n-p` / `completing-read-default` / `read-buffer` / `read-file-name`），周围走真实 Emacs 代码。结果：
+
+| 用例 | 稳定结果 |
+|---|---|
+| `m2-file-buffer-names-*` | `emacs -Q` 基线：第一个 `foo` 保持原名，第二个同名文件得到 `foo<目录名>` |
+| `m2-find-file-reuses-*` | `find-file-noselect` 对符号链接和 `dir/../dir/file` 返回同一个 buffer，buffer 名保持第一次访问的 `real.txt` |
+| `m2-saving-a-deleted-file-*` | 文件删除后 `save-buffer` 不调用 `yes-or-no-p`，直接重建文件并清除 modified；Emacs 按默认 final-newline 规则补了末尾换行 |
+| `m2-write-file-overwrite-*` | `C-x C-w` 覆盖走 `y-or-n-p`；捕获到的提示参数是 `File ‘…’ exists; overwrite? `，`(y or n)` 由 `y-or-n-p` 自己追加 |
+| `m2-kill-buffer-reads-*` | `C-x k` 读 buffer 名，默认当前 buffer，`require-match=t`；返回其他名字时 kill 该 buffer，当前 buffer 保留 |
+| `m2-switch-to-buffer-*` | `read-buffer-to-switch` 排除当前 buffer，default 为 `other-buffer`，`require-match=confirm-after-completion` |
+
+真实 pty command loop 另确认退出保存提示：dirty file buffer → `C-x C-c` 显示：
+
+```
+Save file /tmp/x? (y, n, !, ., q, M-~, C-r, C-f, d or C-h)
+```
+
+即 `save-some-buffers` 使用单键多选，`y` / `n` 本身就是有效答案，而不是 `yes-or-no-p` 的 `yes` / `no`。semacs 的 minibuffer 查询简化为 `(y or n)`，单键 y / n 即作答，不需要 RET；`!`、`.`、`q` 等附加动作保留已登记的 F2 简化。外部修改仍是 `yes-or-no-p` 语义，要求完整 `yes` / `no` 后 RET。
+
+另在隔离 `emacs -Q -nw` pty 中直接调用查询函数，分别只发送 y / n 与 y / n / s（均不发送 RET）：`y-or-n-p` 返回 t / nil，`read-multiple-choice` 返回对应字符选择。此探针确认单键查询本身的交互，不冒充周围文件命令的完整 command loop，也不把 batch ERT 中被替换的查询当成按键证据。
+
+这些记录是外部参照，不证明 semacs 已通过验收；未覆盖真实 Wayland / IME。

@@ -3,40 +3,124 @@
 //! A session is bound to the target that opened it. Only one may exist at a
 //! time; `ReadSession::id` isolates late results from a session that has ended.
 
-use gpui_kit::Entity;
+use std::path::PathBuf;
+
+use crate::keymap::{Keymap, parse_sequence};
+use gpui_kit::{Entity, Keystroke};
 
 use crate::command::{COMMANDS, Command, Scope};
 use crate::view::BufferView;
 
 /// What a confirmed session does with the text read in the minibuffer.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ReadKind {
     /// `M-x`: read a command name and run it on the origin.
     Command,
+    /// `C-x C-f`: read a path and visit it from the origin.
+    FindFile,
+    /// `C-x C-w`: read a path and write the buffer there.
+    WriteFile,
+    /// `C-x b`: read an existing buffer name and activate it.
+    SwitchToBuffer { default: Option<String> },
+    /// A `write-file` target already exists.
+    Overwrite(PathBuf),
+    /// A visited file changed on disk since it was read or saved.
+    ExternalChange(PathBuf),
+    /// `C-x k`: read the name of the buffer to kill.
+    KillBuffer { default: String },
+    /// A modified buffer would be killed.
+    KillBufferConfirm { name: String },
+    /// Exit coordination asks whether to save one dirty buffer.
+    ExitSave { path: Option<PathBuf>, name: String },
+    /// Dirty buffers remain after the per-buffer answers.
+    ExitModified,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Answer {
+    Yes,
+    No,
+    Save,
+    Invalid,
+}
+
+impl Answer {
+    pub fn full(input: &str) -> Self {
+        match input.trim().to_ascii_lowercase().as_str() {
+            "yes" => Self::Yes,
+            "no" => Self::No,
+            _ => Self::Invalid,
+        }
+    }
+
+    pub fn key(stroke: &Keystroke) -> Self {
+        match stroke.key.as_str() {
+            "y" | "Y" | "space" => Self::Yes,
+            "n" | "N" | "backspace" | "delete" => Self::No,
+            "s" | "S" => Self::Save,
+            _ => Self::Invalid,
+        }
+    }
 }
 
 impl ReadKind {
-    pub fn prompt(self) -> &'static str {
+    pub fn is_single_key(&self) -> bool {
+        matches!(
+            self,
+            Self::Overwrite(_) | Self::KillBufferConfirm { .. } | Self::ExitSave { .. }
+        )
+    }
+
+    pub fn answer_hint(&self) -> &'static str {
         match self {
-            ReadKind::Command => "M-x ",
+            Self::KillBufferConfirm { .. } => "Please answer y, n, or s",
+            _ if self.is_single_key() => "Please answer y or n",
+            _ => "Please answer yes or no",
         }
     }
 
-    fn names(self) -> Vec<String> {
+    pub fn prompt(&self) -> String {
         match self {
-            // Session commands drive the minibuffer itself and are not commands
-            // the user can invoke through M-x.
-            ReadKind::Command => {
-                let mut names: Vec<_> = COMMANDS
-                    .iter()
-                    .filter(|spec| spec.scope != Scope::ReadSession)
-                    .map(|spec| spec.name.to_owned())
-                    .collect();
-                names.sort_unstable();
-                names
+            ReadKind::Command => "M-x ".to_owned(),
+            ReadKind::FindFile => "Find file: ".to_owned(),
+            ReadKind::WriteFile => "Write file: ".to_owned(),
+            ReadKind::SwitchToBuffer { default } => match default {
+                Some(name) => format!("Switch to buffer (default {name}): "),
+                None => "Switch to buffer: ".to_owned(),
+            },
+            ReadKind::Overwrite(path) => {
+                format!("File ‘{}’ exists; overwrite? (y or n) ", path.display())
+            }
+            ReadKind::ExternalChange(path) => format!(
+                "{} has changed since visited or saved.  Save anyway? (yes or no) ",
+                path.display()
+            ),
+            ReadKind::KillBuffer { default } => {
+                format!("Kill buffer (default {default}): ")
+            }
+            ReadKind::KillBufferConfirm { name } => {
+                format!("Buffer {name} modified; kill anyway? (y, n, s) ")
+            }
+            ReadKind::ExitSave { path, name } => match path {
+                Some(path) => format!("Save file {}? (y or n) ", path.display()),
+                None => format!("Save buffer {name}? (y or n) "),
+            },
+            ReadKind::ExitModified => {
+                "Modified buffers exist; exit anyway? (yes or no) ".to_owned()
             }
         }
     }
+}
+
+/// Command candidates shared by `M-x` completion and exact lookup.
+pub fn command_names() -> Vec<String> {
+    let mut names: Vec<_> = COMMANDS
+        .iter()
+        .filter(|spec| spec.scope != Scope::ReadSession)
+        .map(|spec| spec.name.to_owned())
+        .collect();
+    names.sort_unstable();
+    names
 }
 
 /// Completed matches and the input change they imply.
@@ -72,11 +156,10 @@ impl Completion {
     }
 }
 
-/// Prefix completion: the matching names plus the longest common prefix (or the
-/// sole candidate). No fuzzy matching, cycling or recursive minibuffers.
-pub fn complete(kind: ReadKind, input: &str) -> Completion {
-    let candidates: Vec<_> = kind
-        .names()
+/// Prefix completion over an already selected candidate source. The shell
+/// chooses command names, paths or buffer names before asking for completion.
+pub fn complete(candidates: Vec<String>, input: &str) -> Completion {
+    let candidates: Vec<_> = candidates
         .into_iter()
         .filter(|name| name.starts_with(input))
         .collect();
@@ -120,16 +203,49 @@ pub struct ReadSession {
     id: u64,
     kind: ReadKind,
     origin: Entity<BufferView>,
-    candidates: Vec<String>,
+    keymap: Keymap,
 }
 
 impl ReadSession {
     pub fn new(id: u64, kind: ReadKind, origin: Entity<BufferView>) -> Self {
+        let keymap = if kind.is_single_key() {
+            let mut keymap = Keymap::default();
+            for key in ["y", "shift-y", "n", "shift-n", "enter", "ctrl-m"] {
+                keymap
+                    .bind(
+                        &parse_sequence(key).unwrap(),
+                        Command::MinibufferCompleteAndExit,
+                    )
+                    .unwrap();
+            }
+            let extra = if matches!(kind, ReadKind::KillBufferConfirm { .. }) {
+                &["s", "shift-s"][..]
+            } else {
+                &["space", "backspace", "delete"][..]
+            };
+            for key in extra {
+                keymap
+                    .bind(
+                        &parse_sequence(key).unwrap(),
+                        Command::MinibufferCompleteAndExit,
+                    )
+                    .unwrap();
+            }
+            keymap
+                .bind(
+                    &parse_sequence("ctrl-g").unwrap(),
+                    Command::AbortMinibuffers,
+                )
+                .unwrap();
+            keymap
+        } else {
+            Keymap::for_scope(Scope::ReadSession)
+        };
         Self {
             id,
             kind,
             origin,
-            candidates: Vec::new(),
+            keymap,
         }
     }
 
@@ -137,21 +253,16 @@ impl ReadSession {
         self.id
     }
 
-    pub fn kind(&self) -> ReadKind {
-        self.kind
+    pub fn kind(&self) -> &ReadKind {
+        &self.kind
     }
 
     pub fn origin(&self) -> &Entity<BufferView> {
         &self.origin
     }
 
-    /// Candidates from the most recent completion request.
-    pub fn candidates(&self) -> &[String] {
-        &self.candidates
-    }
-
-    pub(crate) fn record_completion(&mut self, completion: &Completion) {
-        self.candidates = completion.candidates.clone();
+    pub(crate) fn keymap(&self) -> &Keymap {
+        &self.keymap
     }
 }
 
@@ -161,7 +272,7 @@ mod tests {
 
     #[test]
     fn command_completion_is_sorted_prefix_matching_without_session_commands() {
-        let completion = complete(ReadKind::Command, "forward-");
+        let completion = complete(command_names(), "forward-");
         assert_eq!(
             completion.replacement, None,
             "the common prefix is the input"
@@ -185,14 +296,14 @@ mod tests {
 
     #[test]
     fn completion_extends_to_the_longest_common_prefix_and_handles_edges() {
-        let extended = complete(ReadKind::Command, "forw");
+        let extended = complete(command_names(), "forw");
         assert_eq!(extended.replacement.as_deref(), Some("forward-"));
         assert_eq!(
-            complete(ReadKind::Command, "nosuch").candidates,
+            complete(command_names(), "nosuch").candidates,
             Vec::<String>::new()
         );
-        assert_eq!(complete(ReadKind::Command, "nosuch").message(), "No match");
-        let sole = complete(ReadKind::Command, "kill-regi");
+        assert_eq!(complete(command_names(), "nosuch").message(), "No match");
+        let sole = complete(command_names(), "kill-regi");
         assert_eq!(sole.replacement.as_deref(), Some("kill-region"));
         assert_eq!(sole.message(), "Sole completion");
     }

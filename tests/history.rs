@@ -309,7 +309,8 @@ fn markers_created_inside_inserted_text_survive_undo_redo_cycles() {
 fn successful_save_marks_the_current_boundary_and_the_fixed_past_save_case() {
     let mut target = target("");
     insert(&mut target, "abc");
-    target.mark_saved(target.buffer().snapshot_id()).unwrap();
+    let point = target.begin_save();
+    target.mark_saved_at(point).unwrap();
     assert!(!target.buffer().is_modified());
     insert(&mut target, "d");
     run(&mut target, Command::Undo);
@@ -325,7 +326,8 @@ fn successful_save_marks_the_current_boundary_and_the_fixed_past_save_case() {
     insert(&mut target, "ab");
     run(&mut target, Command::Newline);
     insert(&mut target, "cd");
-    target.mark_saved(target.buffer().snapshot_id()).unwrap();
+    let point = target.begin_save();
+    target.mark_saved_at(point).unwrap();
     run(&mut target, Command::Undo);
     assert_state(&target, "ab\n", 3);
     assert!(target.buffer().is_modified());
@@ -343,29 +345,95 @@ fn successful_save_marks_the_current_boundary_and_the_fixed_past_save_case() {
 fn save_after_undo_and_repeated_save_boundaries_preserve_modified_markers() {
     let mut target = target("");
     insert(&mut target, "ab");
-    target.mark_saved(target.buffer().snapshot_id()).unwrap();
+    let point = target.begin_save();
+    target.mark_saved_at(point).unwrap();
     insert(&mut target, "cd");
-    target.mark_saved(target.buffer().snapshot_id()).unwrap();
+    let point = target.begin_save();
+    target.mark_saved_at(point).unwrap();
     run(&mut target, Command::Undo);
     assert!(!target.buffer().is_modified());
     run(&mut target, Command::UndoRedo);
     assert!(!target.buffer().is_modified());
     run(&mut target, Command::Undo);
     run(&mut target, Command::Undo);
-    target.mark_saved(target.buffer().snapshot_id()).unwrap();
+    let point = target.begin_save();
+    target.mark_saved_at(point).unwrap();
     run(&mut target, Command::UndoRedo);
     run(&mut target, Command::Undo);
     assert!(!target.buffer().is_modified());
 }
 
 #[test]
+fn async_save_of_an_earlier_boundary_keeps_later_edits_dirty_until_undo_reaches_it() {
+    let mut target = target("");
+    insert(&mut target, "ab");
+    let saved = target.begin_save();
+    insert(&mut target, "cd");
+    assert!(target.buffer().is_modified());
+    target.mark_saved_at(saved).unwrap();
+    assert!(
+        target.buffer().is_modified(),
+        "the disk snapshot is the older state, not the current text"
+    );
+    assert_state(&target, "abcd", 4);
+    run(&mut target, Command::Undo);
+    assert_state(&target, "ab", 2);
+    assert!(!target.buffer().is_modified());
+    run(&mut target, Command::UndoRedo);
+    assert_state(&target, "abcd", 2);
+    assert!(target.buffer().is_modified());
+}
+
+#[test]
+fn a_save_completed_while_undone_marks_the_saved_state_and_the_different_current_state() {
+    let mut target = target("");
+    insert(&mut target, "ab");
+    let saved = target.begin_save();
+    run(&mut target, Command::Undo);
+    assert!(!target.buffer().is_modified());
+    target.mark_saved_at(saved).unwrap();
+    assert!(
+        target.buffer().is_modified(),
+        "the current empty text no longer matches the saved disk state"
+    );
+    assert_state(&target, "", 0);
+    run(&mut target, Command::UndoRedo);
+    assert_state(&target, "ab", 0);
+    assert!(!target.buffer().is_modified());
+    run(&mut target, Command::Undo);
+    assert_state(&target, "", 0);
+    assert!(target.buffer().is_modified());
+}
+
+#[test]
+fn an_unreachable_save_point_cannot_clear_dirty() {
+    let mut target = target("");
+    insert(&mut target, "ab");
+    insert(&mut target, "cd");
+    let saved = target.begin_save();
+    run(&mut target, Command::Undo);
+    insert(&mut target, "X");
+    assert!(target.buffer().is_modified());
+    assert_eq!(
+        target.mark_saved_at(saved),
+        Err(EditError::StaleSnapshot),
+        "a new branch discarded the saved history state"
+    );
+    assert!(target.buffer().is_modified());
+    let other = self::target("").begin_save();
+    assert_eq!(target.mark_saved_at(other), Err(EditError::WrongTarget));
+}
+
+#[test]
 fn stale_and_wrong_target_save_completion_cannot_clear_dirty_or_break_a_group() {
     let mut target = target("");
-    let old = target.buffer().snapshot_id();
-    let other = self::target("").buffer().snapshot_id();
+    insert(&mut target, "discarded");
+    let old = target.begin_save();
+    let other = self::target("").begin_save();
+    run(&mut target, Command::Undo);
     insert(&mut target, "ab");
-    assert_eq!(target.mark_saved(old), Err(EditError::StaleSnapshot));
-    assert_eq!(target.mark_saved(other), Err(EditError::WrongTarget));
+    assert_eq!(target.mark_saved_at(old), Err(EditError::StaleSnapshot));
+    assert_eq!(target.mark_saved_at(other), Err(EditError::WrongTarget));
     assert!(target.buffer().is_modified());
     insert(&mut target, "cd");
     run(&mut target, Command::Undo);

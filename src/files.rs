@@ -8,8 +8,11 @@
 //! normalized so opening a file can never silently rewrite it.
 
 use std::fmt;
-use std::io;
-use std::path::Path;
+use std::fs::{self, OpenOptions};
+use std::io::{self, Read, Write};
+use std::path::{Component, Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::SystemTime;
 
 const UTF8_BOM: &[u8] = &[0xEF, 0xBB, 0xBF];
 
@@ -46,6 +49,54 @@ impl FileFormat {
 pub struct DecodedFile {
     pub text: String,
     pub format: FileFormat,
+}
+
+/// Metadata used to notice that a file changed outside the editor.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct FileStamp {
+    len: u64,
+    modified: Option<SystemTime>,
+    #[cfg(unix)]
+    device: u64,
+    #[cfg(unix)]
+    inode: u64,
+}
+
+/// The filesystem object a visited path refers to. Two spellings of the same
+/// file (a symlink, `dir/../file`, a hard link) share an identity, so visiting
+/// either must reuse the same buffer. Compare with a path only as a fallback on
+/// platforms that do not expose a stable object identity.
+#[cfg(unix)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct FileIdentity {
+    device: u64,
+    inode: u64,
+}
+
+#[cfg(not(unix))]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct FileIdentity;
+
+impl FileStamp {
+    pub fn identity(self) -> Option<FileIdentity> {
+        #[cfg(unix)]
+        {
+            Some(FileIdentity {
+                device: self.device,
+                inode: self.inode,
+            })
+        }
+        #[cfg(not(unix))]
+        {
+            None
+        }
+    }
+}
+
+/// Decoded file text plus the metadata from the same open handle.
+pub struct LoadedFile {
+    pub file: DecodedFile,
+    pub stamp: Option<FileStamp>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -120,9 +171,157 @@ impl From<DecodeError> for ReadError {
     }
 }
 
+/// Expands `~`, resolves a relative path against `default_directory`, and
+/// simplifies `.` / `..` lexically. Symbolic links are left in place; callers
+/// that need file identity compare [`FileIdentity`] instead of spelling.
+pub fn expand(path: &Path, default_directory: &Path) -> io::Result<PathBuf> {
+    let expanded = expand_tilde(path);
+    let absolute = if expanded.is_absolute() {
+        expanded
+    } else {
+        default_directory.join(expanded)
+    };
+    Ok(normalize(&absolute))
+}
+
+/// Expands a path against the process working directory.
+pub fn absolute(path: &Path) -> io::Result<PathBuf> {
+    expand(path, &std::env::current_dir()?)
+}
+
+fn expand_tilde(path: &Path) -> PathBuf {
+    let mut components = path.components();
+    let Some(Component::Normal(first)) = components.next() else {
+        return path.to_path_buf();
+    };
+    if first != "~" {
+        return path.to_path_buf();
+    }
+    let Some(home) = std::env::var_os("HOME").map(PathBuf::from) else {
+        return path.to_path_buf();
+    };
+    let rest = components.as_path();
+    if rest.as_os_str().is_empty() {
+        home
+    } else {
+        home.join(rest)
+    }
+}
+
+fn normalize(path: &Path) -> PathBuf {
+    let mut normalized = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                normalized.pop();
+            }
+            Component::Prefix(_) | Component::RootDir | Component::Normal(_) => {
+                normalized.push(component.as_os_str());
+            }
+        }
+    }
+    normalized
+}
+
+/// Metadata for an existing path, or `None` when it does not exist.
+pub fn stamp(path: &Path) -> io::Result<Option<FileStamp>> {
+    let metadata = match fs::metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error),
+    };
+    Ok(Some(file_stamp(&metadata)))
+}
+
+/// Identity of an existing path, or `None` when it does not exist.
+pub fn identity(path: &Path) -> io::Result<Option<FileIdentity>> {
+    Ok(stamp(path)?.and_then(FileStamp::identity))
+}
+
+fn file_stamp(metadata: &fs::Metadata) -> FileStamp {
+    FileStamp {
+        len: metadata.len(),
+        modified: metadata.modified().ok(),
+        #[cfg(unix)]
+        device: {
+            use std::os::unix::fs::MetadataExt;
+            metadata.dev()
+        },
+        #[cfg(unix)]
+        inode: {
+            use std::os::unix::fs::MetadataExt;
+            metadata.ino()
+        },
+    }
+}
+
+/// Basic prefix completion for a path typed in a minibuffer. The input is
+/// expanded like [`expand`] for lookup, while candidates preserve the typed
+/// directory prefix. Directories keep a trailing separator.
+pub fn complete_path(input: &str, default_directory: &Path) -> Vec<String> {
+    if input == "~" && std::env::var_os("HOME").is_some() {
+        return vec!["~/".to_owned()];
+    }
+    let Ok(expanded) = expand(Path::new(input), default_directory) else {
+        return Vec::new();
+    };
+    complete_expanded_path(input, expanded)
+}
+
+fn complete_expanded_path(input: &str, expanded: PathBuf) -> Vec<String> {
+    let typed_directory = input
+        .rfind(std::path::MAIN_SEPARATOR)
+        .map_or("", |index| &input[..=index]);
+    let (directory, prefix) = if input.is_empty() || input.ends_with(std::path::MAIN_SEPARATOR) {
+        (expanded, String::new())
+    } else {
+        let prefix = expanded
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        (
+            expanded
+                .parent()
+                .map(Path::to_path_buf)
+                .unwrap_or_else(|| PathBuf::from(std::path::MAIN_SEPARATOR_STR)),
+            prefix,
+        )
+    };
+    let Ok(entries) = fs::read_dir(&directory) else {
+        return Vec::new();
+    };
+    let mut candidates = Vec::new();
+    for entry in entries.flatten() {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if !name.starts_with(&prefix) {
+            continue;
+        }
+        let mut candidate = format!("{typed_directory}{name}");
+        if entry.path().is_dir() {
+            candidate.push(std::path::MAIN_SEPARATOR);
+        }
+        candidates.push(candidate);
+    }
+    candidates.sort_unstable();
+    candidates
+}
+
 pub fn read(path: &Path) -> Result<DecodedFile, ReadError> {
-    let bytes = std::fs::read(path)?;
-    Ok(decode(&bytes)?)
+    Ok(load(path)?.file)
+}
+
+/// Reads and decodes a file, returning metadata from the same open handle so a
+/// buffer starts with the identity and stamp of the content it actually read.
+pub fn load(path: &Path) -> Result<LoadedFile, ReadError> {
+    let mut file = fs::File::open(path)?;
+    let metadata = file.metadata()?;
+    let mut bytes = Vec::with_capacity(metadata.len() as usize);
+    file.read_to_end(&mut bytes)?;
+    Ok(LoadedFile {
+        file: decode(&bytes)?,
+        stamp: Some(file_stamp(&metadata)),
+    })
 }
 
 pub fn decode(bytes: &[u8]) -> Result<DecodedFile, DecodeError> {
@@ -167,6 +366,92 @@ pub fn encode(text: &str, format: FileFormat) -> Vec<u8> {
         }
     }
     out
+}
+
+/// Writes through a same-directory temporary file, flushes it to disk and
+/// renames it over the target. Returns the stamp of the file actually written;
+/// a failure leaves the original file untouched.
+///
+/// Following a final symlink writes the real target and keeps the link. The
+/// rename replaces the directory entry, so hard links to the old inode are not
+/// updated; that is the deliberate cost of not truncating the original file
+/// before the new bytes are safely on disk.
+pub fn write_atomic(path: &Path, text: &str, format: FileFormat) -> io::Result<FileStamp> {
+    let target = resolve_write_target(path)?;
+    let parent = target
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    let name = target
+        .file_name()
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "file name is empty"))?
+        .to_string_lossy();
+    let permissions = fs::metadata(&target)
+        .ok()
+        .map(|metadata| metadata.permissions());
+    let bytes = encode(text, format);
+
+    static NEXT_TEMP: AtomicU64 = AtomicU64::new(0);
+    for _ in 0..100 {
+        let id = NEXT_TEMP.fetch_add(1, Ordering::Relaxed);
+        let temp = parent.join(format!(".{name}.semacs-save-{}-{id}", std::process::id()));
+        let mut file = match OpenOptions::new().write(true).create_new(true).open(&temp) {
+            Ok(file) => file,
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => continue,
+            Err(error) => return Err(error),
+        };
+
+        let result = (|| {
+            if let Some(permissions) = permissions {
+                file.set_permissions(permissions)?;
+            }
+            file.write_all(&bytes)?;
+            file.sync_all()?;
+            let stamp = file_stamp(&file.metadata()?);
+            drop(file);
+            fs::rename(&temp, &target)?;
+            Ok(stamp)
+        })();
+        if result.is_err() {
+            let _ = fs::remove_file(&temp);
+        }
+        return result;
+    }
+
+    Err(io::Error::new(
+        io::ErrorKind::AlreadyExists,
+        "could not allocate a temporary save file",
+    ))
+}
+
+/// Resolves a final symlink chain without requiring the target to exist, so a
+/// dangling link still writes its target instead of replacing the link.
+fn resolve_write_target(path: &Path) -> io::Result<PathBuf> {
+    const MAX_SYMLINKS: usize = 40;
+    let mut current = path.to_path_buf();
+    for _ in 0..MAX_SYMLINKS {
+        match fs::symlink_metadata(&current) {
+            Ok(metadata) if metadata.file_type().is_symlink() => {
+                let link = fs::read_link(&current)?;
+                current = if link.is_absolute() {
+                    link
+                } else {
+                    current
+                        .parent()
+                        .filter(|parent| !parent.as_os_str().is_empty())
+                        .unwrap_or_else(|| Path::new("."))
+                        .join(link)
+                };
+            }
+            Ok(_) => return Ok(current),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(current),
+            Err(error) => return Err(error),
+        }
+    }
+    Err(io::Error::new(
+        io::ErrorKind::InvalidInput,
+        "too many levels of symbolic links",
+    ))
 }
 
 fn unsupported_encoding_bom(bytes: &[u8]) -> Option<&'static str> {
@@ -361,5 +646,74 @@ mod tests {
             .as_str(),
             "UTF-8 BOM CRLF"
         );
+    }
+
+    #[test]
+    fn expand_uses_the_default_directory_and_simplifies_dots() {
+        let default = Path::new("/tmp/semacs/default");
+        assert_eq!(
+            expand(Path::new("a/../b"), default).unwrap(),
+            PathBuf::from("/tmp/semacs/default/b")
+        );
+        assert_eq!(
+            expand(Path::new("./a/./b"), default).unwrap(),
+            PathBuf::from("/tmp/semacs/default/a/b")
+        );
+        assert_eq!(
+            expand(Path::new("/a/../b"), default).unwrap(),
+            PathBuf::from("/b")
+        );
+    }
+
+    #[test]
+    fn expand_home_and_leave_missing_users_literal() {
+        let Some(home) = std::env::var_os("HOME").map(PathBuf::from) else {
+            return;
+        };
+        assert_eq!(
+            expand(Path::new("~/notes"), Path::new("/tmp")).unwrap(),
+            home.join("notes")
+        );
+        assert_eq!(
+            expand(Path::new("~nobody/notes"), Path::new("/tmp")).unwrap(),
+            PathBuf::from("/tmp/~nobody/notes")
+        );
+    }
+
+    #[test]
+    fn complete_path_preserves_the_input_spelling_and_marks_directories() {
+        static NEXT: AtomicU64 = AtomicU64::new(0);
+        let dir = std::env::temp_dir().join(format!(
+            "semacs-complete-{}-{}",
+            std::process::id(),
+            NEXT.fetch_add(1, Ordering::Relaxed)
+        ));
+        fs::create_dir_all(dir.join("sub")).unwrap();
+        fs::write(dir.join("alpha.txt"), b"").unwrap();
+        fs::write(dir.join("alpine.txt"), b"").unwrap();
+        fs::write(dir.join("beta.txt"), b"").unwrap();
+
+        let mut candidates = complete_path("al", &dir);
+        let mut expected = vec!["alpha.txt".to_owned(), "alpine.txt".to_owned()];
+        expected.sort_unstable();
+        candidates.sort_unstable();
+        assert_eq!(candidates, expected);
+
+        for prefix in ["./", "~/"] {
+            let input = format!("{prefix}al");
+            let completion =
+                crate::session::complete(complete_expanded_path(&input, dir.join("al")), &input);
+            assert_eq!(completion.replacement, Some(format!("{prefix}alp")));
+            assert!(
+                completion
+                    .candidates
+                    .iter()
+                    .all(|name| name.starts_with(prefix))
+            );
+        }
+
+        let sub = complete_path("su", &dir);
+        assert_eq!(sub, vec!["sub/".to_owned()]);
+        fs::remove_dir_all(dir).unwrap();
     }
 }

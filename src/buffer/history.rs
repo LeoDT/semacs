@@ -1,4 +1,4 @@
-use super::{AppliedEdit, Buffer, Edit, EditError, EditSource, SnapshotId};
+use super::{AppliedEdit, Buffer, Edit, EditError, EditSource, SavePoint};
 use crate::text::{ByteOffset, Rope};
 
 #[derive(Clone, Copy, Default, PartialEq, Eq)]
@@ -10,7 +10,18 @@ pub(crate) enum EditGroup {
     Isolated,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(crate) struct GroupId(u64);
+
+/// A stable position in the linear history: before any group, or after one.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum HistoryState {
+    Base,
+    After(GroupId),
+}
+
 struct Group {
+    id: GroupId,
     kind: EditGroup,
     start: ByteOffset,
     removed: Rope,
@@ -28,11 +39,17 @@ pub(super) struct History {
     undo: Vec<Group>,
     redo: Vec<Group>,
     merging: bool,
+    next_group_id: u64,
 }
 
 impl History {
     fn record(&mut self, mut group: Group) {
         self.redo.clear();
+        self.next_group_id = self
+            .next_group_id
+            .checked_add(1)
+            .expect("history group id exhausted");
+        group.id = GroupId(self.next_group_id);
         if self.merging
             && let Some(previous) = self.undo.last_mut()
             && previous.kind == group.kind
@@ -82,6 +99,73 @@ impl History {
         self.merging = group.kind != EditGroup::Isolated;
         self.undo.push(group);
     }
+
+    pub(super) fn current_state(&self) -> HistoryState {
+        self.undo
+            .last()
+            .map_or(HistoryState::Base, |group| HistoryState::After(group.id))
+    }
+
+    fn state_index(&self, state: HistoryState) -> Option<usize> {
+        match state {
+            HistoryState::Base => Some(0),
+            HistoryState::After(id) => {
+                if let Some(index) = self.undo.iter().position(|group| group.id == id) {
+                    Some(index + 1)
+                } else {
+                    self.redo
+                        .iter()
+                        .position(|group| group.id == id)
+                        .map(|index| self.undo.len() + self.redo.len() - index)
+                }
+            }
+        }
+    }
+
+    fn group_mut(&mut self, forward_index: usize) -> Option<&mut Group> {
+        if forward_index < self.undo.len() {
+            self.undo.get_mut(forward_index)
+        } else {
+            let reverse_index = forward_index - self.undo.len();
+            let index = self.redo.len().checked_sub(1 + reverse_index)?;
+            self.redo.get_mut(index)
+        }
+    }
+
+    /// Marks one history state clean or dirty. A state is represented by the
+    /// group that ends it and by the group that starts after it, so both cached
+    /// markers must move together.
+    fn set_state_modified(&mut self, state: HistoryState, modified: bool) -> bool {
+        let Some(index) = self.state_index(state) else {
+            return false;
+        };
+        let total = self.undo.len() + self.redo.len();
+        if index > 0
+            && let Some(group) = self.group_mut(index - 1)
+        {
+            group.modified_after = modified;
+        }
+        if index < total
+            && let Some(group) = self.group_mut(index)
+        {
+            group.modified_before = modified;
+        }
+        true
+    }
+
+    /// Applies a completed save at an arbitrary state. If the buffer has moved
+    /// away from that state, its current state becomes dirty because the disk
+    /// now holds the saved snapshot, not the current text.
+    pub(super) fn mark_saved(&mut self, state: HistoryState) -> bool {
+        if !self.set_state_modified(state, false) {
+            return false;
+        }
+        let current = self.current_state();
+        if current != state {
+            self.set_state_modified(current, true);
+        }
+        true
+    }
 }
 
 fn collapsed_mark(buffer: &Buffer, start: ByteOffset, len: usize) -> Option<usize> {
@@ -96,17 +180,32 @@ impl Buffer {
         self.history.merging = false;
     }
 
-    /// Called only after a successful save of the current committed snapshot.
-    pub fn mark_saved(&mut self, snapshot: SnapshotId) -> Result<(), EditError> {
-        self.validate_snapshot(snapshot)?;
+    /// The current history state, captured when a save starts.
+    pub(crate) fn save_point(&self) -> SavePoint {
+        SavePoint {
+            buffer: self.snapshot.id.buffer,
+            state: self.history.current_state(),
+        }
+    }
+
+    /// Starts a save: the boundary must not keep merging with later typing, or
+    /// the captured group would come to mean a different text.
+    pub fn begin_save(&mut self) -> SavePoint {
         self.break_history_group();
-        self.modified = false;
-        if let Some(group) = self.history.undo.last_mut() {
-            group.modified_after = false;
+        self.save_point()
+    }
+
+    /// Applies an asynchronous save result to the state it captured. A result
+    /// whose history state is no longer reachable cannot clear dirty.
+    pub fn mark_saved_at(&mut self, point: SavePoint) -> Result<(), EditError> {
+        if point.buffer != self.snapshot.id.buffer {
+            return Err(EditError::WrongTarget);
         }
-        if let Some(group) = self.history.redo.last_mut() {
-            group.modified_before = false;
+        if !self.history.mark_saved(point.state) {
+            return Err(EditError::StaleSnapshot);
         }
+        self.break_history_group();
+        self.modified = self.history.current_state() != point.state;
         Ok(())
     }
 
@@ -117,6 +216,7 @@ impl Buffer {
     ) -> Result<Option<AppliedEdit>, EditError> {
         self.validate_edit(&edit)?;
         let group = Group {
+            id: GroupId(0),
             kind,
             start: edit.range.start,
             removed: self.text().slice(edit.range.start.0..edit.range.end.0),

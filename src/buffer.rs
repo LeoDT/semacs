@@ -4,11 +4,12 @@ use std::ops::Range;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use crate::files::{DecodedFile, FileFormat};
+use crate::files::{DecodedFile, FileFormat, FileIdentity, FileStamp};
 use crate::text::{ByteOffset, Rope};
 
 mod history;
 pub(crate) use history::EditGroup;
+use history::HistoryState;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct BufferId(u64);
@@ -36,6 +37,15 @@ impl BufferSnapshot {
     pub fn text(&self) -> &Rope {
         &self.text
     }
+}
+
+/// A stable save boundary captured when a save starts. It refers to a history
+/// state, not to a text snapshot, so an asynchronous result can be applied even
+/// after later edits.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SavePoint {
+    buffer: BufferId,
+    state: HistoryState,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -79,6 +89,10 @@ pub struct Buffer {
     read_only: bool,
     read_only_prefix: ByteOffset,
     path: Option<PathBuf>,
+    identity: Option<FileIdentity>,
+    base_name: String,
+    display_name: String,
+    disk_stamp: Option<FileStamp>,
     format: FileFormat,
     modified: bool,
     history: history::History,
@@ -111,6 +125,12 @@ impl Buffer {
         let id = NEXT_ID
             .try_update(Ordering::Relaxed, Ordering::Relaxed, |id| id.checked_add(1))
             .expect("buffer identity exhausted");
+        let base_name = path
+            .as_deref()
+            .and_then(Path::file_name)
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "*scratch*".to_owned());
+        let display_name = base_name.clone();
         Self {
             snapshot: BufferSnapshot {
                 id: SnapshotId {
@@ -125,10 +145,42 @@ impl Buffer {
             read_only: false,
             read_only_prefix: ByteOffset(0),
             path,
+            identity: None,
+            base_name,
+            display_name,
+            disk_stamp: None,
             format: file.format,
             modified: false,
             history: history::History::default(),
         }
+    }
+
+    /// Creates a buffer for a file whose text and metadata were read together.
+    pub fn visiting(path: PathBuf, file: DecodedFile, stamp: Option<FileStamp>) -> Self {
+        let mut buffer = Self::new(Some(path), file);
+        buffer.set_disk_stamp(stamp);
+        buffer
+    }
+
+    /// Attaches the disk state a loader observed for this path. Intended for
+    /// loaders and tests that build a buffer without `files::load`.
+    pub fn with_disk_stamp(mut self, stamp: Option<FileStamp>) -> Self {
+        self.set_disk_stamp(stamp);
+        self
+    }
+
+    /// Creates an empty, unvisited buffer with an explicit name.
+    pub fn named(name: &str) -> Self {
+        let mut buffer = Self::new(
+            None,
+            DecodedFile {
+                text: String::new(),
+                format: FileFormat::default(),
+            },
+        );
+        buffer.base_name = name.to_owned();
+        buffer.display_name = name.to_owned();
+        buffer
     }
 
     pub fn minibuffer(prompt: &str, initial: &str) -> Self {
@@ -245,10 +297,38 @@ impl Buffer {
     }
 
     pub fn display_name(&self) -> String {
-        self.path()
-            .and_then(Path::file_name)
+        self.display_name.clone()
+    }
+
+    pub fn base_name(&self) -> String {
+        self.base_name.clone()
+    }
+
+    pub(crate) fn set_display_name(&mut self, name: String) {
+        self.display_name = name;
+    }
+
+    pub fn disk_stamp(&self) -> Option<FileStamp> {
+        self.disk_stamp
+    }
+
+    pub fn identity(&self) -> Option<FileIdentity> {
+        self.identity
+    }
+
+    pub(crate) fn set_disk_stamp(&mut self, stamp: Option<FileStamp>) {
+        self.identity = stamp.and_then(FileStamp::identity);
+        self.disk_stamp = stamp;
+    }
+
+    /// Updates the visited file after a successful `write-file`.
+    pub(crate) fn set_path(&mut self, path: PathBuf) {
+        self.base_name = path
+            .file_name()
             .map(|name| name.to_string_lossy().into_owned())
-            .unwrap_or_else(|| "*scratch*".to_owned())
+            .unwrap_or_else(|| "*scratch*".to_owned());
+        self.display_name = self.base_name.clone();
+        self.path = Some(path);
     }
 
     pub fn format(&self) -> FileFormat {

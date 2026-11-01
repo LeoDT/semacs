@@ -23,6 +23,8 @@
 
 ## M2 minibuffer、文件与 buffer 管理
 
+状态：实现与 headless 回归已完成；真实 Wayland / IME、纯键盘文件闭环及 OS 窗口关闭路径仍待单独授权验证，M2 尚未整体验收。
+
 - `M-x`、文件打开 / 保存 / 另存、buffer 切换 / 关闭与退出。
 - 命令名 / 路径 / buffer 名基础补全，prompt 保护、确认 / 取消与焦点恢复；覆盖、外部修改、kill 与退出等普通确认走 minibuffer 查询会话。
 - 多 buffer 独立状态及共享 kill ring；输入会话切换不污染其他目标。

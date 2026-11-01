@@ -66,17 +66,6 @@ fn contents(visual: &mut VisualTestContext, shell: &Entity<AppShell>) -> String 
     })
 }
 
-fn candidates(visual: &mut VisualTestContext, shell: &Entity<AppShell>) -> Vec<String> {
-    visual.read(|cx| {
-        shell
-            .read(cx)
-            .session()
-            .expect("open session")
-            .candidates()
-            .to_vec()
-    })
-}
-
 fn session_message(visual: &mut VisualTestContext, editor: &Entity<BufferView>) -> Option<String> {
     visual.read(|cx| editor.read(cx).message().map(str::to_owned))
 }
@@ -96,7 +85,10 @@ fn mx_completes_the_common_prefix_and_lists_candidates(cx: &mut TestAppContext) 
     let editor = mx(&mut visual, &shell);
     visual.read(|cx| {
         assert_eq!(
-            shell.read(cx).session().map(|session| session.kind()),
+            shell
+                .read(cx)
+                .session()
+                .map(|session| session.kind().clone()),
             Some(ReadKind::Command)
         );
         assert_eq!(
@@ -111,10 +103,6 @@ fn mx_completes_the_common_prefix_and_lists_candidates(cx: &mut TestAppContext) 
     visual.simulate_keystrokes("tab");
     redraw(&mut visual);
     assert_eq!(contents(&mut visual, &shell), "forward-");
-    assert_eq!(
-        candidates(&mut visual, &shell),
-        vec!["forward-char".to_owned(), "forward-word".to_owned()]
-    );
     assert!(
         session_message(&mut visual, &editor)
             .unwrap()
@@ -163,7 +151,18 @@ fn mx_unique_completion_and_exact_names_run_on_the_origin(cx: &mut TestAppContex
     visual.simulate_keystrokes("enter");
     redraw(&mut visual);
     visual.read(|cx| {
-        assert!(shell.read(cx).session().is_none());
+        let state = (
+            shell
+                .read(cx)
+                .session()
+                .map(|session| session.kind().clone()),
+            shell
+                .read(cx)
+                .minibuffer()
+                .map(|mini| mini.read(cx).contents(cx)),
+            body.read(cx).buffer().text().to_string(),
+        );
+        assert!(shell.read(cx).session().is_none(), "{state:?}");
         assert!(shell.read(cx).minibuffer().is_none());
         assert_eq!(body.read(cx).buffer().point(), ByteOffset(1));
         assert_eq!(body.read(cx).buffer().text().to_string(), "abc def");
@@ -252,22 +251,13 @@ fn mx_candidates_cover_the_body_layers_but_not_session_commands(cx: &mut TestApp
     let editor = mx(&mut visual, &shell);
     visual.simulate_keystrokes("tab");
     redraw(&mut visual);
-    let candidates = candidates(&mut visual, &shell);
-    let expected = COMMANDS
+    let count = COMMANDS
         .iter()
         .filter(|spec| spec.scope != Scope::ReadSession)
         .count();
-    assert_eq!(candidates.len(), expected);
-    for name in ["forward-char", "save-buffer", "execute-extended-command"] {
-        assert!(candidates.contains(&name.to_owned()), "{name}");
-    }
-    for name in [
-        "minibuffer-complete",
-        "minibuffer-complete-and-exit",
-        "abort-minibuffers",
-    ] {
-        assert!(!candidates.contains(&name.to_owned()), "{name}");
-    }
+    let message = session_message(&mut visual, &editor).unwrap();
+    assert!(message.starts_with("Candidates: "));
+    assert!(message.ends_with(&format!("({count} total)")));
 
     // Session commands are not addressable through M-x either.
     visual.simulate_input("minibuffer-complete");
@@ -377,21 +367,97 @@ fn window_close_callback_can_mount_and_focus_a_minibuffer(cx: &mut TestAppContex
 }
 
 #[gpui::test]
+fn bare_minibuffer_does_not_expose_application_commands(cx: &mut TestAppContext) {
+    let (mut visual, shell, _body) = open("body", cx);
+    visual.update(|window, cx| {
+        shell.update(cx, |shell, cx| {
+            shell
+                .mount_minibuffer("P: ", "", window, cx)
+                .expect("bare minibuffer mounts");
+        });
+    });
+    redraw(&mut visual);
+    let editor = visual.read(|cx| {
+        shell
+            .read(cx)
+            .minibuffer()
+            .unwrap()
+            .read(cx)
+            .editor()
+            .clone()
+    });
+    visual.simulate_keystrokes("alt-x");
+    redraw(&mut visual);
+    visual.read(|cx| {
+        assert!(shell.read(cx).session().is_none());
+        assert_eq!(editor.read(cx).message(), Some("M-x is undefined"));
+        assert_eq!(
+            shell.read(cx).minibuffer().unwrap().read(cx).contents(cx),
+            ""
+        );
+    });
+}
+
+#[gpui::test]
 fn mx_runs_application_commands_through_the_shell_layer(cx: &mut TestAppContext) {
     let (mut visual, shell, body) = open("body", cx);
+    visual.simulate_input("X");
+    redraw(&mut visual);
     let _editor = mx(&mut visual, &shell);
     visual.simulate_input("save-buffer");
     redraw(&mut visual);
     visual.simulate_keystrokes("enter");
     redraw(&mut visual);
     visual.read(|cx| {
-        assert!(shell.read(cx).session().is_none());
         assert_eq!(
-            body.read(cx).message(),
-            Some("save-buffer is not available yet")
+            shell
+                .read(cx)
+                .session()
+                .map(|session| session.kind().clone()),
+            Some(ReadKind::WriteFile)
         );
-        assert_eq!(body.read(cx).buffer().text().to_string(), "body");
-        assert!(!body.read(cx).buffer().is_modified());
+        assert_eq!(
+            shell.read(cx).minibuffer().unwrap().read(cx).prompt(cx),
+            "Write file: "
+        );
+        assert_eq!(body.read(cx).buffer().text().to_string(), "Xbody");
+        assert!(body.read(cx).buffer().is_modified());
+    });
+    visual.simulate_keystrokes("ctrl-g");
+    redraw(&mut visual);
+    visual.read(|cx| assert!(shell.read(cx).session().is_none()));
+    assert_focused(&mut visual, &body);
+}
+
+#[gpui::test]
+fn active_read_session_keeps_ret_event_routing_after_focus_drift(cx: &mut TestAppContext) {
+    let (mut visual, shell, body) = open("abc", cx);
+    let editor = mx(&mut visual, &shell);
+    visual.simulate_input("forward-char");
+    redraw(&mut visual);
+    visual.update(|window, cx| window.focus(&body.focus_handle(cx), cx));
+    visual.simulate_keystrokes("enter");
+    redraw(&mut visual);
+    visual.read(|cx| {
+        let state = (
+            shell
+                .read(cx)
+                .session()
+                .map(|session| session.kind().clone()),
+            shell
+                .read(cx)
+                .minibuffer()
+                .map(|mini| mini.read(cx).contents(cx)),
+            body.read(cx).buffer().text().to_string(),
+        );
+        assert!(shell.read(cx).session().is_none(), "{state:?}");
+        assert!(shell.read(cx).minibuffer().is_none());
+        assert_eq!(body.read(cx).buffer().point(), ByteOffset(1));
+        assert_eq!(body.read(cx).buffer().text().to_string(), "abc");
+        assert_eq!(
+            editor.read(cx).buffer().text().to_string(),
+            "M-x forward-char"
+        );
     });
     assert_focused(&mut visual, &body);
 }

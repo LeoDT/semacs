@@ -398,7 +398,7 @@ fn whole_buffer_readonly_remains_distinct_from_prompt_protection(cx: &mut TestAp
 }
 
 #[gpui::test]
-fn close_cancels_both_compositions_and_cancel_restores_minibuffer_focus(cx: &mut TestAppContext) {
+fn close_cancels_both_compositions_and_cancel_restores_body_focus(cx: &mut TestAppContext) {
     let (mut visual, body) = open("body", cx);
     visual.simulate_input("X");
     let (shell, mini, editor) = show(&mut visual, "P: ", "abc");
@@ -406,34 +406,31 @@ fn close_cancels_both_compositions_and_cancel_restores_minibuffer_focus(cx: &mut
     visual.update(|window, cx| input.replace_and_mark_text_in_range(None, "未", None, window, cx));
     assert!(!visual.simulate_close());
     visual.update(|window, cx| {
-        assert!(window.has_active_prompt());
+        assert!(shell.read(cx).session().is_some());
         input.replace_text_in_range(None, "late", window, cx);
+        assert!(shell.read(cx).minibuffer().is_some());
         assert!(
             shell
                 .update(cx, |shell, cx| shell
                     .mount_minibuffer("blocked", "", window, cx))
                 .is_none()
         );
-        assert!(!shell.update(cx, |shell, cx| shell.unmount_minibuffer(window, cx)));
     });
     redraw(&mut visual);
-    visual.simulate_keystrokes("escape");
+    visual.simulate_keystrokes("ctrl-g");
     redraw(&mut visual);
     visual.update(|window, cx| {
-        assert!(editor.focus_handle(cx).is_focused(window));
-        assert!(!window.has_active_prompt());
+        assert!(shell.read(cx).session().is_none());
+        assert!(body.read(cx).focus_handle(cx).is_focused(window));
         input.replace_text_in_range(None, "late", window, cx);
     });
     assert_eq!(visual.read(|cx| mini.read(cx).contents(cx)), "abc");
-    visual.simulate_input("Z");
-    hide(&mut visual, &shell);
     visual.simulate_input("Y");
     redraw(&mut visual);
-    assert_eq!(visual.read(|cx| mini.read(cx).contents(cx)), "abcZ");
-    assert_eq!(
-        visual.read(|cx| body.read(cx).buffer().text().to_string()),
-        "XYbody"
-    );
+    visual.read(|cx| {
+        assert_eq!(body.read(cx).buffer().text().to_string(), "XYbody");
+        assert_eq!(mini.read(cx).contents(cx), "abc");
+    });
 }
 
 #[gpui::test]
@@ -444,8 +441,7 @@ fn transient_minibuffer_dirty_state_does_not_make_a_clean_document_unsaved(
     let (_, _, editor) = show(&mut visual, "P: ", "");
     visual.simulate_input("transient");
     assert!(visual.simulate_close());
-    visual.update(|window, cx| {
-        assert!(!window.has_active_prompt());
+    visual.update(|_, cx| {
         assert!(!body.read(cx).buffer().is_modified());
         assert!(editor.read(cx).buffer().is_modified());
     });

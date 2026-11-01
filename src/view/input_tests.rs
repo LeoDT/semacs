@@ -432,13 +432,27 @@ fn dirty_close_is_confirmed_cancel_restores_focus_and_discard_closes(cx: &mut Te
     redraw(&mut visual);
     let mut old = handler(&editor, &visual);
     assert!(!visual.simulate_close());
-    assert!(visual.update(|window, _| window.has_active_prompt()));
+    visual.update(|window, cx| {
+        let shell = app_shell(window, cx);
+        let shell = shell.read(cx);
+        assert!(shell.session().is_some());
+        assert!(
+            shell
+                .minibuffer()
+                .unwrap()
+                .read(cx)
+                .prompt(cx)
+                .contains("Save buffer")
+        );
+    });
     assert!(!visual.simulate_close());
     visual.update(|window, cx| old.replace_text_in_range(None, "late", window, cx));
     redraw(&mut visual);
-    visual.simulate_keystrokes("escape");
+    visual.simulate_keystrokes("ctrl-g");
     redraw(&mut visual);
     visual.update(|window, cx| {
+        let shell = app_shell(window, cx);
+        assert!(shell.read(cx).session().is_none());
         assert!(editor.focus_handle(cx).is_focused(window));
         old.replace_text_in_range(None, "late", window, cx);
     });
@@ -451,7 +465,10 @@ fn dirty_close_is_confirmed_cancel_restores_focus_and_discard_closes(cx: &mut Te
     redraw(&mut visual);
     assert!(!visual.simulate_close());
     redraw(&mut visual);
-    visual.simulate_keystrokes("tab enter");
+    visual.simulate_keystrokes("n");
+    redraw(&mut visual);
+    visual.simulate_input("yes");
+    visual.simulate_keystrokes("enter");
     visual.run_until_parked();
     assert!(visual.windows().is_empty());
 }
@@ -463,7 +480,6 @@ fn closing_only_a_preedit_is_clean_but_preserves_prior_commits(cx: &mut TestAppC
     visual
         .update(|window, cx| input.replace_and_mark_text_in_range(None, "临时", None, window, cx));
     assert!(visual.simulate_close());
-    assert!(!visual.update(|window, _| window.has_active_prompt()));
     visual.read(|cx| {
         assert_eq!(
             editor.read(cx).display_snapshot().text().to_string(),
@@ -485,22 +501,37 @@ fn closing_only_a_preedit_is_clean_but_preserves_prior_commits(cx: &mut TestAppC
         assert!(view.target.buffer().is_modified());
     });
     redraw(&mut visual);
-    visual.simulate_keystrokes("escape");
+    visual.update(|window, cx| {
+        let shell = app_shell(window, cx);
+        assert!(shell.read(cx).session().is_some());
+    });
+    visual.simulate_keystrokes("ctrl-g");
     redraw(&mut visual);
+    visual.update(|window, cx| {
+        let shell = app_shell(window, cx);
+        assert!(shell.read(cx).session().is_none());
+        assert!(editor.focus_handle(cx).is_focused(window));
+    });
 }
 
 #[gpui::test]
 fn close_confirmation_defaults_to_cancel_and_accepts_keyboard_quit(cx: &mut TestAppContext) {
     let (mut visual, editor) = open("", cx);
     visual.simulate_input("dirty");
-    for key in ["enter", "ctrl-g", "escape"] {
+    for keys in ["enter ctrl-g", "ctrl-g"] {
         assert!(!visual.simulate_close());
         redraw(&mut visual);
-        assert!(visual.update(|window, _| window.has_active_prompt()));
-        visual.simulate_keystrokes(key);
-        redraw(&mut visual);
         visual.update(|window, cx| {
-            assert!(!window.has_active_prompt());
+            let shell = app_shell(window, cx);
+            assert!(shell.read(cx).session().is_some());
+        });
+        for key in keys.split_whitespace() {
+            visual.simulate_keystrokes(key);
+            redraw(&mut visual);
+        }
+        visual.update(|window, cx| {
+            let shell = app_shell(window, cx);
+            assert!(shell.read(cx).session().is_none());
             assert!(editor.focus_handle(cx).is_focused(window));
         });
         visual.simulate_input("x");
@@ -508,7 +539,7 @@ fn close_confirmation_defaults_to_cancel_and_accepts_keyboard_quit(cx: &mut Test
     visual.read(|cx| {
         assert_eq!(
             editor.read(cx).target.buffer().text().to_string(),
-            "dirtyxxx"
+            "dirtyxx"
         );
         assert!(editor.read(cx).target.buffer().is_modified());
     });
