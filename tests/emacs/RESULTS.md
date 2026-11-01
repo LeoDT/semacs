@@ -27,6 +27,35 @@
 | mark-buffers | A mark=4 → 切到 foo 编辑并设 mark → 切回 A 在 mark 前插入 → 回 foo undo | A 的 mark 跟随自己的编辑（4→5），B 的 mark/undo 不受影响 |
 | undo-then-input | 见 `del-then-undo-then-type` | undo 后输入开新组，不复活旧内容 |
 
+### M1 历史补充参照
+
+本批重新运行原有 typing / DEL / C-d / motion / RET / yank 分组、越过保存点与 marker 条件恢复的隔离 pty 用例，结果与上表一致。新增 pty 观察如下，point 均为 1-based：
+
+| 用例 | 结果 |
+|---|---|
+| `m1-redo-backward-delete` | `abcDEF` 在 point=4 连续 DEL 两次，undo 恢复 point=4，redo 得到 `aDEF`、point=2 |
+| `m1-redo-forward-delete` | `abcDEF` 在 point=2 连续 C-d 两次，undo / redo 均回 point=2 |
+| `m1-redo-after-motion` | 在 `tail` 前输入 `abc` → undo → 成功 C-f → redo，仍恢复 `abctail`、point=1 |
+| `m1-save-crossing` | 分三组输入 `ab`、RET、`cd` 后标记保存，undo 到 `ab\n` 与 `ab` 都为 dirty；redo 到最后保存边界为 clean。这不把所有“越过保存点”泛化为 clean |
+| `m1-save-twice` | 输入 `ab` 后标记保存，再输入 `cd` 并标记保存；undo 到 `ab` 与 redo 到 `abcd` 均为 clean |
+
+这里的保存操作仍是 `set-buffer-modified-p nil`，没有写磁盘。产品内部保存点入口同样不替代 M2 实际保存、磁盘字节与失败安全验收。
+绑定导出保留 Emacs 默认 `undo-limit=160000`、`undo-strong-limit=240000`、`undo-outer-limit=nil` 的参照；不据此宣称自有线性历史与 Emacs GC / undo 环容量等价。
+
+`m1-history.el` 的 6 项 ERT 通过，属于显式分界的函数 / interactive 调用，而非自动分组的 command loop。只读拒绝来自 interactive 检查，直接调用 `undo-only` 可以绕过；全局 marker 比较先停用 region，不将 Emacs 默认 undo-in-region 记为产品要求。
+
+### M1 prompt 保护与字段参照
+
+隔离 pty 的 `m1-minibuffer-prompt` / `m1-minibuffer-motion` / `m1-minibuffer-history` 重新运行；`Input: ` 的 prompt_end=8（1-based 字符位置）：
+
+- 输入 `abc` 后 C-a 到 8，C-b 到 7，证明 prompt 只读不等于 point 不可进入。
+- point=1 时 C-k 复制 `Input: ` 到 ring、point 到 8，但不删除 prompt；随后输入字段仍可正常编辑。
+- 正文 kill `body` 后输入 `A`，进入 minibuffer C-y 得到 `body`，删除 `bo` 后 ring 为 `["bo", "body"]`；两次 undo 只恢复 / 撤销 minibuffer 编辑，不动正文的 `A`。退出参照读入后，正文 undo 仍独立工作。
+
+`m1-fields.el` 的 7 项 ERT 使用显式的只读前缀 / field 属性，补足边界断言。C-a 受 field 约束，而 C-e 从 prompt 内仍到整条逻辑行末；C-k 则用所在字段的末端。yank 在只读文字处仍先设置 mark，再在非空插入时报告 text-read-only；它不同于整个 buffer 只读时的前置拒绝。
+
+参照采集的 `text` 包含 prompt，`prompt_end` 与 point / mark 都是字符位置。纯函数 ERT 不能证明真实会话调度；pty 也不证明真实桌面 / IME。产品只实现本阶段已确认的固定只读前缀与 field 边界，不宣称实现完整文本属性或读入会话；参照的 C-g 结束会话不等于产品 M1 的编辑器 Quit。
+
 ### marker 观察的采集限制
 
 上表 mark 场景经批量探针与 command loop 复核。`post-command-hook` 采集的第一条编辑命令后 active 可能尚未反映 transient-mark 的延迟停用，须比较稳定后的命令，不能把这一拍的 True 当成语义差异。
@@ -41,6 +70,33 @@
 因此旧记录“按 region 是否有活动区分 Quit / undefined”是采集假象，不是 Emacs 语义。
 真实 PGTK GUI（Hyprland + 真实按键）复核为 `C-x C-g is undefined`。
 
+### M1 kill / copy / yank
+
+`m1-kill.el` 的 7 项直接函数 ERT 固定空 / inactive region、kill-line 空白与换行、copy 方向 / 命令链、只读 kill、yank mark、副作用和容量。Emacs 31.1 默认 `kill-ring-max=120`，不按旧版本常见的 60 推断。
+
+隔离 pty 真实 command loop（`drive.py` 的三个 `m1-*` 用例，禁用 interprogram 与 copy blink delay）另行采集：
+
+| 用例 | 稳定结果 |
+|---|---|
+| `m1-copy-kill-yank` | `ab\\ncd` 从 BOB 选中 `ab`，M-w 后 ring=[ab]；两次 C-k 后 ring=[\\ncd, ab]；C-y 恢复原文，point=6、mark=3、active=false（Emacs 1-based） |
+| `m1-readonly-kill` | 只读 `abc\\ndef` 从 BOB 两次 C-k：文本与 modified 不变，先复制 `abc`，再追加换行；point 依次为 4、5，两次都报只读错误 |
+| `m1-kill-copy-direction` | `abc\\ndef` 在 mark=1、point=3 时 C-k 得 ring=[c]；M-w 续接为 [cab]；再次 M-w 得 [ab, cab]；文本为 `ab\\ndef`，稳定后 active=false |
+
+`post-command-hook` 在 copy / 首条 kill 后仍可能采到延迟停用之前的 active=true；如已有 marker 采集限制所述，不能把这拍当成稳定 active。产品 headless 对应命令链与共享语义测试独立断言即时最终状态；本记录不证明原生桌面 / IME 或历史分组已验收。
+
+### M1 motion 直接函数参照
+
+`m1-motion.el` 固定 Emacs 31.1 的词移动、逻辑行目标列 / 边界、TAB / Unicode 显示列、buffer 跳转的 mark，以及 batch selected window 的首次翻页。直接调用的下一条上下行命令显式设置 `last-command`，不声称经过真实 command loop。
+
+- `beginning-of-buffer` / `end-of-buffer`：inactive 时在原 point 设置 inactive mark；active 时保留原 mark / active。
+- `next-line` / `previous-line` 越界时仍先移到 EOB / BOB，再抛边界错误。
+- `forward-word` 在 `éclair` 中包括组合符号，在 `🙂last` 中先停在 emoji 后；semacs 的字母 / 数字词规则与之不同，已登记为 F2。
+- 首次向下翻页在固定 context=2、margin=0 时前进窗口正文行数减两行，point 到新页行首。未据 batch 的后续未 redisplay 状态固定连续翻页坐标。
+
+本节是参照记录，不是产品、原生桌面 / IME 或 M1 性能验收。
+
 ### 键位查询
 
-GNU Emacs 31.1 `-Q` / fundamental-mode 已核对：`C-a` = `move-beginning-of-line`，`C-e` = `move-end-of-line`，`C-x C-c` = `save-buffers-kill-terminal`。这是三项观察，不代表完整键位表已核对。
+GNU Emacs 31.1 `-Q` / fundamental-mode 的绑定查询与缩进选项已固定于 [m1-bindings.tsv](m1-bindings.tsv)，M1 注册绑定由 `tests/keymap.rs` 逐项对照。`ESC ESC` 是前缀，`ESC ESC ESC` 为 `keyboard-escape-quit`；`C-x C-g`、`ESC C-g` 无绑定。
+
+这是原始查询，不含 GUI 键名翻译：`<tab>` / `<return>` / `<backspace>` 的原始查询为 nil，不能据此判定真实 GUI 按键未绑定。基础缩进的固定选项与 26 组直接函数调用结果由 [m1-indent.el](m1-indent.el) 断言；字符运动、GUI Delete 与 `C-d` 的 region 差异、三次 ESC 的状态由 [m1-editing.el](m1-editing.el) 断言。不代表 semacs 命令执行或真实 command loop 验收通过。

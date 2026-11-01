@@ -3,7 +3,9 @@
 use std::ops::Range;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use crate::buffer::{AppliedEdit, Buffer, BufferId, Edit, EditError, EditSource, SnapshotId};
+use crate::buffer::{
+    AppliedEdit, Buffer, BufferId, Edit, EditError, EditGroup, EditSource, SnapshotId,
+};
 use crate::text::{ByteOffset, OffsetUtf16, Rope, clip_utf16_range, range_to_utf16};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -93,6 +95,7 @@ pub struct DisplaySnapshot {
     text: Rope,
     selected: Range<ByteOffset>,
     marked: Option<Range<ByteOffset>>,
+    region: Option<Range<ByteOffset>>,
 }
 
 impl DisplaySnapshot {
@@ -110,6 +113,21 @@ impl DisplaySnapshot {
 
     pub fn marked_range(&self) -> Option<Range<ByteOffset>> {
         self.marked.clone()
+    }
+
+    pub fn region_ranges(&self) -> impl Iterator<Item = Range<ByteOffset>> {
+        let ranges = match (&self.region, &self.marked) {
+            (Some(region), Some(marked)) => [
+                Some(region.start..region.end.min(marked.start)),
+                Some(region.start.max(marked.end)..region.end),
+            ],
+            (region, None) => [region.clone(), None],
+            (None, _) => [None, None],
+        };
+        ranges
+            .into_iter()
+            .flatten()
+            .filter(|range| !range.is_empty())
     }
 
     pub fn selected_range_utf16(&self) -> Range<OffsetUtf16> {
@@ -239,6 +257,83 @@ impl InputSession {
         Ok(())
     }
 
+    pub fn command_edit(
+        &mut self,
+        buffer: &mut Buffer,
+        token: SessionToken,
+        range: Range<ByteOffset>,
+        text: &str,
+    ) -> Result<InputUpdate, InputError> {
+        self.command_edit_grouped(buffer, token, range, text, EditGroup::Isolated)
+    }
+
+    pub(crate) fn command_edit_grouped(
+        &mut self,
+        buffer: &mut Buffer,
+        token: SessionToken,
+        range: Range<ByteOffset>,
+        text: &str,
+        group: EditGroup,
+    ) -> Result<InputUpdate, InputError> {
+        self.guard_command(buffer, token)?;
+        let before = self.display_id(buffer);
+        let edit = buffer.edit_grouped(
+            Edit {
+                snapshot: buffer.snapshot_id(),
+                range: range.clone(),
+                text,
+                source: EditSource::Command,
+            },
+            group,
+        )?;
+        self.base = buffer.snapshot_id();
+        if edit.is_some() {
+            self.invalidate_display();
+        }
+        Ok(InputUpdate {
+            edit,
+            change: DisplayChange {
+                before,
+                after: self.display_id(buffer),
+                old_range: range.clone(),
+                new_range: range.start..ByteOffset(range.start.0 + text.len()),
+            },
+        })
+    }
+
+    pub fn replay_history(
+        &mut self,
+        buffer: &mut Buffer,
+        token: SessionToken,
+        redo: bool,
+    ) -> Result<Option<InputUpdate>, InputError> {
+        self.guard_command(buffer, token)?;
+        let before = self.display_id(buffer);
+        let edit = if redo { buffer.redo()? } else { buffer.undo()? };
+        let Some(edit) = edit else {
+            return Ok(None);
+        };
+        self.base = buffer.snapshot_id();
+        self.invalidate_display();
+        Ok(Some(InputUpdate {
+            change: DisplayChange {
+                before,
+                after: self.display_id(buffer),
+                old_range: edit.old_range.clone(),
+                new_range: edit.new_range.clone(),
+            },
+            edit: Some(edit),
+        }))
+    }
+
+    fn guard_writable(&self, buffer: &Buffer, token: SessionToken) -> Result<(), InputError> {
+        self.validate(buffer, token)?;
+        if buffer.is_read_only() {
+            return Err(EditError::ReadOnly.into());
+        }
+        Ok(())
+    }
+
     /// The committed projection, available even after `end` so the body still renders.
     pub fn committed_snapshot(&self, buffer: &Buffer) -> DisplaySnapshot {
         let point = buffer.point();
@@ -247,6 +342,7 @@ impl InputSession {
             text: buffer.text().clone(),
             selected: point..point,
             marked: None,
+            region: buffer.region(),
         }
     }
 
@@ -261,6 +357,19 @@ impl InputSession {
             snapshot.text = preedit.display.clone();
             snapshot.selected = preedit.selected.clone();
             snapshot.marked = Some(preedit.marked.clone());
+            snapshot.region = snapshot.region.map(|region| {
+                let project = |offset: ByteOffset| {
+                    ByteOffset(
+                        offset.0
+                            + if offset > preedit.anchor {
+                                preedit.marked.end.0 - preedit.marked.start.0
+                            } else {
+                                0
+                            },
+                    )
+                };
+                project(region.start)..project(region.end)
+            });
         }
         Ok(snapshot)
     }
@@ -292,6 +401,7 @@ impl InputSession {
             }
             None => range.clone(),
         };
+        buffer.check_writable_range(committed_range.clone())?;
         let mut display = snapshot.text;
         display.replace(range.start.0..range.end.0, text);
         Ok(Replacement {
@@ -311,7 +421,7 @@ impl InputSession {
         text: &str,
         selected: Option<Range<OffsetUtf16>>,
     ) -> Result<InputUpdate, InputError> {
-        self.validate(buffer, token)?;
+        self.guard_writable(buffer, token)?;
         let selected = match selected {
             Some(range) => {
                 clip_utf16_range(&Rope::from(text), range).ok_or(EditError::InvalidRange)?
@@ -373,7 +483,8 @@ impl InputSession {
         range: Option<Range<OffsetUtf16>>,
         text: &str,
     ) -> Result<InputUpdate, InputError> {
-        self.validate(buffer, token)?;
+        self.guard_writable(buffer, token)?;
+        let implicit_range = range.is_none();
         let replacement = self.prepare_replacement(buffer, range, text)?;
         let end =
             replacement.display.len() - (buffer.text().len() - replacement.committed_range.end.0);
@@ -381,15 +492,28 @@ impl InputSession {
             .display
             .chunks_in_range(replacement.committed_range.start.0..end)
             .collect();
-        let edit = buffer.edit(Edit {
-            snapshot: buffer.snapshot_id(),
-            range: replacement.committed_range,
-            text: &inserted,
-            source: EditSource::PlatformInput,
-        })?;
+        let group = if implicit_range
+            && !self.is_composing()
+            && replacement.committed_range.is_empty()
+            && !text.contains(['\n', '\r'])
+        {
+            EditGroup::Insert
+        } else {
+            EditGroup::Isolated
+        };
+        let edit = buffer.edit_grouped(
+            Edit {
+                snapshot: buffer.snapshot_id(),
+                range: replacement.committed_range,
+                text: &inserted,
+                source: EditSource::PlatformInput,
+            },
+            group,
+        )?;
         buffer
             .set_point(replacement.inserted.end)
             .expect("valid projected caret");
+        buffer.deactivate_mark();
         self.base = buffer.snapshot_id();
         if self.preedit.take().is_some() {
             self.token = SessionToken::new(self.token.target);
@@ -414,9 +538,10 @@ impl InputSession {
         buffer: &mut Buffer,
     ) -> Result<Option<InputUpdate>, InputError> {
         self.validate(buffer, self.token)?;
-        let Some(preedit) = self.preedit.take() else {
+        let Some(preedit) = self.preedit.as_ref() else {
             return Ok(None);
         };
+        self.guard_writable(buffer, self.token)?;
         let before = self.display_id(buffer);
         let text: String = preedit
             .display
@@ -428,9 +553,11 @@ impl InputSession {
             text: &text,
             source: EditSource::PlatformInput,
         })?;
+        let preedit = self.preedit.take().expect("validated preedit");
         buffer
             .set_point(preedit.selected.end)
             .expect("valid committed caret");
+        buffer.deactivate_mark();
         self.base = buffer.snapshot_id();
         self.token = SessionToken::new(self.token.target);
         self.invalidate_display();

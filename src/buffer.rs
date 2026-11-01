@@ -7,6 +7,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use crate::files::{DecodedFile, FileFormat};
 use crate::text::{ByteOffset, Rope};
 
+mod history;
+pub(crate) use history::EditGroup;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct BufferId(u64);
 
@@ -39,6 +42,8 @@ impl BufferSnapshot {
 pub enum EditSource {
     Command,
     PlatformInput,
+    Undo,
+    Redo,
 }
 
 pub struct Edit<'a> {
@@ -62,14 +67,21 @@ pub enum EditError {
     WrongTarget,
     StaleSnapshot,
     InvalidRange,
+    ReadOnly,
+    TextReadOnly,
 }
 
 pub struct Buffer {
     snapshot: BufferSnapshot,
     point: ByteOffset,
+    mark: Option<ByteOffset>,
+    mark_active: bool,
+    read_only: bool,
+    read_only_prefix: ByteOffset,
     path: Option<PathBuf>,
     format: FileFormat,
     modified: bool,
+    history: history::History,
 }
 
 impl Buffer {
@@ -108,10 +120,52 @@ impl Buffer {
                 text: Rope::from(file.text.as_str()),
             },
             point: ByteOffset(0),
+            mark: None,
+            mark_active: false,
+            read_only: false,
+            read_only_prefix: ByteOffset(0),
             path,
             format: file.format,
             modified: false,
+            history: history::History::default(),
         }
+    }
+
+    pub fn minibuffer(prompt: &str, initial: &str) -> Self {
+        let mut buffer = Self::new(
+            None,
+            DecodedFile {
+                text: format!("{prompt}{initial}"),
+                format: FileFormat::default(),
+            },
+        )
+        .with_read_only_prefix(ByteOffset(prompt.len()))
+        .expect("valid prompt boundary");
+        buffer.point = ByteOffset(buffer.text().len());
+        buffer.modified = true;
+        buffer
+    }
+
+    pub fn with_read_only_prefix(mut self, end: ByteOffset) -> Result<Self, EditError> {
+        self.validate_range(&(ByteOffset(0)..end))?;
+        self.read_only_prefix = end;
+        self.break_history_group();
+        Ok(self)
+    }
+
+    pub fn read_only_prefix(&self) -> ByteOffset {
+        self.read_only_prefix
+    }
+
+    pub fn check_writable_range(&self, range: Range<ByteOffset>) -> Result<(), EditError> {
+        self.validate_range(&range)?;
+        if self.read_only {
+            return Err(EditError::ReadOnly);
+        }
+        if range.start < self.read_only_prefix {
+            return Err(EditError::TextReadOnly);
+        }
+        Ok(())
     }
 
     pub fn snapshot(&self) -> BufferSnapshot {
@@ -136,6 +190,42 @@ impl Buffer {
         }
         self.point = point;
         Ok(())
+    }
+
+    pub fn mark(&self) -> Option<ByteOffset> {
+        self.mark
+    }
+
+    pub fn mark_active(&self) -> bool {
+        self.mark_active
+    }
+
+    pub fn region(&self) -> Option<Range<ByteOffset>> {
+        let mark = self
+            .mark
+            .filter(|mark| self.mark_active && *mark != self.point)?;
+        Some(self.point.min(mark)..self.point.max(mark))
+    }
+
+    pub fn set_mark(&mut self, point: ByteOffset) -> Result<(), EditError> {
+        if !self.text().is_char_boundary(point.0) {
+            return Err(EditError::InvalidRange);
+        }
+        self.mark = Some(point);
+        self.mark_active = true;
+        Ok(())
+    }
+
+    pub fn deactivate_mark(&mut self) {
+        self.mark_active = false;
+    }
+
+    pub fn is_read_only(&self) -> bool {
+        self.read_only
+    }
+
+    pub fn set_read_only(&mut self, read_only: bool) {
+        self.read_only = read_only;
     }
 
     pub fn line_column(&self) -> (u32, usize) {
@@ -170,24 +260,44 @@ impl Buffer {
     }
 
     /// Every nonempty replacement is a committed edit, even with identical text.
-    /// R1 has no history or save operation; D16 save-point semantics land in M1.
     pub fn edit(&mut self, edit: Edit<'_>) -> Result<Option<AppliedEdit>, EditError> {
-        if edit.snapshot.buffer != self.snapshot.id.buffer {
+        self.edit_grouped(edit, EditGroup::Isolated)
+    }
+
+    fn validate_snapshot(&self, snapshot: SnapshotId) -> Result<(), EditError> {
+        if snapshot.buffer != self.snapshot.id.buffer {
             return Err(EditError::WrongTarget);
         }
-        if edit.snapshot != self.snapshot.id {
+        if snapshot != self.snapshot.id {
             return Err(EditError::StaleSnapshot);
         }
-        if edit.range.start > edit.range.end
-            || !self.text().is_char_boundary(edit.range.start.0)
-            || !self.text().is_char_boundary(edit.range.end.0)
+        Ok(())
+    }
+
+    fn validate_range(&self, range: &Range<ByteOffset>) -> Result<(), EditError> {
+        if range.start > range.end
+            || !self.text().is_char_boundary(range.start.0)
+            || !self.text().is_char_boundary(range.end.0)
         {
             return Err(EditError::InvalidRange);
         }
+        Ok(())
+    }
+
+    fn validate_edit(&self, edit: &Edit<'_>) -> Result<(), EditError> {
+        self.validate_snapshot(edit.snapshot)?;
+        self.validate_range(&edit.range)?;
+        if !(edit.range.is_empty() && edit.text.is_empty()) {
+            self.check_writable_range(edit.range.clone())?;
+        }
+        Ok(())
+    }
+
+    fn apply_edit(&mut self, edit: Edit<'_>) -> Result<Option<AppliedEdit>, EditError> {
+        self.validate_edit(&edit)?;
         if edit.range.is_empty() && edit.text.is_empty() {
             return Ok(None);
         }
-
         let before = self.snapshot.id;
         let version = TextVersion(
             before
@@ -201,6 +311,14 @@ impl Buffer {
             .replace(edit.range.start.0..edit.range.end.0, edit.text);
         self.snapshot.id.version = version;
         self.point = ByteOffset(edit.range.start.0 + edit.text.len());
+        if let Some(mark) = &mut self.mark {
+            if *mark > edit.range.end {
+                mark.0 = mark.0 - (edit.range.end.0 - edit.range.start.0) + edit.text.len();
+            } else if *mark > edit.range.start {
+                *mark = edit.range.start;
+            }
+        }
+        self.deactivate_mark();
         self.modified = true;
 
         Ok(Some(AppliedEdit {

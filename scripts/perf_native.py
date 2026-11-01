@@ -5,9 +5,11 @@ import argparse
 import csv
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import queue
+import re
 import shutil
 import subprocess
 import threading
@@ -123,7 +125,72 @@ def drive_ime(process, desktop, lines, stem, token):
     process.stdin.flush()
 
 
-def read_report(path, software, ime):
+def validate_m1_report(content, rows, software, seconds, interval_ms):
+    settings = re.search(
+        r"# mode=m1; duration_seconds=(\d+); interval_ms=(\d+); command_steps=(\d+);", content,
+    )
+    if not settings or tuple(map(int, settings.groups()[:2])) != (seconds, interval_ms):
+        raise RuntimeError("M1 report settings do not match the requested workload")
+    chain_steps = int(settings.group(3))
+    count = seconds * 1000 // interval_ms
+    expected = [("open", 0)] + [("chain", i) for i in range(chain_steps)] + [
+        ("sustained", i) for i in range(count)
+    ]
+    if chain_steps < 1 or [(r["phase"], int(r["step"])) for r in rows] != expected:
+        raise RuntimeError("incomplete or reordered M1 phase matrix")
+    budget_status = "not-applicable" if software else "true"
+    if f"# completed=true; budget_passed={budget_status};" not in content:
+        raise RuntimeError("M1 report is missing the expected budget verdict")
+    original_bytes = int(rows[0]["bytes"])
+    for row in rows:
+        phase, status = row["phase"], row["status"]
+        values = {}
+        for key in (
+            "action_cpu_ms", "first_submit_ms", "ready_submit_ms", "first_frame_submit_ms",
+            "draw_cpu_max_ms", "schedule_lag_ms", "observed_elapsed_ms",
+        ):
+            value = row[key]
+            if not value and key in ("first_submit_ms", "ready_submit_ms", "first_frame_submit_ms"):
+                values[key] = None
+            elif not value or not math.isfinite(float(value)) or float(value) < 0:
+                raise RuntimeError(f"invalid M1 metric {key}: {row}")
+            else:
+                values[key] = float(value)
+        first, ready = values["first_submit_ms"], values["ready_submit_ms"]
+        if status == "ready":
+            valid = first is not None and ready is not None and ready >= first
+        elif status == "superseded-before-ready":
+            valid = phase == "sustained" and first is not None and ready is None
+        elif status == "superseded-before-first":
+            valid = software and phase == "sustained" and first is None and ready is None
+        else:
+            valid = False
+        if not valid or (phase != "sustained" and status != "ready"):
+            raise RuntimeError(f"invalid M1 observation coverage: {row}")
+        if int(row["blank_frames"]) != 0 or float(row["width_px"]) <= 0 or float(row["height_px"]) <= 0:
+            raise RuntimeError(f"missing M1 body: {row}")
+        if first is not None and (values["first_frame_submit_ms"] is None or values["first_frame_submit_ms"] > first):
+            raise RuntimeError(f"invalid M1 first-frame boundary: {row}")
+        if phase == "sustained":
+            index = int(row["step"])
+            remainder = (index + 1) % 64
+            pending = remainder if remainder <= 32 else 64 - remainder
+            key = "x" if index % 64 < 32 else "backspace"
+            if int(row["bytes"]) != original_bytes + pending or int(row["point"]) != pending or row["key"] != key:
+                raise RuntimeError(f"incorrect M1 sustained workload: {row}")
+        if not software:
+            first_limit, ready_limit = (250, 500) if phase == "open" else (16, 300)
+            for key, limit in (
+                ("action_cpu_ms", 2), ("draw_cpu_max_ms", 16),
+                ("first_submit_ms", first_limit), ("ready_submit_ms", ready_limit),
+            ):
+                if values[key] is not None and values[key] > limit:
+                    raise RuntimeError(f"STOP: M1 {phase} step {row['step']}: {key}={values[key]} > {limit}")
+    if rows[-1]["status"] != "ready":
+        raise RuntimeError("M1 final surviving key did not reach full layout readiness")
+
+
+def read_report(path, software, ime, m1=None):
     content = path.read_text()
     if "# completed=true;" not in content:
         raise RuntimeError(f"incomplete report {path}")
@@ -131,6 +198,9 @@ def read_report(path, software, ime):
     if renderer not in content:
         raise RuntimeError(f"unexpected renderer class in {path}")
     rows = list(csv.DictReader(line for line in content.splitlines() if not line.startswith("#")))
+    if m1 is not None:
+        validate_m1_report(content, rows, software, *m1)
+        return rows
     expected = (
         {"open": 1, "preedit": 2, "cancel": 1, "commit": 1,
          "scroll": 1, "resize": 1, "font": 1, "click": 1} if ime else
@@ -157,6 +227,9 @@ def run_probe(args, desktop, sample, run):
         invocation.append("--allow-software")
     if args.ime:
         invocation.append("--external")
+    if args.m1:
+        invocation.extend(["--m1", "--duration-seconds", str(args.duration_seconds),
+                           "--interval-ms", str(args.interval_ms)])
     environment = os.environ.copy()
     token = uuid.uuid4().hex
     environment["SEMACS_PERF_TOKEN"] = token
@@ -180,10 +253,15 @@ def run_probe(args, desktop, sample, run):
         try:
             if args.ime:
                 drive_ime(process, desktop, lines, stem, token)
-            status = process.wait(timeout=150)
+            status = process.wait(timeout=args.duration_seconds + 120 if args.m1 else 150)
             if status != 0:
-                raise RuntimeError(f"probe exited {status}; see {stem}.stderr.log")
-            return read_report(report, args.software, args.ime)
+                thread.join(timeout=5)
+                stops = [line for line in stem.with_suffix(".stdout.log").read_text().splitlines()
+                         if line.startswith("STOP ")]
+                reason = stops[-1] if stops else f"probe exited {status}"
+                raise RuntimeError(f"{reason}; see {stem}.stdout.log and {stem}.stderr.log")
+            pacing = (args.duration_seconds, args.interval_ms) if args.m1 else None
+            return read_report(report, args.software, args.ime, pacing)
         finally:
             if process.poll() is None:
                 process.terminate()
@@ -203,7 +281,11 @@ def main():
     parser.add_argument("output", type=Path, help="NEW directory; refuses to reuse")
     parser.add_argument("--consent", action="store_true", help="authorize independent native test windows")
     parser.add_argument("--software", action="store_true", help="diagnostic only, never hardware acceptance")
-    parser.add_argument("--ime", action="store_true", help="real Wayland/fcitx5 Pinyin; requires Hyprland/wtype")
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--ime", action="store_true", help="real Wayland/fcitx5 Pinyin; requires Hyprland/wtype")
+    mode.add_argument("--m1", action="store_true", help="M1 command chain + paced native sustained input; stop on first hardware budget failure")
+    parser.add_argument("--duration-seconds", type=int, help="M1 sustained duration, 1..600; default 60")
+    parser.add_argument("--interval-ms", type=int, help="M1 input cadence, 20..1000 ms; default 50")
     parser.add_argument("--sample", choices=SAMPLES, action="append")
     parser.add_argument("--runs", type=int, default=3)
     parser.add_argument("--hyprland-instance", default=os.environ.get("HYPRLAND_INSTANCE_SIGNATURE"))
@@ -213,6 +295,13 @@ def main():
         parser.error("--consent is required before opening desktop test windows")
     if args.runs < 1:
         parser.error("--runs must be positive")
+    if not args.m1 and (args.duration_seconds is not None or args.interval_ms is not None):
+        parser.error("pacing options require --m1")
+    if args.m1:
+        args.duration_seconds = 60 if args.duration_seconds is None else args.duration_seconds
+        args.interval_ms = 50 if args.interval_ms is None else args.interval_ms
+        if not 1 <= args.duration_seconds <= 600 or not 20 <= args.interval_ms <= 1000:
+            parser.error("M1 requires duration 1..600 seconds and interval 20..1000 ms")
     if args.ime and (not args.hyprland_instance or not os.environ.get("WAYLAND_DISPLAY")):
         parser.error("--ime requires the actual Wayland/Hyprland session environment")
     args.input = args.input.resolve(strict=True)
@@ -223,7 +312,8 @@ def main():
     digest = hashlib.sha256(args.input.read_bytes()).hexdigest()
     metadata = {
         "uname": list(os.uname()), "software_diagnostic": args.software,
-        "ime": args.ime, "runs": args.runs, "samples": args.sample or list(SAMPLES),
+        "ime": args.ime, "m1": args.m1, "duration_seconds": args.duration_seconds,
+        "interval_ms": args.interval_ms, "runs": args.runs, "samples": args.sample or list(SAMPLES),
         "fixture_sha256": digest,
         "fontconfig_monospace": command("fc-match", "-f", "%{family}\n%{file}\n", "monospace"),
         "fontconfig_bold": command("fc-match", "-f", "%{family}\n%{file}\n", "monospace:style=Bold"),
@@ -235,15 +325,26 @@ def main():
         for sample in metadata["samples"]:
             for run in range(1, args.runs + 1):
                 rows = run_probe(args, desktop, sample, run)
+                if args.m1:
+                    sustained = [row for row in rows if row["phase"] == "sustained"]
+                    metadata.setdefault("m1_coverage", []).append({
+                        "sample": sample, "run": run, "keys": len(sustained),
+                        "ready": sum(row["status"] == "ready" for row in sustained),
+                        "superseded_before_ready": sum(row["status"] == "superseded-before-ready" for row in sustained),
+                        "superseded_before_first": sum(row["status"] == "superseded-before-first" for row in sustained),
+                    })
                 for row in rows:
                     for key in (
                         "first_submit_ms", "ready_submit_ms", "draw_cpu_max_ms",
-                        "action_cpu_ms", "blank_frames", "first_frame_submit_ms",
+                        "action_cpu_ms", "blank_frames", "first_frame_submit_ms", "schedule_lag_ms",
                     ):
-                        if row[key]:
+                        if row.get(key):
                             values.setdefault((sample, row["phase"], key), []).append(float(row[key]))
                 print(f"{sample} {run}/{args.runs}: complete", flush=True)
         metadata["completed"] = True
+    except Exception as error:
+        metadata["error"] = str(error)
+        raise
     finally:
         try:
             desktop.restore()

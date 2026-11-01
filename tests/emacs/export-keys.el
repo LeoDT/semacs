@@ -20,7 +20,10 @@
     "C-x C-f" "C-x C-s" "C-x C-w" "C-x b" "C-x k" "C-x C-c"
     "C-s" "C-r" "C-u"
     "C-x 1" "C-x 2" "C-x 3" "C-x o" "C-x a"
-    "RET" "TAB" "C-i" "C-j" "C-m" "C-h" "ESC" "M-ESC"))
+    "RET" "<return>" "TAB" "<tab>" "C-i" "C-j" "C-m" "C-h"
+    "<backspace>" "<delete>" "<deletechar>" "C-l"
+    "ESC" "M-ESC" "ESC ESC" "ESC ESC ESC" "ESC f" "ESC C-_"
+    "ESC C-g" "C-x C-g"))
 
 (defun reference/describe-binding (key)
   (let ((cmd (condition-case err
@@ -41,9 +44,13 @@
     (princ (format "# undo-limit: %s\n" undo-limit))
     (princ (format "# undo-strong-limit: %s\n" undo-strong-limit))
     (princ (format "# undo-outer-limit: %s\n" undo-outer-limit))
+    (dolist (option '(tab-width indent-tabs-mode tab-always-indent standard-indent
+                      indent-line-function electric-indent-mode electric-indent-inhibit
+                      electric-indent-chars))
+      (princ (format "# %s: %S\n" option (symbol-value option))))
     (princ "# driving: emacs -Q --batch, key-binding lookup (not a command loop)\n")
     (princ "#\n")
     (dolist (key reference/keys)
-      (princ (format "%-10s %s\n" key (reference/describe-binding key))))))
+      (princ (format "%s\t%s\n" key (reference/describe-binding key))))))
 
 (reference/export)

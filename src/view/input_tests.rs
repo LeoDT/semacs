@@ -7,11 +7,12 @@ use crate::platform::BufferInputHandler;
 use crate::text::{ByteOffset, range_to_utf16};
 use gpui_kit as gpui;
 use gpui_kit::{
-    Entity, Focusable, InputHandler, TestAppContext, VisualTestContext, font, point, px, size,
+    App, AppContext, Entity, Focusable, InputHandler, TestAppContext, VisualTestContext, Window,
+    font, point, px, size,
 };
 use std::sync::atomic::AtomicBool;
 
-fn open(text: &str, cx: &mut TestAppContext) -> (VisualTestContext, Entity<BufferView>) {
+pub(super) fn open(text: &str, cx: &mut TestAppContext) -> (VisualTestContext, Entity<BufferView>) {
     cx.update(crate::app::init);
     let buffer = Buffer::new(
         None,
@@ -21,10 +22,19 @@ fn open(text: &str, cx: &mut TestAppContext) -> (VisualTestContext, Entity<Buffe
         },
     );
     let window = cx.open_window(size(px(400.), px(240.)), |window, cx| {
-        AppShell::new(buffer, window, cx)
+        let shell = cx.new(|cx| AppShell::new(buffer, window, cx));
+        gpui_kit::base::Root::new(shell, window, cx)
     });
     let editor = window
-        .read_with(cx, |shell, _| shell.editor().clone())
+        .read_with(cx, |root, cx| {
+            root.view()
+                .clone()
+                .downcast::<AppShell>()
+                .unwrap()
+                .read(cx)
+                .editor()
+                .clone()
+        })
         .unwrap();
     let mut visual = VisualTestContext::from_window(window.into(), cx);
     visual.update(|window, _| window.activate_window());
@@ -32,20 +42,51 @@ fn open(text: &str, cx: &mut TestAppContext) -> (VisualTestContext, Entity<Buffe
     (visual, editor)
 }
 
-fn redraw(cx: &mut VisualTestContext) {
+pub(super) fn app_shell(window: &Window, cx: &App) -> Entity<AppShell> {
+    window
+        .root::<gpui_kit::base::Root>()
+        .unwrap()
+        .unwrap()
+        .read(cx)
+        .view()
+        .clone()
+        .downcast::<AppShell>()
+        .unwrap()
+}
+
+pub(super) fn redraw(cx: &mut VisualTestContext) {
     cx.run_until_parked();
     cx.update(|window, cx| window.draw(cx).clear(cx));
 }
 
-fn handler(editor: &Entity<BufferView>, cx: &VisualTestContext) -> BufferInputHandler {
+pub(super) fn handler(editor: &Entity<BufferView>, cx: &VisualTestContext) -> BufferInputHandler {
     cx.read(|cx| {
         let view = editor.read(cx);
         BufferInputHandler {
             view: editor.downgrade(),
-            token: view.input.token(),
+            token: view.target.input().token(),
             registration: view.registration,
         }
     })
+}
+
+pub(super) fn press_listener(
+    editor: &Entity<super::BufferView>,
+    key: &'static str,
+    window: &mut gpui_kit::Window,
+    cx: &mut gpui_kit::App,
+) {
+    editor.update(cx, |view, cx| {
+        view.key_down(
+            &gpui_kit::KeyDownEvent {
+                keystroke: gpui_kit::Keystroke::parse(key).unwrap(),
+                is_held: false,
+                prefer_character_input: false,
+            },
+            window,
+            cx,
+        );
+    });
 }
 
 #[gpui::test]
@@ -53,21 +94,27 @@ fn registered_handler_receives_typing_newline_and_scalar_deletion(cx: &mut TestA
     let (mut visual, editor) = open("", cx);
     visual.simulate_input("中🙂e\u{301}");
     redraw(&mut visual);
-    visual.read(|cx| assert_eq!(editor.read(cx).buffer.text().to_string(), "中🙂e\u{301}"));
+    visual.read(|cx| {
+        assert_eq!(
+            editor.read(cx).target.buffer().text().to_string(),
+            "中🙂e\u{301}"
+        )
+    });
     visual.simulate_keystrokes("backspace enter");
     redraw(&mut visual);
     visual.read(|cx| {
         let view = editor.read(cx);
-        assert_eq!(view.buffer.text().to_string(), "中🙂e\n");
-        assert!(view.buffer.is_modified());
+        assert_eq!(view.target.buffer().text().to_string(), "中🙂e\n");
+        assert!(view.target.buffer().is_modified());
         assert!(view.layout_ready());
     });
     visual.simulate_keystrokes("ctrl-v ctrl-c ctrl-x");
     redraw(&mut visual);
     visual.read(|cx| {
         let view = editor.read(cx);
-        assert_eq!(view.buffer.text().to_string(), "中🙂e\n");
-        assert!(view.message().unwrap().contains("undefined"));
+        assert_eq!(view.target.buffer().text().to_string(), "中🙂e\n");
+        assert_eq!(view.message(), Some("C-x"));
+        assert!(view.target.is_pending());
     });
 }
 
@@ -103,9 +150,9 @@ fn same_frame_callbacks_advance_only_their_own_token_and_geometry_waits_for_layo
     redraw(&mut visual);
     visual.read(|cx| {
         let view = editor.read(cx);
-        assert_eq!(view.buffer.text().to_string(), "终!tail");
-        assert_eq!(view.buffer.point(), ByteOffset(4));
-        assert!(!view.input.is_composing());
+        assert_eq!(view.target.buffer().text().to_string(), "终!tail");
+        assert_eq!(view.target.buffer().point(), ByteOffset(4));
+        assert!(!view.target.input().is_composing());
         assert!(view.layout_ready());
     });
     visual.update(|window, cx| {
@@ -121,7 +168,12 @@ fn same_frame_callbacks_advance_only_their_own_token_and_geometry_waits_for_layo
         current.replace_text_in_range(None, "后", window, cx);
     });
     redraw(&mut visual);
-    visual.read(|cx| assert_eq!(editor.read(cx).buffer.text().to_string(), "终!保留后tail"));
+    visual.read(|cx| {
+        assert_eq!(
+            editor.read(cx).target.buffer().text().to_string(),
+            "终!保留后tail"
+        )
+    });
 }
 
 #[gpui::test]
@@ -175,13 +227,13 @@ fn composition_barrier_blocks_commands_but_not_platform_composition(cx: &mut Tes
     visual.simulate_keystrokes("ctrl-x backspace enter");
     visual.read(|cx| {
         let view = editor.read(cx);
-        assert_eq!(view.buffer.text().to_string(), "body");
+        assert_eq!(view.target.buffer().text().to_string(), "body");
         assert_eq!(view.display_snapshot().text().to_string(), "拼音body");
         assert_eq!(
             view.message(),
             Some("Input method composition is active; finish it first")
         );
-        assert!(!view.buffer.is_modified());
+        assert!(!view.target.buffer().is_modified());
     });
     let mut input = handler(&editor, &visual);
     visual.update(|window, cx| {
@@ -190,7 +242,7 @@ fn composition_barrier_blocks_commands_but_not_platform_composition(cx: &mut Tes
         input.replace_text_in_range(None, "完", window, cx);
     });
     redraw(&mut visual);
-    visual.read(|cx| assert_eq!(editor.read(cx).buffer.text().to_string(), "完body"));
+    visual.read(|cx| assert_eq!(editor.read(cx).target.buffer().text().to_string(), "完body"));
 }
 
 #[gpui::test]
@@ -206,7 +258,7 @@ fn blur_cancels_marked_text_and_reopened_focus_rejects_old_handlers(cx: &mut Tes
     visual.read(|cx| {
         let view = editor.read(cx);
         assert_eq!(view.display_snapshot().text().to_string(), "body");
-        assert!(!view.buffer.is_modified());
+        assert!(!view.target.buffer().is_modified());
         assert!(view.viewport_layout().is_some());
     });
     visual.update(|window, cx| window.focus(&editor.focus_handle(cx), cx));
@@ -214,7 +266,12 @@ fn blur_cancels_marked_text_and_reopened_focus_rejects_old_handlers(cx: &mut Tes
     visual.update(|window, cx| old.replace_text_in_range(None, "late", window, cx));
     visual.simulate_input("new");
     redraw(&mut visual);
-    visual.read(|cx| assert_eq!(editor.read(cx).buffer.text().to_string(), "newbody"));
+    visual.read(|cx| {
+        assert_eq!(
+            editor.read(cx).target.buffer().text().to_string(),
+            "newbody"
+        )
+    });
 }
 
 #[gpui::test]
@@ -235,14 +292,19 @@ fn window_deactivation_ends_session_even_when_view_focus_handle_is_unchanged(
             editor.read(cx).display_snapshot().text().to_string(),
             "body"
         );
-        assert!(!editor.read(cx).buffer.is_modified());
+        assert!(!editor.read(cx).target.buffer().is_modified());
     });
     visual.update(|window, _| window.activate_window());
     redraw(&mut visual);
     visual.update(|window, cx| old.replace_text_in_range(None, "late", window, cx));
     visual.simulate_input("new");
     redraw(&mut visual);
-    visual.read(|cx| assert_eq!(editor.read(cx).buffer.text().to_string(), "newbody"));
+    visual.read(|cx| {
+        assert_eq!(
+            editor.read(cx).target.buffer().text().to_string(),
+            "newbody"
+        )
+    });
 }
 
 #[gpui::test]
@@ -304,7 +366,7 @@ fn scrolled_reflow_retains_paint_but_never_reuses_old_input_geometry(cx: &mut Te
             });
             let mut input = BufferInputHandler {
                 view: editor.downgrade(),
-                token: editor.read(cx).input.token(),
+                token: editor.read(cx).target.input().token(),
                 registration: editor.read(cx).registration,
             };
             let position =
@@ -327,7 +389,7 @@ fn scrolled_reflow_retains_paint_but_never_reuses_old_input_geometry(cx: &mut Te
                 view.viewport_layout().unwrap().key()
             );
             assert!(view.retained_paint_layout.is_none());
-            assert!(view.buffer.text().to_string().starts_with("new"));
+            assert!(view.target.buffer().text().to_string().starts_with("new"));
         });
     }
 }
@@ -341,12 +403,12 @@ fn malformed_platform_callbacks_leave_projection_and_committed_versions_unchange
     visual.update(|window, cx| {
         input.replace_and_mark_text_in_range(None, "汉", None, window, cx);
         let before = editor.read(cx).display_snapshot();
-        let committed = editor.read(cx).buffer.snapshot_id();
+        let committed = editor.read(cx).target.buffer().snapshot_id();
         let reversed = std::ops::Range { start: 3, end: 1 };
         input.replace_and_mark_text_in_range(Some(0..2), "bad", Some(reversed.clone()), window, cx);
         input.replace_text_in_range(Some(reversed.clone()), "bad", window, cx);
         assert_eq!(editor.read(cx).display_snapshot().id(), before.id());
-        assert_eq!(editor.read(cx).buffer.snapshot_id(), committed);
+        assert_eq!(editor.read(cx).target.buffer().snapshot_id(), committed);
         let mut adjusted = Some(0..0);
         assert!(
             input
@@ -363,7 +425,7 @@ fn dirty_close_is_confirmed_cancel_restores_focus_and_discard_closes(cx: &mut Te
     let mut input = handler(&editor, &visual);
     visual.update(|window, cx| {
         input.replace_and_mark_text_in_range(Some(1..4), "ni", None, window, cx);
-        assert_eq!(editor.read(cx).buffer.text().to_string(), "az");
+        assert_eq!(editor.read(cx).target.buffer().text().to_string(), "az");
         let marked = input.marked_text_range(window, cx).unwrap();
         input.replace_text_in_range(Some(marked), "", window, cx);
     });
@@ -382,8 +444,8 @@ fn dirty_close_is_confirmed_cancel_restores_focus_and_discard_closes(cx: &mut Te
     });
     visual.read(|cx| {
         let view = editor.read(cx);
-        assert_eq!(view.buffer.text().to_string(), "az");
-        assert!(view.buffer.is_modified());
+        assert_eq!(view.target.buffer().text().to_string(), "az");
+        assert!(view.target.buffer().is_modified());
     });
     visual.simulate_input("x");
     redraw(&mut visual);
@@ -407,7 +469,7 @@ fn closing_only_a_preedit_is_clean_but_preserves_prior_commits(cx: &mut TestAppC
             editor.read(cx).display_snapshot().text().to_string(),
             "body"
         );
-        assert!(!editor.read(cx).buffer.is_modified());
+        assert!(!editor.read(cx).target.buffer().is_modified());
     });
 
     let (mut visual, editor) = open("body", cx);
@@ -420,7 +482,7 @@ fn closing_only_a_preedit_is_clean_but_preserves_prior_commits(cx: &mut TestAppC
     visual.read(|cx| {
         let view = editor.read(cx);
         assert_eq!(view.display_snapshot().text().to_string(), "提交body");
-        assert!(view.buffer.is_modified());
+        assert!(view.target.buffer().is_modified());
     });
     redraw(&mut visual);
     visual.simulate_keystrokes("escape");
@@ -444,8 +506,11 @@ fn close_confirmation_defaults_to_cancel_and_accepts_keyboard_quit(cx: &mut Test
         visual.simulate_input("x");
     }
     visual.read(|cx| {
-        assert_eq!(editor.read(cx).buffer.text().to_string(), "dirtyxxx");
-        assert!(editor.read(cx).buffer.is_modified());
+        assert_eq!(
+            editor.read(cx).target.buffer().text().to_string(),
+            "dirtyxxx"
+        );
+        assert!(editor.read(cx).target.buffer().is_modified());
     });
 }
 
@@ -481,8 +546,8 @@ fn actual_input_deltas_reuse_wrap_index_across_multiple_callbacks(cx: &mut TestA
                 .collect::<Vec<_>>()
         };
         assert_eq!(rows(index), rows(&full));
-        let point = view.buffer.point();
-        assert!(range_to_utf16(view.buffer.text(), point..point).is_some());
+        let point = view.target.buffer().point();
+        assert!(range_to_utf16(view.target.buffer().text(), point..point).is_some());
     });
 }
 
@@ -512,4 +577,238 @@ fn preview_and_final_geometry_refresh_once_each_and_not_on_stable_frames(cx: &mu
         window.draw(cx).clear(cx);
     });
     visual.read(|cx| assert_eq!(editor.read(cx).geometry_refreshes, final_count));
+}
+
+#[gpui::test]
+fn keyboard_commands_preserve_prefix_quit_and_scalar_editing_semantics(cx: &mut TestAppContext) {
+    let (mut visual, editor) = open("中e\u{301}🙂", cx);
+    visual.simulate_keystrokes("ctrl-f ctrl-space ctrl-f ctrl-x ctrl-g");
+    redraw(&mut visual);
+    visual.read(|cx| {
+        let view = editor.read(cx);
+        assert_eq!(view.buffer().point(), ByteOffset(4));
+        assert_eq!(view.buffer().mark(), Some(ByteOffset(3)));
+        assert!(view.buffer().mark_active());
+        assert!(!view.target.is_pending());
+        assert_eq!(view.message(), Some("C-x C-g is undefined"));
+        assert!(!view.buffer().is_modified());
+    });
+    visual.simulate_keystrokes("ctrl-g");
+    visual.read(|cx| {
+        let view = editor.read(cx);
+        assert_eq!(view.message(), Some("Quit"));
+        assert_eq!(view.buffer().mark(), Some(ByteOffset(3)));
+        assert!(!view.buffer().mark_active());
+    });
+    visual.simulate_keystrokes("ctrl-a ctrl-d enter ctrl-j");
+    redraw(&mut visual);
+    visual.read(|cx| {
+        let view = editor.read(cx);
+        assert_eq!(view.buffer().text().to_string(), "\n\ne\u{301}🙂");
+        assert_eq!(view.buffer().point(), ByteOffset(2));
+        assert!(view.layout_ready());
+    });
+}
+
+#[gpui::test]
+fn pending_prefix_cannot_be_bypassed_by_direct_platform_callbacks(cx: &mut TestAppContext) {
+    let (mut visual, editor) = open("abc", cx);
+    visual.simulate_keystrokes("ctrl-x");
+    redraw(&mut visual);
+    let mut input = handler(&editor, &visual);
+    visual.update(|window, cx| {
+        assert!(!input.accepts_text_input(window, cx));
+        input.replace_text_in_range(None, "bad", window, cx);
+        input.replace_and_mark_text_in_range(None, "bad", None, window, cx);
+        input.unmark_text(window, cx);
+        let view = editor.read(cx);
+        assert_eq!(view.buffer().text().to_string(), "abc");
+        assert!(view.target.is_pending());
+        assert!(!view.target.input().is_composing());
+        assert!(!view.buffer().is_modified());
+    });
+    visual.simulate_keystrokes("z");
+    visual.read(|cx| {
+        let view = editor.read(cx);
+        assert_eq!(view.message(), Some("C-x z is undefined"));
+        assert_eq!(view.buffer().text().to_string(), "abc");
+        assert!(!view.target.is_pending());
+    });
+    visual.update(|window, cx| input.replace_text_in_range(None, "late", window, cx));
+    visual.simulate_input("z");
+    redraw(&mut visual);
+    visual.read(|cx| assert_eq!(editor.read(cx).buffer().text().to_string(), "zabc"));
+}
+
+#[gpui::test]
+fn motion_revokes_old_callbacks_without_rebuilding_compatible_text_layout(cx: &mut TestAppContext) {
+    let (mut visual, editor) = open("中🙂tail", cx);
+    let mut old = handler(&editor, &visual);
+    let (display, layout, shaped) = visual.read(|cx| {
+        let view = editor.read(cx);
+        (
+            view.display_snapshot().id(),
+            view.wrap_index().unwrap().key().clone(),
+            view.cache.values().cloned().collect::<Vec<_>>(),
+        )
+    });
+    visual.update(|window, cx| {
+        window.dispatch_keystroke(gpui_kit::Keystroke::parse("ctrl-f").unwrap(), cx);
+        old.replace_text_in_range(None, "late", window, cx);
+        assert!(old.selected_text_range(false, window, cx).is_none());
+        let view = editor.read(cx);
+        assert_eq!(view.buffer().point(), ByteOffset(3));
+        assert_eq!(view.buffer().text().to_string(), "中🙂tail");
+    });
+    redraw(&mut visual);
+    visual.read(|cx| {
+        let view = editor.read(cx);
+        assert_eq!(view.display_snapshot().id(), display);
+        assert_eq!(*view.wrap_index().unwrap().key(), layout);
+        for row in &shaped {
+            assert!(
+                view.cache
+                    .values()
+                    .any(|current| std::sync::Arc::ptr_eq(row, current))
+            );
+        }
+        assert!(!view.buffer().is_modified());
+    });
+    visual.simulate_input("字");
+    visual.read(|cx| assert_eq!(editor.read(cx).buffer().text().to_string(), "中字🙂tail"));
+}
+
+#[gpui::test]
+fn composition_barrier_preserves_the_current_registration_inside_the_key_listener(
+    cx: &mut TestAppContext,
+) {
+    let (mut visual, editor) = open("tail", cx);
+    let mut input = handler(&editor, &visual);
+    visual
+        .update(|window, cx| input.replace_and_mark_text_in_range(None, "拼音", None, window, cx));
+    redraw(&mut visual);
+    let mut input = handler(&editor, &visual);
+    visual.update(|window, cx| {
+        editor.update(cx, |view, cx| {
+            view.key_down(
+                &gpui_kit::KeyDownEvent {
+                    keystroke: gpui_kit::Keystroke::parse("ctrl-x").unwrap(),
+                    is_held: false,
+                    prefer_character_input: false,
+                },
+                window,
+                cx,
+            );
+        });
+        assert_eq!(
+            editor.read(cx).message(),
+            Some("Input method composition is active; finish it first")
+        );
+        assert!(!editor.read(cx).target.is_pending());
+        assert_eq!(
+            input.registration,
+            editor.read(cx).registration,
+            "the barrier must not revoke the current callback"
+        );
+        input.replace_text_in_range(None, "汉", window, cx);
+        assert_eq!(editor.read(cx).buffer().text().to_string(), "汉tail");
+        assert!(!editor.read(cx).target.input().is_composing());
+    });
+    redraw(&mut visual);
+    visual.simulate_keystrokes("ctrl-x");
+    visual.read(|cx| assert_eq!(editor.read(cx).message(), Some("C-x")));
+}
+
+#[gpui::test]
+fn readonly_blocks_typing_commands_and_direct_callbacks_but_allows_motion(cx: &mut TestAppContext) {
+    let (mut visual, editor) = open("abc", cx);
+    visual.update(|_, cx| {
+        editor.update(cx, |view, cx| {
+            view.target.set_read_only(true);
+            cx.notify();
+        })
+    });
+    redraw(&mut visual);
+    let initial = visual.read(|cx| editor.read(cx).buffer().snapshot_id());
+    let mut input = handler(&editor, &visual);
+    visual.update(|window, cx| {
+        assert!(!input.accepts_text_input(window, cx));
+        input.replace_text_in_range(None, "bad", window, cx);
+        input.replace_and_mark_text_in_range(None, "bad", None, window, cx);
+    });
+    visual.simulate_input("x");
+    visual.simulate_keystrokes("ctrl-f ctrl-d backspace enter");
+    redraw(&mut visual);
+    visual.read(|cx| {
+        let view = editor.read(cx);
+        assert_eq!(view.buffer().snapshot_id(), initial);
+        assert_eq!(view.buffer().point(), ByteOffset(1));
+        assert_eq!(view.buffer().text().to_string(), "abc");
+        assert_eq!(view.message(), Some("Buffer is read-only"));
+        assert!(!view.target.input().is_composing());
+        assert!(!view.buffer().is_modified());
+    });
+}
+
+#[gpui::test]
+fn printable_binding_runs_the_registered_command_instead_of_self_insert(cx: &mut TestAppContext) {
+    let (mut visual, editor) = open("abc", cx);
+    visual.update(|_, cx| {
+        editor.update(cx, |view, _| {
+            view.keymap
+                .bind(
+                    &crate::keymap::parse_sequence("q").unwrap(),
+                    crate::command::Command::ForwardChar,
+                )
+                .unwrap();
+        })
+    });
+    visual.simulate_input("q");
+    redraw(&mut visual);
+    visual.read(|cx| {
+        let view = editor.read(cx);
+        assert_eq!(view.buffer().point(), ByteOffset(1));
+        assert_eq!(view.buffer().text().to_string(), "abc");
+        assert!(!view.buffer().is_modified());
+    });
+}
+
+#[gpui::test]
+fn gui_delete_uses_emacs_region_semantics_and_backspace_remains_scalar(cx: &mut TestAppContext) {
+    let (mut visual, editor) = open("abcdef", cx);
+    visual.simulate_keystrokes("ctrl-f ctrl-space ctrl-f ctrl-f ctrl-f delete");
+    redraw(&mut visual);
+    visual.read(|cx| {
+        let view = editor.read(cx);
+        assert_eq!(view.buffer().text().to_string(), "aef");
+        assert_eq!(view.buffer().mark(), Some(ByteOffset(1)));
+        assert!(!view.buffer().mark_active());
+    });
+    visual.simulate_keystrokes("backspace");
+    redraw(&mut visual);
+    visual.read(|cx| assert_eq!(editor.read(cx).buffer().text().to_string(), "ef"));
+}
+
+#[gpui::test]
+fn typing_does_not_replace_an_active_region_and_indent_aliases_use_commands(
+    cx: &mut TestAppContext,
+) {
+    let (mut visual, editor) = open("abcdef", cx);
+    visual.simulate_keystrokes("ctrl-f ctrl-space ctrl-f ctrl-f");
+    visual.simulate_input("X");
+    redraw(&mut visual);
+    visual.read(|cx| {
+        let view = editor.read(cx);
+        assert_eq!(view.buffer().text().to_string(), "abcXdef");
+        assert_eq!(view.buffer().mark(), Some(ByteOffset(1)));
+        assert!(!view.buffer().mark_active());
+    });
+    visual.simulate_keystrokes("ctrl-a tab ctrl-a ctrl-i");
+    redraw(&mut visual);
+    visual.read(|cx| {
+        let view = editor.read(cx);
+        assert_eq!(view.buffer().text().to_string(), "\t\tabcXdef");
+        assert_eq!(view.buffer().point(), ByteOffset(1));
+        assert!(view.layout_ready());
+    });
 }

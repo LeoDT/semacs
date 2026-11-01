@@ -1,10 +1,14 @@
 pub mod app;
 pub mod buffer;
+pub mod command;
 pub mod display;
 pub mod echo;
+pub mod editing;
 pub mod files;
 pub mod frame;
 pub mod input;
+pub mod keymap;
+pub mod minibuffer;
 mod platform;
 mod prompt;
 pub mod text;

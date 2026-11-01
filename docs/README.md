@@ -10,6 +10,7 @@ semacs 将 Emacs 的操作模型带到现代 GPU UI，不复刻 Emacs 外观或 
 | [实施计划](plan.md) | 里程碑与交付顺序 |
 | [性能预算](performance.md) | 量化预算、指标含义和必要测量入口 |
 | [R1 验收归档](records/r1.md) | 固定的实测结果、环境、验收结论与限制 |
+| [M1 性能验收](records/m1-performance.md) | 已确认的验收结论、完整矩阵实测及未测边界 |
 | [Emacs 对照基准](../tests/emacs/README.md) | 外部行为参照的入口和比较陷阱 |
 | [第三方来源](../THIRD_PARTY.md) / [许可](../LICENSE) | 来源、修改归属与分发义务 |
 

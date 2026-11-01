@@ -21,6 +21,7 @@ heapless = "0.9.2"
 log = "0.4"
 rayon = "1.8"
 unicode-segmentation = "1.10"
+unicode-width = "0.2"
 
 [dev-dependencies]
 gpui-kit = { version = "0.8.1", features = ["test-support"] }

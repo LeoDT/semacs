@@ -9,10 +9,23 @@
 
 ```sh
 python3 tests/emacs/drive.py undo-del dirty kill2
+python3 tests/emacs/drive.py m1-copy-kill-yank m1-readonly-kill m1-kill-copy-direction
+python3 tests/emacs/drive.py m1-redo-backward-delete m1-redo-forward-delete m1-redo-after-motion m1-save-crossing m1-save-twice
+python3 tests/emacs/drive.py m1-minibuffer-prompt m1-minibuffer-motion m1-minibuffer-history
 emacs -Q --batch -l tests/emacs/export-keys.el
+emacs -Q --batch -l tests/emacs/m1-indent.el -l tests/emacs/m1-editing.el -l tests/emacs/m1-motion.el -l tests/emacs/m1-kill.el -l tests/emacs/m1-history.el -l tests/emacs/m1-fields.el -f ert-run-tests-batch-and-exit
 ```
 
-可用 case 以 `drive.py` 的 `CASES` 为准。导出绑定不等于 command loop 验证，也不代表完整键位已核对。
+可用 command-loop case 以 `drive.py` 的 `CASES` 为准。`m1-bindings.tsv` 固定 Emacs 31.1 的原始绑定查询与缩进选项，供 Rust keymap 测试对照；不证明 GUI 键名翻译或命令执行通过。`m1-indent.el` / `m1-editing.el` / `m1-motion.el` / `m1-kill.el` 固定基础缩进、编辑与 motion 结果，属于直接函数调用，不证明 command loop / 历史分组通过。motion 中显式使用逻辑行；窗口测试仅查询 batch 的 selected window，首个翻页用例不证明连续翻页或 GUI 布局一致。词边界已知差异单独断言 Emacs 的结果，产品规则见 F2 登记。
+
+`m1-kill.el` 固定行尾 / 空白 kill、方向与 copy 命令链、空 / inactive region、只读复制副作用、yank mark 与 120 条 ring 容量。直接函数测试显式模拟 `last-command` 和 transient mark 的延迟停用，不等同真实 command loop。
+`drive.py` 的三项 `m1-copy-kill-yank` / `m1-readonly-kill` / `m1-kill-copy-direction` 用例另走隔离 pty command loop；`baseline.el` 采集 UTF-8 base64 ring 条目，清空初始 ring、禁用 interprogram 剪贴板与 copy blink delay，避免采集受剪贴板和反馈等待干扰。
+
+`m1-history.el` 固定显式 undo boundary 下的 Unicode 回放、redo point、marker 条件恢复及内部 modified 保存标记。分组仍以 pty command loop 为参照，不用显式 boundary 的直接调用证明自动分组。参照 helper 在 undo 前停用 region，以比较已批准的全局 undo；只读测试使用 `call-interactively`，因为直接调用 `undo-only` 本身绕过 interactive 的只读检查。`C-c m` 和产品 `mark_saved(snapshot)` 都只用于保存点状态测试，不证明磁盘保存已实现。
+
+`m1-fields.el` 的 7 项直接函数 / interactive ERT 用带只读属性和 field 的前缀，核对 C-a、C-e、prompt 边界编辑、只读 kill 的复制范围、跨 prompt copy、yank 在只读文字中的 mark 副作用及初始化 prompt 不进历史。它不代表实现完整 text-property 系统或真实 minibuffer 会话。尤其 C-e 并不受 field 末端约束，不能和 C-a 一概处理。
+
+三个 `m1-minibuffer-*` pty 用例通过参照专用的 C-c t 打开 `read-from-minibuffer`；`baseline.el` 的 `prompt_end` 是 Emacs 1-based 字符位置，原始 `text` 包含 prompt，驱动额外展示输入后缀。正文与 minibuffer 的 point / mark 比较须分别换算 UTF-8 字节位置。参照使用真实读入会话的 C-g 结束；产品 M1 只挂载 / 卸载编辑组件，不据此宣称已实现读入确认 / 取消或完整 minibuffer-local-map。
 
 ## 比较陷阱
 

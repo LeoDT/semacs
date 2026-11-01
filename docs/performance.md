@@ -49,6 +49,8 @@
 | 真实 IME 受控流程 | arm 首次目标状态提交 ≤ 75 ms；完整就绪提交 ≤ 300 ms |
 | 稳定观察阶段 | 30 个无主动 invalidation 的 frame-demand tick 不产生 draw |
 
+持续输入验收口径（用户于 2026-11-01 确认）：每键同步更新 ≤2 ms、首次目标提交 ≤16 ms；被后续输入取代的旧版本不要求继续完成完整布局，其 ready 保留为未测，不填 0 或计作逐键完成。停止输入后的最终有效版本完整就绪提交须 ≤300 ms，实际观测到的 ready 仍按对应预算判定。该口径明确过期目标的适用范围，不调宽任何数值阈值。
+
 同回调 32 键不是长时间持续输入；完整命令链和持续输入的阶段补测见 [实施计划](plan.md)。
 GPU 执行 / 实际呈现可在出现瓶颈或需要端到端延迟承诺时另定方案，不预先扩大为 M1 硬门禁。
 
@@ -62,6 +64,15 @@ cargo build --release --example perf_view
 RUNS=3 target/release/examples/perf_view .pi/tmp/perf-sample.txt
 ```
 
+M1 有界命令链 / 连续前台更新的 CPU 补测入口：
+
+```sh
+cargo build --release --example perf_m1
+RUNS=3 target/release/examples/perf_m1 .pi/tmp/perf-sample.txt
+```
+
+该入口遇到超预算立即停止；连续段只报告每键前台更新和末键恢复，不是原生长时间持续输入，也不提供平台提交时延。验收结果与未测边界见 [M1 性能记录](records/m1-performance.md)。
+
 文件层独立入口为 `examples/perf_load.rs` / `scripts/perf_baseline.sh`。
 
 以下命令仅在另行获得真实桌面测试同意后，在正常宿主终端运行；输入使用可丢弃样本，输出目录必须尚不存在：
@@ -70,6 +81,9 @@ RUNS=3 target/release/examples/perf_view .pi/tmp/perf-sample.txt
 cargo build --release --example perf_native --features native-profiler
 python3 -B scripts/perf_native.py .pi/tmp/perf-sample.txt .pi/tmp/native-report --consent
 python3 -B scripts/perf_native.py .pi/tmp/perf-sample.txt .pi/tmp/native-ime-report --consent --ime
+python3 -B scripts/perf_native.py .pi/tmp/perf-sample.txt .pi/tmp/native-m1-report --consent --m1 --sample mixed --runs 1
 ```
+
+原生 M1 命令链 / 持续输入入口为同一驱动的 `--m1` 模式，默认 60 秒 / 50 ms，硬件超预算立即保存部分报告并停止。工具将被后续输入取代的 ready 明确记为未测，并要求末键完整就绪；最终验收按上文已确认口径逐项核对，不仅凭工具成功退出判断。不把调度迟到当成实体按键延迟。Base Root 路由冲突已修复，当前代码的 headless 收尾及用户宿主六类各三轮 M1 矩阵已完成，结果与被取代 ready / 真实 OS / IME / GPU 未测边界见 [验收记录](records/m1-performance.md)。后续复测仍先做小范围检查，出现超预算先汇报，不自动调优重测。
 
 硬件验收不强制软件渲染；`--software` 仅用于诊断，不代表硬件通过。原生功能诊断入口为 `examples/native_input.rs`，不能将其状态日志时间戳当作性能数据。

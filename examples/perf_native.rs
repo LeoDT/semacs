@@ -1,7 +1,7 @@
 //! Opt-in native-font / platform-submission measurements over the production shell.
 //! Platform submission is not GPU execution or compositor presentation.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::VecDeque;
 use std::fs::OpenOptions;
 use std::io::{BufRead, Write};
@@ -17,17 +17,43 @@ use gpui_kit::*;
 use semacs::app::AppShell;
 use semacs::buffer::Buffer;
 use semacs::files::{self, DecodedFile, FileFormat};
+use semacs::input::DisplayId;
 use semacs::view::BufferView;
 
 #[path = "support/samples.rs"]
 mod samples;
 
+#[path = "support/native_m1.rs"]
+mod m1;
+#[path = "support/m1_workload.rs"]
+mod workload;
+
 #[cfg(test)]
 #[path = "support/native_tests.rs"]
 mod tests;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct EditStamp {
+    display: DisplayId,
+    point: usize,
+    mark: Option<usize>,
+    mark_active: bool,
+}
+
+impl EditStamp {
+    fn capture(view: &BufferView) -> Self {
+        Self {
+            display: view.display_snapshot().id(),
+            point: view.buffer().point().0,
+            mark: view.buffer().mark().map(|mark| mark.0),
+            mark_active: view.buffer().mark_active(),
+        }
+    }
+}
+
 #[derive(Clone, Copy)]
 struct PaintState {
+    stamp: EditStamp,
     at: Instant,
     ready: bool,
     compatible: bool,
@@ -48,6 +74,7 @@ fn capture(view: &BufferView) -> PaintState {
     assert_eq!(index.key().display, display.id());
     let layout = view.paint_layout().expect("paint must have a body layout");
     PaintState {
+        stamp: EditStamp::capture(view),
         at: Instant::now(),
         ready: view.layout_ready(),
         compatible: layout.key() == index.key(),
@@ -61,6 +88,38 @@ fn capture(view: &BufferView) -> PaintState {
         scroll: f32::from(layout.scroll().y),
         marked: display.marked_range().is_some(),
     }
+}
+
+fn collect_frames(
+    collector: &mut ForegroundJournalCollector,
+    paints: &RefCell<VecDeque<PaintState>>,
+    window: &Window,
+) -> Vec<(PresentedFrame, Option<PaintState>)> {
+    let drained = collector.collect_unseen();
+    assert_eq!(drained.lost, 0, "profiler overflow invalidates the run");
+    let mut result = Vec::new();
+    for entry in drained.entries {
+        if let ForegroundJournalEntry::Boundary(IntervalBoundary::Presented(frame)) = entry
+            && frame.frame.window_id == window.window_handle().window_id()
+        {
+            let mut paints = paints.borrow_mut();
+            while paints
+                .front()
+                .is_some_and(|paint| paint.at < frame.frame.draw_start)
+            {
+                paints.pop_front();
+            }
+            let paint = paints
+                .front()
+                .copied()
+                .filter(|paint| paint.at <= frame.frame.draw_end);
+            if paint.is_some() {
+                paints.pop_front();
+            }
+            result.push((frame, paint));
+        }
+    }
+    result
 }
 
 struct Probe {
@@ -453,31 +512,13 @@ impl Run {
     }
 
     fn tick(&mut self, window: &mut Window, cx: &mut App) -> bool {
-        let drained = self.collector.collect_unseen();
-        assert_eq!(drained.lost, 0, "profiler overflow invalidates the run");
         let mut completed = false;
-        for entry in drained.entries {
-            if let ForegroundJournalEntry::Boundary(IntervalBoundary::Presented(frame)) = entry
-                && frame.frame.window_id == window.window_handle().window_id()
-            {
-                let mut paints = self.paints.borrow_mut();
-                while paints
-                    .front()
-                    .is_some_and(|paint| paint.at < frame.frame.draw_start)
-                {
-                    paints.pop_front();
-                }
-                let paint = paints
-                    .front()
-                    .copied()
-                    .filter(|paint| paint.at <= frame.frame.draw_end);
-                if let Some(paint) = paint {
-                    paints.pop_front();
-                    self.last_paint = Some(paint);
-                }
-                if let Some(measurement) = &mut self.current {
-                    completed |= measurement.accept(frame, paint);
-                }
+        for (frame, paint) in collect_frames(&mut self.collector, &self.paints, window) {
+            if let Some(paint) = paint {
+                self.last_paint = Some(paint);
+            }
+            if let Some(measurement) = &mut self.current {
+                completed |= measurement.accept(frame, paint);
             }
         }
         if let Some(measurement) = &mut self.current {
@@ -551,23 +592,53 @@ fn schedule(run: Rc<RefCell<Run>>, window: &Window) {
 
 fn main() {
     let mut args = std::env::args_os().skip(1);
-    let input = PathBuf::from(
-        args.next()
-            .expect("expected MIXED_SAMPLE SAMPLE NEW_REPORT [--allow-software] [--external]"),
-    );
+    let input =
+        PathBuf::from(args.next().expect(
+            "expected MIXED_SAMPLE SAMPLE NEW_REPORT [--allow-software] [--external | --m1]",
+        ));
     let sample = args.next().expect("expected SAMPLE").into_string().unwrap();
     assert!(samples::NAMES.contains(&sample.as_str()));
     let report = PathBuf::from(args.next().expect("expected NEW_REPORT"));
     assert!(!report.exists(), "report must not already exist");
     let mut allow_software = false;
     let mut external = false;
-    for arg in args {
+    let mut m1_mode = false;
+    let mut config = m1::Config::default();
+    let mut pacing_options = false;
+    while let Some(arg) = args.next() {
         match arg.to_str().unwrap() {
             "--allow-software" => allow_software = true,
             "--external" => external = true,
+            "--m1" => m1_mode = true,
+            "--duration-seconds" => {
+                config.seconds = args
+                    .next()
+                    .expect("duration value")
+                    .to_str()
+                    .unwrap()
+                    .parse()
+                    .expect("integer duration");
+                pacing_options = true;
+            }
+            "--interval-ms" => {
+                config.interval_ms = args
+                    .next()
+                    .expect("interval value")
+                    .to_str()
+                    .unwrap()
+                    .parse()
+                    .expect("integer interval");
+                pacing_options = true;
+            }
             other => panic!("unknown argument: {other}"),
         }
     }
+    assert!(
+        !(external && m1_mode),
+        "--m1 and --external are separate measurements"
+    );
+    assert!(!pacing_options || m1_mode, "pacing options require --m1");
+    config.validate().expect("valid M1 settings");
     let mixed = files::read(&input)
         .expect("read deterministic mixed sample")
         .text;
@@ -592,6 +663,8 @@ fn main() {
         });
         rx
     });
+    let succeeded = Rc::new(Cell::new(false));
+    let outcome = succeeded.clone();
     gpui_kit::application().run(move |cx| {
         semacs::app::init(cx);
         profiler::set_trace_enabled(true);
@@ -617,10 +690,19 @@ fn main() {
             }),
         ).expect("open native performance window");
         let editor = probe.read(cx).shell.read(cx).editor().clone();
-        window.update(cx, move |_, window, _| {
+        window.update(cx, move |_, window, cx| {
             let specs = window.gpu_specs().expect("renderer must identify itself");
             assert!(allow_software || !specs.is_software_emulated,
                 "hardware GPU required; --allow-software is diagnostic only");
+            let header = format!("# sample={sample}; model_ms={model_ms:.3}; external={external}; graphics={specs:?}\n# release={}; native {}; soft wrap enabled\n# first/ready end at CPU platform submission, NOT screen presentation; external includes driver/IPC/IME overhead",
+                !cfg!(debug_assertions), if m1_mode { "monospace 16px/24px, fixed dimensions" } else { "monospace 16px/24px -> bold 18px/27px" });
+            if m1_mode {
+                m1::start(config, m1::Session {
+                    editor, paints, collector, original: open.expected, opened_at: open.start,
+                    report, header, succeeded: outcome, hardware: !specs.is_software_emulated,
+                }, window, cx);
+                return;
+            }
             let mut actions = VecDeque::new();
             if !external {
                 actions.extend(std::iter::repeat_n(Step::Scroll, 30));
@@ -631,11 +713,13 @@ fn main() {
             }
             let run = Run {
                 editor, paints, collector, actions, current: Some(open), rows: Vec::new(),
-                header: format!("# sample={sample}; model_ms={model_ms:.3}; external={external}; graphics={specs:?}\n# release={}; native monospace 16px/24px -> bold 18px/27px; soft wrap enabled\n# first/ready end at CPU platform submission, NOT screen presentation; external includes driver/IPC/IME overhead",
-                    !cfg!(debug_assertions)),
+                header,
                 report, commands, external, waiting_since: Instant::now(), last_paint: None,
             };
             schedule(Rc::new(RefCell::new(run)), window);
         }).unwrap();
     });
+    if m1_mode && !succeeded.get() {
+        std::process::exit(2);
+    }
 }

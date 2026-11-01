@@ -38,6 +38,28 @@ C_W = b"\x17"
 
 # Each case: (initial text, [(label, keys), ...])
 CASES = {
+    "m1-minibuffer-motion": ("body", [("open reference input", b"\x03t"),
+        ("type abc", b"abc"), ("M-<", ESC + b"<"), ("C-a", C_A),
+        ("C-b x2", b"\x02" * 2), ("C-a in prompt", C_A),
+        ("C-k in prompt", C_K), ("M->", ESC + b">"),
+        ("undo", C_SLASH), ("C-g", C_G)]),
+    "m1-minibuffer-history": ("body", [("C-a", C_A), ("C-k", C_K),
+        ("type A", b"A"), ("open reference input", b"\x03t"),
+        ("C-y", C_Y), ("C-a", C_A), ("C-SPC", C_SPC),
+        ("C-f x2", C_F * 2), ("C-w", C_W), ("undo", C_SLASH),
+        ("undo", C_SLASH), ("C-g", C_G), ("undo body", C_SLASH)]),
+    "m1-minibuffer-prompt": ("body", [("open reference input", b"\x03t"),
+        ("type abc", b"abc"), ("C-a", C_A), ("C-b", b"\x02"),
+        ("C-f", C_F), ("DEL", DEL), ("C-g", C_G)]),
+    "m1-copy-kill-yank": ("ab\ncd", [
+        ("M-<", ESC + b"<"), ("C-SPC", C_SPC), ("C-f x2", C_F * 2),
+        ("M-w", ESC + b"w"), ("C-k x2", C_K * 2), ("C-y", C_Y)]),
+    "m1-readonly-kill": ("abc\ndef", [
+        ("M-<", ESC + b"<"), ("readonly", b"\x03r"), ("C-k", C_K),
+        ("C-k again", C_K)]),
+    "m1-kill-copy-direction": ("abc\ndef", [
+        ("M-<", ESC + b"<"), ("C-SPC", C_SPC), ("C-f x2", C_F * 2),
+        ("C-k", C_K), ("M-w", ESC + b"w"), ("M-w again", ESC + b"w")]),
     "undo-typing": ("", [("type abc", b"abc"), ("undo1", C_SLASH)]),
     "undo-del": ("", [("type abc", b"abc"), ("del x3", DEL * 3),
                       ("undo1", C_SLASH), ("undo2", C_SLASH)]),
@@ -71,6 +93,18 @@ CASES = {
     "kill-yank": ("ab", [("C-a", C_A), ("C-k", C_K), ("C-y", C_Y), ("undo1", C_SLASH),
                           ("undo2", C_SLASH)]),
     "undo-empty-msg": ("", [("undo1", C_SLASH)]),
+    "m1-redo-backward-delete": ("abcDEF", [("C-a C-f x3", C_A + C_F * 3),
+        ("DEL x2", DEL * 2), ("undo", C_SLASH), ("redo", C_M__)]),
+    "m1-redo-forward-delete": ("abcDEF", [("C-a C-f", C_A + C_F),
+        ("C-d x2", C_D * 2), ("undo", C_SLASH), ("redo", C_M__)]),
+    "m1-redo-after-motion": ("tail", [("C-a", C_A), ("type abc", b"abc"), ("undo", C_SLASH),
+        ("C-f", C_F), ("redo", C_M__)]),
+    "m1-save-twice": ("", [("type ab", b"ab"), ("save", b"\x03m"),
+        ("type cd", b"cd"), ("save", b"\x03m"), ("undo", C_SLASH),
+        ("redo", C_M__)]),
+    "m1-save-crossing": ("", [("type ab", b"ab"), ("RET", RET),
+        ("type cd", b"cd"), ("save", b"\x03m"), ("undo", C_SLASH),
+        ("undo", C_SLASH), ("redo", C_M__), ("redo", C_M__)]),
     "mark-quit2": ("hello world", [("C-e", C_E), ("C-SPC", C_SPC), ("C-a", C_A),
                                    ("C-g", C_G), ("yank after quit", C_Y)]),
     "quit-no-mark": ("", [("C-g", C_G), ("C-g again", C_G)]),
@@ -198,6 +232,12 @@ def main():
             d = json.loads(line)
             raw = base64.b64decode(d["text"]).decode("utf-8", "replace")
             print(f"  [{i}] text={raw!r} point={d['point']} mark={d['mark']} active={d['active']} modified={d.get('modified')} msg={d.get('msg','')!r}")
+            if d.get("prompt_end") is not None:
+                end = d["prompt_end"]
+                print(f"      prompt_end={end} input={raw[end - 1:]!r}")
+            if "kill_ring" in d:
+                ring = [base64.b64decode(text).decode("utf-8") for text in d["kill_ring"]]
+                print(f"      kill_ring={ring!r}")
         for m in marks:
             print(f"  step {m['keys']!r:24} -> dumps {m['dumps'][0]}..{m['dumps'][1]}")
         print()

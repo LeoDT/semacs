@@ -13,9 +13,16 @@ use unicode_segmentation::UnicodeSegmentation;
 
 use crate::buffer::Buffer;
 use crate::display::{FontMeasure, IndexedRow, LayoutKey, LayoutSettings, WrapIndex, WrapJob};
-use crate::input::{DisplayChange, DisplaySnapshot, InputSession, SessionToken};
+use crate::editing::{
+    CommandOutcome, CommandViewport, EditTarget, InputDisposition, KillRing, RecenterPosition,
+    TAB_WIDTH, ViewportRequest,
+};
+use crate::input::{DisplayChange, DisplaySnapshot, SessionToken};
+use crate::keymap::Keymap;
 use crate::platform::{BufferInputHandler, InputOperation};
-use crate::text::{ByteOffset, range_to_utf16};
+use crate::text::ByteOffset;
+
+mod motion;
 
 const PREVIEW_BYTES: usize = 8192;
 const SYNC_SHAPE_BYTES: usize = 8192;
@@ -203,6 +210,47 @@ impl ViewportLayout {
         )
     }
 
+    pub fn region_bounds(
+        &self,
+        ranges: impl IntoIterator<Item = Range<ByteOffset>>,
+    ) -> Vec<Bounds<Pixels>> {
+        let mut bounds = Vec::new();
+        for range in ranges {
+            for row in &self.rows {
+                let content_end = ByteOffset(row.source.start.0 + row.source.row.content_len);
+                let start = range.start.max(row.source.start);
+                let end = range
+                    .end
+                    .min(ByteOffset(row.source.start.0 + row.source.row.byte_len));
+                if start >= end {
+                    continue;
+                }
+                let Some(left) = row.x_for_offset(start.min(content_end)) else {
+                    continue;
+                };
+                let right = if end > content_end {
+                    self.bounds.size.width + self.scroll.x
+                } else if let Some(right) = row.x_for_offset(end) {
+                    right
+                } else {
+                    continue;
+                };
+                let origin = self.origin(row);
+                let right = (origin.x + right.max(left + px(1.))).min(self.bounds.right());
+                let left = (origin.x + left).max(self.bounds.left());
+                let top = origin.y.max(self.bounds.top());
+                let bottom = (origin.y + self.key.settings.line_height).min(self.bounds.bottom());
+                if left < right && top < bottom {
+                    bounds.push(Bounds::new(
+                        point(left, top),
+                        size(right - left, bottom - top),
+                    ));
+                }
+            }
+        }
+        bounds
+    }
+
     pub fn bounds_for_range(
         &self,
         range: Range<ByteOffset>,
@@ -243,8 +291,8 @@ struct InputGeometry {
 }
 
 pub struct BufferView {
-    buffer: Buffer,
-    input: InputSession,
+    target: EditTarget,
+    keymap: Keymap,
     focus: FocusHandle,
     settings: LayoutSettings,
     metrics: Option<FontMeasure>,
@@ -255,6 +303,7 @@ pub struct BufferView {
     cache: HashMap<usize, Arc<ShapedRow>>,
     color: Option<Hsla>,
     geometry: Option<ViewportLayout>,
+    content_bounds: Option<Bounds<Pixels>>,
     retained_paint_layout: Option<ViewportLayout>,
     scroll: Point<Pixels>,
     reflow_base: Option<WrapIndex>,
@@ -262,6 +311,7 @@ pub struct BufferView {
     registration: u64,
     accepting_input: bool,
     reveal_caret: bool,
+    pending_recenter: Option<RecenterPosition>,
     input_geometry: Option<InputGeometry>,
     message: Option<SharedString>,
     _input_subscriptions: Vec<Subscription>,
@@ -271,16 +321,21 @@ pub struct BufferView {
 
 impl BufferView {
     pub fn new(buffer: Buffer, cx: &mut Context<Self>) -> Self {
+        let target = EditTarget::with_kill_ring(buffer, cx.default_global::<KillRing>().clone());
+        Self::with_target(target, cx)
+    }
+
+    pub fn with_target(target: EditTarget, cx: &mut Context<Self>) -> Self {
         Self {
-            input: InputSession::new(&buffer),
-            buffer,
+            target,
+            keymap: Keymap::m1_defaults(),
             focus: cx.focus_handle(),
             settings: LayoutSettings {
                 font: font("monospace"),
                 font_size: px(16.),
                 line_height: px(24.),
                 wrap_width: px(1.),
-                tab_size: 8,
+                tab_size: TAB_WIDTH,
             },
             metrics: None,
             index: None,
@@ -290,6 +345,7 @@ impl BufferView {
             cache: HashMap::new(),
             color: None,
             geometry: None,
+            content_bounds: None,
             retained_paint_layout: None,
             scroll: Point::default(),
             reflow_base: None,
@@ -297,6 +353,7 @@ impl BufferView {
             registration: 0,
             accepting_input: true,
             reveal_caret: false,
+            pending_recenter: None,
             input_geometry: None,
             message: None,
             _input_subscriptions: Vec::new(),
@@ -306,12 +363,10 @@ impl BufferView {
     }
 
     pub fn buffer(&self) -> &Buffer {
-        &self.buffer
+        self.target.buffer()
     }
     pub fn display_snapshot(&self) -> DisplaySnapshot {
-        self.input
-            .display_snapshot(&self.buffer)
-            .unwrap_or_else(|_| self.input.committed_snapshot(&self.buffer))
+        self.target.display_snapshot()
     }
     pub fn wrap_index(&self) -> Option<&WrapIndex> {
         self.index.as_ref()
@@ -335,6 +390,12 @@ impl BufferView {
                     .filter(|layout| layout.key.display == self.display_snapshot().id())
             })
             .or(current)
+    }
+
+    pub fn region_bounds(&self) -> Vec<Bounds<Pixels>> {
+        self.paint_layout()
+            .map(|layout| layout.region_bounds(self.display_snapshot().region_ranges()))
+            .unwrap_or_default()
     }
 
     fn retain_paint_layout(&mut self) {
@@ -372,10 +433,27 @@ impl BufferView {
                 view.resume_input(cx);
             }
         });
-        self._input_subscriptions = vec![focus, blur, activation];
+        let owner = window.window_handle();
+        let editor = cx.weak_entity();
+        let keys = cx.intercept_keystrokes(move |event, window, cx| {
+            if window.window_handle() == owner {
+                editor
+                    .update(cx, |view, cx| {
+                        view.route_key(
+                            &event.keystroke,
+                            event.input_preference == InputPreference::CharacterInput,
+                            window,
+                            cx,
+                        );
+                    })
+                    .ok();
+            }
+        });
+        self._input_subscriptions = vec![focus, blur, activation, keys];
     }
 
     fn queue_change(&mut self, change: DisplayChange, cx: &mut Context<Self>) {
+        self.pending_recenter = None;
         if self.reflow_base.is_none() {
             self.reflow_base = self
                 .index
@@ -406,41 +484,20 @@ impl BufferView {
         }
     }
 
-    fn end_input(&mut self, cx: &mut Context<Self>) {
-        let before = self.display_snapshot();
-        self.input.end();
-        let after = self.display_snapshot();
-        let old_range = before
-            .marked_range()
-            .unwrap_or(ByteOffset(0)..ByteOffset(0));
-        let start = old_range.start;
-        self.queue_change(
-            DisplayChange {
-                before: before.id(),
-                after: after.id(),
-                old_range,
-                new_range: start..start,
-            },
-            cx,
-        );
+    pub(crate) fn end_input(&mut self, cx: &mut Context<Self>) {
+        if self.target.snapshot_for(self.target.token()).is_err() {
+            return;
+        }
+        let change = self.target.end_input();
+        self.queue_change(change, cx);
         self.input_geometry = None;
+        self.invalidate_input_registration();
     }
 
     fn resume_input(&mut self, cx: &mut Context<Self>) {
-        if self.input.display_snapshot(&self.buffer).is_ok() {
-            return;
+        if let Some(change) = self.target.resume_input() {
+            self.queue_change(change, cx);
         }
-        let before = self.display_snapshot().id();
-        self.input = InputSession::new(&self.buffer);
-        self.queue_change(
-            DisplayChange {
-                before,
-                after: self.display_snapshot().id(),
-                old_range: ByteOffset(0)..ByteOffset(0),
-                new_range: ByteOffset(0)..ByteOffset(0),
-            },
-            cx,
-        );
     }
 
     pub(crate) fn suspend_input(&mut self, cx: &mut Context<Self>) {
@@ -448,11 +505,15 @@ impl BufferView {
         self.end_input(cx);
     }
 
-    pub(crate) fn restore_input(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    pub(crate) fn resume_accepting_input(&mut self, cx: &mut Context<Self>) {
         self.accepting_input = true;
         self.resume_input(cx);
-        window.focus(&self.focus, cx);
         cx.notify();
+    }
+
+    pub(crate) fn restore_input(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.resume_accepting_input(cx);
+        window.focus(&self.focus, cx);
     }
 
     pub(crate) fn platform_snapshot(
@@ -467,7 +528,18 @@ impl BufferView {
         {
             return None;
         }
-        self.input.snapshot_for(&self.buffer, token).ok()
+        self.target.snapshot_for(token).ok()
+    }
+
+    pub(crate) fn accepts_platform_input(
+        &self,
+        registration: u64,
+        token: SessionToken,
+        window: &Window,
+    ) -> bool {
+        self.platform_snapshot(registration, token, window)
+            .is_some()
+            && self.target.allows_text_input(token)
     }
 
     pub(crate) fn platform_update(
@@ -479,18 +551,23 @@ impl BufferView {
         cx: &mut Context<Self>,
     ) -> Option<SessionToken> {
         self.platform_snapshot(registration, token, window)?;
-        let update = match operation {
-            InputOperation::Replace(range, text) => Some(
-                self.input
-                    .replace_text(&mut self.buffer, token, range, text)
-                    .ok()?,
-            ),
-            InputOperation::Mark(range, text, selection) => Some(
-                self.input
-                    .replace_and_mark(&mut self.buffer, token, range, text, selection)
-                    .ok()?,
-            ),
-            InputOperation::Unmark => self.input.commit_preedit(&mut self.buffer).ok()?,
+        let result = match operation {
+            InputOperation::Replace(range, text) => {
+                self.target.replace_text(token, range, text).map(Some)
+            }
+            InputOperation::Mark(range, text, selection) => self
+                .target
+                .replace_and_mark(token, range, text, selection)
+                .map(Some),
+            InputOperation::Unmark => self.target.commit_preedit(token),
+        };
+        let update = match result {
+            Ok(update) => update,
+            Err(error) => {
+                self.message = Some(error.to_string().into());
+                cx.notify();
+                return None;
+            }
         };
         if let Some(update) = update {
             self.queue_change(update.change, cx);
@@ -498,17 +575,21 @@ impl BufferView {
             self.message = None;
             window.notify_text_input_changed(&self.focus);
         }
-        Some(self.input.token())
+        Some(self.target.token())
     }
 
-    fn bind_input(&mut self, cx: &mut Context<Self>) -> BufferInputHandler {
+    fn invalidate_input_registration(&mut self) {
         self.registration = self
             .registration
             .checked_add(1)
             .expect("input registration exhausted");
+    }
+
+    fn bind_input(&mut self, cx: &mut Context<Self>) -> BufferInputHandler {
+        self.invalidate_input_registration();
         BufferInputHandler {
             view: cx.weak_entity(),
-            token: self.input.token(),
+            token: self.target.token(),
             registration: self.registration,
         }
     }
@@ -569,6 +650,7 @@ impl BufferView {
 
     pub fn scroll_by(&mut self, delta: Point<Pixels>, cx: &mut Context<Self>) {
         self.reveal_caret = false;
+        self.pending_recenter = None;
         self.scroll.x = (self.scroll.x + delta.x).max(px(0.));
         self.scroll.y = (self.scroll.y + delta.y).max(px(0.));
         self.geometry = None;
@@ -669,14 +751,28 @@ impl BufferView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if !self.focus.is_focused(window) && self.input.display_snapshot(&self.buffer).is_ok() {
+        if !self.focus.is_focused(window) && self.target.snapshot_for(self.target.token()).is_ok() {
             self.end_input(cx);
         }
         let mut bounds = bounds.inset(PADDING);
         bounds.size.width = bounds.size.width.max(px(1.));
         bounds.size.height = bounds.size.height.max(px(1.));
+        self.content_bounds = Some(bounds);
         self.ensure_index(bounds, cx);
         let index = self.index.as_ref().unwrap();
+        if let Some(position) = self.pending_recenter
+            && let Some(row) = index.row_for_offset(self.target.buffer().point())
+        {
+            let available = (bounds.size.height - self.settings.line_height).max(px(0.));
+            let offset = match position {
+                RecenterPosition::Center => available / 2.,
+                RecenterPosition::Top => px(0.),
+                RecenterPosition::Bottom => available,
+            };
+            self.scroll.y = (self.settings.line_height * row.index as f32 - offset).max(px(0.));
+            self.pending_recenter = None;
+            self.reveal_caret = false;
+        }
         if self.reveal_caret
             && let Some(row) = index.row_for_offset(self.display_snapshot().selected_range().end)
         {
@@ -689,8 +785,8 @@ impl BufferView {
             self.reveal_caret = false;
         }
         if index.is_complete() {
-            let height = self.settings.line_height * index.row_count() as f32;
-            self.scroll.y = self.scroll.y.min((height - bounds.size.height).max(px(0.)));
+            let last_row = self.settings.line_height * index.row_count().saturating_sub(1) as f32;
+            self.scroll.y = self.scroll.y.min(last_row);
         }
         if self.color != Some(color) {
             self.cache.clear();
@@ -805,8 +901,9 @@ impl BufferView {
         if !self.accepting_input {
             return;
         }
-        if self.input.is_composing() {
-            self.composition_barrier(cx);
+        if self.target.input().is_composing() {
+            self.message = Some("Input method composition is active; finish it first".into());
+            cx.notify();
             return;
         }
         let Some(offset) = self
@@ -815,83 +912,111 @@ impl BufferView {
         else {
             return;
         };
-        self.buffer
-            .set_point(offset)
-            .expect("shaped character boundary");
         self.resume_input(cx);
+        if let Err(error) = self
+            .target
+            .set_point_from_pointer(self.target.token(), offset)
+        {
+            self.message = Some(error.to_string().into());
+            cx.notify();
+            return;
+        }
+        self.invalidate_input_registration();
+        self.pending_recenter = None;
+        self.message = None;
         window.focus(&self.focus, cx);
         window.notify_text_selection_changed(&self.focus);
         cx.notify();
     }
 
-    fn composition_barrier(&mut self, cx: &mut Context<Self>) {
-        self.message = Some("Input method composition is active; finish it first".into());
+    fn finish_command(
+        &mut self,
+        outcome: CommandOutcome,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(update) = outcome.update {
+            self.queue_change(update.change, cx);
+            window.notify_text_input_changed(&self.focus);
+        } else if outcome.reveal_point {
+            window.notify_text_selection_changed(&self.focus);
+        }
+        self.pending_recenter = None;
+        match outcome.viewport {
+            Some(ViewportRequest::ScrollToRow(row)) => {
+                let y = self.settings.line_height * row as f32;
+                self.scroll_by(point(px(0.), y - self.scroll.y), cx);
+            }
+            Some(ViewportRequest::Recenter(position)) => {
+                self.pending_recenter = Some(position);
+                self.reveal_caret = false;
+            }
+            None => self.reveal_caret |= outcome.reveal_point,
+        }
+        self.message = outcome.message.map(Into::into);
         cx.notify();
     }
 
+    #[cfg(test)]
     fn key_down(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
-        if !self.accepting_input {
-            cx.stop_propagation();
+        self.route_key(&event.keystroke, event.prefer_character_input, window, cx);
+    }
+
+    fn route_key(
+        &mut self,
+        stroke: &Keystroke,
+        prefer_character_input: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if !self.accepting_input || !self.focus.is_focused(window) {
             return;
         }
-        let key = &event.keystroke;
-        let command_modifier = key.modifiers.control || key.modifiers.alt || key.modifiers.platform;
-        let basic_edit = matches!(
-            key.key.as_str(),
-            "enter" | "return" | "backspace" | "delete"
+        let display = self.display_snapshot().id();
+        let viewport = self.index.as_ref().and_then(|index| {
+            self.content_bounds
+                .filter(|_| index.key().display == display && index.key().settings == self.settings)
+                .map(|bounds| {
+                    let height = f32::from(self.settings.line_height);
+                    motion::Viewport {
+                        index,
+                        first_row: (f32::from(self.scroll.y) / height).floor() as usize,
+                        visible_rows: (f32::from(bounds.size.height) / height).floor().max(1.)
+                            as usize,
+                    }
+                })
+        });
+        let before_point = self.target.buffer().point();
+        let result = self.target.dispatch_keystroke(
+            self.target.token(),
+            stroke,
+            prefer_character_input,
+            &[&self.keymap],
+            viewport
+                .as_ref()
+                .map(|viewport| viewport as &dyn CommandViewport),
         );
-        if !command_modifier && !basic_edit && key.key_char.is_some() {
-            return;
-        }
-        if self.input.is_composing() {
-            self.composition_barrier(cx);
-        } else if !command_modifier && basic_edit {
-            let point = self.buffer.point().0;
-            let range = match key.key.as_str() {
-                "backspace" => {
-                    let start = self
-                        .buffer
-                        .text()
-                        .reversed_chars_at(point)
-                        .next()
-                        .map_or(point, |ch| point - ch.len_utf8());
-                    ByteOffset(start)..ByteOffset(point)
+        match result {
+            Ok(route) => match route.disposition {
+                InputDisposition::TextInput => return,
+                InputDisposition::Handled => {
+                    self.invalidate_input_registration();
+                    self.finish_command(route.outcome, window, cx);
                 }
-                "delete" => {
-                    let end = self
-                        .buffer
-                        .text()
-                        .chars_at(point)
-                        .next()
-                        .map_or(point, |ch| point + ch.len_utf8());
-                    ByteOffset(point)..ByteOffset(end)
+                InputDisposition::Ignored => return,
+            },
+            Err(error) => {
+                if !self.target.input().is_composing() {
+                    self.invalidate_input_registration();
                 }
-                _ => ByteOffset(point)..ByteOffset(point),
-            };
-            let range = range_to_utf16(self.buffer.text(), range).expect("scalar range");
-            let text = if matches!(key.key.as_str(), "enter" | "return") {
-                "\n"
-            } else {
-                ""
-            };
-            if let Ok(update) =
-                self.input
-                    .replace_text(&mut self.buffer, self.input.token(), Some(range), text)
-            {
-                self.queue_change(update.change, cx);
-                self.reveal_caret = true;
-                self.message = None;
-                window.notify_text_input_changed(&self.focus);
+                if self.target.buffer().point() != before_point {
+                    self.pending_recenter = None;
+                    self.reveal_caret = true;
+                    window.notify_text_selection_changed(&self.focus);
+                }
+                self.message = Some(error.to_string().into());
+                cx.notify();
             }
-        } else {
-            self.message = Some(
-                format!(
-                    "{} is undefined (R1 input driver)",
-                    key.unparse(cx.platform_info().os)
-                )
-                .into(),
-            );
-            cx.notify();
         }
         cx.stop_propagation();
     }
@@ -920,7 +1045,6 @@ impl Render for BufferView {
             .text_color(cx.theme().foreground)
             .on_mouse_down(MouseButton::Left, cx.listener(Self::mouse_down))
             .on_scroll(cx.listener(Self::scroll_wheel))
-            .on_key_down(cx.listener(Self::key_down))
             .child(TextCanvas { view: cx.entity() })
     }
 }
@@ -991,7 +1115,7 @@ impl Element for TextCanvas {
                 view.refresh_input_geometry(window);
             }
         });
-        let (layout, focus, caret, marked) = {
+        let (layout, focus, caret, marked, region) = {
             let view = self.view.read(cx);
             let Some(layout) = view.paint_layout().cloned() else {
                 return;
@@ -1003,13 +1127,22 @@ impl Element for TextCanvas {
                 .index
                 .as_ref()
                 .and_then(|index| layout.bounds_for_range(point..point, index));
-            (layout, focus, caret, snapshot.marked_range())
+            (
+                layout,
+                focus,
+                caret,
+                snapshot.marked_range(),
+                view.region_bounds(),
+            )
         };
         window.with_content_mask(
             Some(ContentMask {
                 bounds: layout.bounds,
             }),
             |window| {
+                for bounds in region {
+                    window.paint_quad(fill(bounds, cx.theme().selection));
+                }
                 for row in &layout.rows {
                     let origin = layout.origin(row);
                     for part in &row.parts {
@@ -1059,7 +1192,17 @@ impl Element for TextCanvas {
 }
 
 #[cfg(test)]
+mod history_tests;
+#[cfg(test)]
 mod input_tests;
+#[cfg(test)]
+mod minibuffer_tests;
+#[cfg(test)]
+mod motion_tests;
+#[cfg(test)]
+mod region_tests;
+#[cfg(test)]
+mod routing_tests;
 
 #[cfg(test)]
 mod tests {

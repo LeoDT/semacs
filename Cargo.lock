@@ -6090,6 +6090,7 @@ dependencies = [
  "rand 0.9.5",
  "rayon",
  "unicode-segmentation",
+ "unicode-width",
 ]
 
 [[package]]

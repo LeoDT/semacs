@@ -159,7 +159,10 @@ impl InputHandler for BufferInputHandler {
     }
 
     fn accepts_text_input(&mut self, window: &mut Window, cx: &mut App) -> bool {
-        self.snapshot(window, cx).is_some()
+        self.view.upgrade().is_some_and(|view| {
+            view.read(cx)
+                .accepts_platform_input(self.registration, self.token, window)
+        })
     }
 
     fn prefers_ime_for_printable_keys(&mut self, window: &mut Window, cx: &mut App) -> bool {

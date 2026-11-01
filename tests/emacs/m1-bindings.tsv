@@ -1,0 +1,80 @@
+# emacs-version: 31.1
+# major-mode: fundamental-mode
+# transient-mark-mode: t
+# undo-limit: 160000
+# undo-strong-limit: 240000
+# undo-outer-limit: nil
+# tab-width: 8
+# indent-tabs-mode: t
+# tab-always-indent: t
+# standard-indent: 4
+# indent-line-function: indent-relative
+# electric-indent-mode: t
+# electric-indent-inhibit: nil
+# electric-indent-chars: (10)
+# driving: emacs -Q --batch, key-binding lookup (not a command loop)
+#
+C-f	forward-char
+C-b	backward-char
+C-p	previous-line
+C-n	next-line
+C-a	move-beginning-of-line
+C-e	move-end-of-line
+M-f	forward-word
+M-b	backward-word
+M-<	beginning-of-buffer
+M->	end-of-buffer
+C-v	scroll-up-command
+M-v	scroll-down-command
+C-d	delete-char
+DEL	delete-backward-char
+backspace	nil
+C-k	kill-line
+C-w	kill-region
+M-w	kill-ring-save
+C-y	yank
+M-y	yank-pop
+C-@	set-mark-command
+C-SPC	set-mark-command
+C-x C-x	exchange-point-and-mark
+C-g	keyboard-quit
+C-/	undo
+C-_	undo
+C-x u	undo
+C-?	undo-redo
+C-M-_	undo-redo
+M-x	execute-extended-command
+C-x C-f	find-file
+C-x C-s	save-buffer
+C-x C-w	write-file
+C-x b	switch-to-buffer
+C-x k	kill-buffer
+C-x C-c	save-buffers-kill-terminal
+C-s	isearch-forward
+C-r	isearch-backward
+C-u	universal-argument
+C-x 1	delete-other-windows
+C-x 2	split-window-below
+C-x 3	split-window-right
+C-x o	other-window
+C-x a	PREFIX
+RET	newline
+<return>	nil
+TAB	indent-for-tab-command
+<tab>	nil
+C-i	indent-for-tab-command
+C-j	electric-newline-and-maybe-indent
+C-m	newline
+C-h	PREFIX
+<backspace>	nil
+<delete>	nil
+<deletechar>	delete-forward-char
+C-l	recenter-top-bottom
+ESC	PREFIX
+M-ESC	PREFIX
+ESC ESC	PREFIX
+ESC ESC ESC	keyboard-escape-quit
+ESC f	forward-word
+ESC C-_	undo-redo
+ESC C-g	nil
+C-x C-g	nil

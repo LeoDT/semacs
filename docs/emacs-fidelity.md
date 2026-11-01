@@ -40,6 +40,14 @@
 
 不做的产品能力统一见 [非目标](requirements.md#非目标f4)，与仅延后到 v1 后的能力区分，不另维护一份清单。
 
+### M1 已登记的 F2 motion 差异
+
+- 词由连续 Unicode 字母 / 数字组成；其余字符作为分隔符，不实现 syntax table 或按文字系统细分词。下划线、组合附加符号和 emoji 均为分隔符；例如 `M-f` 在 `éclair` 中先停在 `e` 后，在 `🙂last` 中直接到 `last` 后，与 Emacs 的精确边界不同。
+- `C-n` / `C-p` 按逻辑行移动，不按软换行显示行；连续上下行共用临时目标列，其他命令、指针定位和平台输入提交打断。列宽复用基础缩进的 Unicode 宽度与 tab-width=8；目标列落在 TAB / 宽字符内时越过该字符，不实现行尾特殊 goal 或像素目标列。
+- 翻页按完整可见显示行数减两行移动（至少一行）；point 仍在新页内则保留，否则移到最近可见行的行首。末页 / 首页先移到 buffer 边缘，再次同向翻页报边界错误；不承诺 Emacs 的精确窗口边距与列定位。
+- `C-l` 连续执行按居中 → 顶部 → 底部循环，其他命令打断；按像素定位，允许 EOB 后留白，不承诺 Emacs 的整行取整和滚动边距。
+- 翻页只使用当前文本 / 布局设置兼容且完整的 wrap index；尚未就绪时提示重试，不同步扫描全文、不排队自动重放。recenter 可等当前 point 的兼容显示行就绪后定位。
+
 ## 3. 键位解析约定
 
 - `C-` = control；`M-` = meta / alt；`S-` = shift；`s-` = super；组合写作 `C-M-_`、`C-x C-s`。
@@ -55,7 +63,7 @@
 
 ## 4. v1 默认键位（草案）
 
-使用 Emacs 命令名；实现前固定完整表，逐项与参照绑定核对。草案不是已经完成的注册表或核验记录。
+使用 Emacs 命令名。M1 编辑命令的标识与默认绑定已固定于 [注册表](../src/command.rs)，并与 [Emacs 绑定查询](../tests/emacs/m1-bindings.tsv) 逐项核对；注册不表示执行已接入或通过验收。下表仍包含 M2 与延后能力。
 
 | 键 | 命令 | v1 |
 |---|---|---|
@@ -64,7 +72,7 @@
 | `M-f` / `M-b` | forward-word / backward-word | 是 |
 | `M-<` / `M->` | beginning-of-buffer / end-of-buffer | 是 |
 | `C-v` / `M-v` | scroll-up-command / scroll-down-command | 是 |
-| `C-d` / `DEL` | delete-char / delete-backward-char | 是 |
+| `C-d` / `DEL` / GUI Delete | delete-char / delete-backward-char / delete-forward-char | 是 |
 | `C-k` | kill-line | 是 |
 | `C-w` / `M-w` | kill-region / kill-ring-save | 是 |
 | `C-y` | yank | 是 |
@@ -108,15 +116,26 @@
 - mark 位置与 active 独立；停用 region 不删除 mark。
 - mark 为 insertion type nil 的 marker：在其前插入则后移，在其位置或之后插入不动。
 - 删除覆盖 mark（包括删除末端）时坍缩到删除起点；undo 仅在 mark 仍位于该起点时恢复原偏移，否则只按文本位移调整；redo 再按删除规则处理。
-- 纯 marked 更新 / 丢弃不调整 mark；平台已提交替换和最终输入提交按已提交编辑调整。
+- 纯 marked 更新 / 丢弃不调整 mark；平台已提交替换和最终输入提交按已提交编辑调整。region 高亮按 committed point / mark 投影到当前显示，跳过仍 marked 的预编辑文字；它不改变平台输入的 caret / selected range，也不启用 delete-selection。
 - 输入提交、undo / redo 与顶层 `C-g` 停用 region，但保留 mark。
 
 ### kill ring
 
-- `C-k` / `C-w` / `M-w` / `C-y` 遵循参照语义；`C-w` / `M-w` 作用于 region。
-- 连续 kill 按命令链追加；非连续 kill 不追加，平台输入提交也打断连续 kill。
+- `C-k` / `C-w` / `M-w` / `C-y` 遵循参照语义；`C-w` / `M-w` 在 mark 已设置时使用 point / mark 范围，不要求 active；空 region 可写入空 ring 条目但不创建文本编辑。kill / copy 停用 region，保留 mark。
+- 连续 kill 按应用级命令链追加；正向追加、反向 region 前置。非 kill 命令、undefined、指针定位、输入会话结束及平台输入提交打断连续 kill；等待前缀本身不是命令。`M-w` 可续接前一条 kill，但自身不构成下一条 kill 的连续前驱。
 - `kill-line` 在 EOB 回显 `End of buffer`，不建历史组。
-- yank 在插入起点设置 mark，回显 `Mark set`；正文与 minibuffer 共用全局 kill ring，暂不读写系统剪贴板。
+- 只读 buffer 的 kill 按参照复制到 ring 后报告只读错误，不修改文本 / modified；`C-k` 此时还会把 point 移到被复制范围末端。`M-w` 在只读 buffer 可正常复制；只读 yank 在改变 mark 前拒绝。
+- yank 在插入起点设置 mark，回显 `Mark set`；非空插入停用 region，不替换原 region。空 ring 报错但仍在 point 设置 mark；空字符串 yank 无文本编辑，不主动停用已有 active。
+- 正文与 minibuffer 共用应用内 kill ring，不读写系统剪贴板。默认最多保留 120 条、不去重，与固定 Emacs 31.1 默认值一致；连续追加仍只占一条。
+
+### 只读前缀与 field
+
+- 只读文本范围与整个 buffer 只读分开判断。M1 先支持固定只读前缀，不引入完整 text-property 或任意可变 field 系统。
+- minibuffer 的 prompt 是 committed 文本中的只读前缀，point / mark 可以进入，region / copy 可以包含；不使用外置 label 替代。在前缀内插入或删除 / 替换其文字均被拒绝，在前缀末端插入允许。统一 Edit 校验及平台预编辑 / 提交路径都执行保护，undo / redo 不能绕过。
+- 字段边界独立于只读属性，由共享命令层使用。目前支持在不可变前缀中固定的分界：C-a 从输入字段移到当前逻辑行首，但不进入 prompt；已在 prompt 内时仍可移到该字段内的行首。C-k 的范围止于所在字段的行尾 / 末端。字符移动和 buffer 跳转不统一截断到输入区；C-e 仍到逻辑行末，不能把所有 motion 都限制在字段内。
+- 删除 prompt 的 kill 先复制，再报告只读文本错误；C-k 还移到复制范围末端。yank 的整个 buffer 只读检查发生在设置 mark 前；仅插入位置为只读文本时，非空 yank 设置 mark 后因插入受保护而失败。空 ring 和空字符串 yank 保留既定的 mark 副作用，不创建文本编辑。
+- prompt / 初始输入在创建目标时初始化，不属于用户 undo 组；minibuffer 的 modified 不代表文件未保存。正文与 minibuffer 的 history、point / mark、输入会话和布局独立，kill ring 仍应用内共享。
+- M1 最小 minibuffer 仅是可挂载、聚焦的编辑组件，沿用 M1 编辑 keymap；RET / C-j 仍执行编辑换行，C-g 仍停用 region 并回显 Quit，不假装完成读入确认 / 取消。M-x、读入专用绑定、补全及完整会话由 M2 接入。
 
 ### IME 与生命周期
 

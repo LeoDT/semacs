@@ -4,9 +4,26 @@ use gpui_kit::WindowId;
 use gpui_kit::profiler::journal::PresentedFrame;
 use gpui_kit::profiler::{DrawPhases, FrameTiming, PresentTiming};
 
-use super::{Measurement, PaintState, Step};
+use super::{EditStamp, Measurement, PaintState, Step};
 
-fn frame(start: Instant) -> PresentedFrame {
+pub(super) fn stamp() -> EditStamp {
+    let buffer = semacs::buffer::Buffer::new(
+        None,
+        semacs::files::DecodedFile {
+            text: "abc".into(),
+            format: semacs::files::FileFormat::default(),
+        },
+    );
+    let target = semacs::editing::EditTarget::new(buffer);
+    EditStamp {
+        display: target.display_snapshot().id(),
+        point: 0,
+        mark: None,
+        mark_active: false,
+    }
+}
+
+pub(super) fn frame(start: Instant) -> PresentedFrame {
     PresentedFrame {
         frame: FrameTiming {
             window_id: WindowId::from(1),
@@ -27,8 +44,9 @@ fn frame(start: Instant) -> PresentedFrame {
     }
 }
 
-fn paint(at: Instant) -> PaintState {
+pub(super) fn paint(at: Instant) -> PaintState {
     PaintState {
+        stamp: stamp(),
         at,
         ready: true,
         compatible: true,
