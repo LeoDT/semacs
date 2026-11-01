@@ -106,7 +106,7 @@ OS 窗口关闭等平台触发且无法可靠聚焦 minibuffer 的确认可使�
 ## 待决事项
 
 - 自动保存与备份属于后续增强。
-- OS 窗口关闭确认在真实 Wayland 下的最终路径（minibuffer 或窗口级例外）待 M2 验证后固化。
+- OS 窗口关闭确认在真实 Wayland 下的最终路径（minibuffer 或窗口级例外）待 M2 验证后固化；headless 已确认关闭回调内可挂载、聚焦 minibuffer 并接收输入（`tests/mx.rs::window_close_callback_can_mount_and_focus_a_minibuffer`），真实 Wayland 仍待测。
 - v1 后各项增强的优先级。
 
 新增保真度差异、平台依赖调整或输入策略变化须先确认；真实环境验证另行征求同意。

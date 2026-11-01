@@ -99,4 +99,7 @@ commands! {
     SwitchToBuffer => "switch-to-buffer", Application, ["ctrl-x b" => "C-x b"];
     KillBuffer => "kill-buffer", Application, ["ctrl-x k" => "C-x k"];
     SaveBuffersKillTerminal => "save-buffers-kill-terminal", Application, ["ctrl-x ctrl-c" => "C-x C-c"];
+    MinibufferComplete => "minibuffer-complete", ReadSession, ["tab" => "TAB", "ctrl-i" => "C-i"];
+    MinibufferCompleteAndExit => "minibuffer-complete-and-exit", ReadSession, ["enter" => "RET", "ctrl-m" => "C-m"];
+    AbortMinibuffers => "abort-minibuffers", ReadSession, ["ctrl-g" => "C-g"];
 }

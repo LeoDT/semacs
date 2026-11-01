@@ -35,25 +35,31 @@ fn command_registry_has_unique_names_and_identities() {
     assert_eq!(Command::named("not-a-command"), None);
 }
 
-#[test]
-fn every_default_binding_matches_the_fixed_emacs_reference() {
-    let reference = include_str!("emacs/m1-bindings.tsv");
-    assert!(reference.starts_with("# emacs-version: 31.1\n"));
-    let reference: std::collections::HashMap<_, _> = reference
+fn reference_table(source: &'static str) -> std::collections::HashMap<&'static str, &'static str> {
+    assert!(source.starts_with("# emacs-version: 31.1\n"));
+    source
         .lines()
         .filter(|line| !line.starts_with('#'))
         .map(|line| line.split_once('\t').unwrap())
-        .collect();
+        .collect()
+}
+
+#[test]
+fn every_default_binding_matches_the_fixed_emacs_reference() {
+    let body_reference = reference_table(include_str!("emacs/m1-bindings.tsv"));
+    let session_reference = reference_table(include_str!("emacs/m2-minibuffer-bindings.tsv"));
     let application = Keymap::for_scope(Scope::Application);
     let edit = Keymap::for_scope(Scope::Edit);
+    let session = Keymap::for_scope(Scope::ReadSession);
     let body = [&application, &edit];
+    let minibuffer = [&session, &edit];
     for spec in COMMANDS {
+        let (layers, reference): (&[&Keymap], _) = match spec.scope {
+            Scope::Application | Scope::Edit => (&body, &body_reference),
+            Scope::ReadSession => (&minibuffer, &session_reference),
+        };
         for binding in spec.bindings {
             assert_eq!(reference.get(binding.reference), Some(&spec.name));
-            let layers: &[&Keymap] = match spec.scope {
-                Scope::Application | Scope::Edit => &body,
-                Scope::ReadSession => continue,
-            };
             assert_eq!(
                 lookup(layers, &keys(binding.keys)),
                 Lookup::Command(spec.command),
@@ -68,6 +74,19 @@ fn every_default_binding_matches_the_fixed_emacs_reference() {
     // Application bindings live only in the application layer used by the body.
     assert_eq!(lookup(&[&edit], &keys("ctrl-x ctrl-f")), Lookup::Unbound);
     assert_eq!(lookup(&[&application], &keys("ctrl-f")), Lookup::Unbound);
+    // Session bindings only exist in the layer a read session adds.
+    assert_eq!(
+        lookup(&[&edit], &keys("enter")),
+        Lookup::Command(Command::Newline)
+    );
+    assert_eq!(
+        lookup(&minibuffer, &keys("enter")),
+        Lookup::Command(Command::MinibufferCompleteAndExit)
+    );
+    assert_eq!(
+        lookup(&minibuffer, &keys("ctrl-g")),
+        Lookup::Command(Command::AbortMinibuffers)
+    );
 }
 
 #[test]

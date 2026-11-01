@@ -17,7 +17,7 @@ fn show(
     let result = visual.update(|window, cx| {
         let shell = app_shell(window, cx);
         let mini = shell.update(cx, |shell, cx| {
-            shell.show_minibuffer(prompt, initial, window, cx).unwrap()
+            shell.mount_minibuffer(prompt, initial, window, cx).unwrap()
         });
         let editor = mini.read(cx).editor().clone();
         (shell, mini, editor)
@@ -28,7 +28,7 @@ fn show(
 
 fn hide(visual: &mut VisualTestContext, shell: &Entity<AppShell>) {
     visual.update(|window, cx| {
-        assert!(shell.update(cx, |shell, cx| shell.hide_minibuffer(window, cx)));
+        assert!(shell.update(cx, |shell, cx| shell.unmount_minibuffer(window, cx)));
     });
     redraw(visual);
 }
@@ -411,10 +411,10 @@ fn close_cancels_both_compositions_and_cancel_restores_minibuffer_focus(cx: &mut
         assert!(
             shell
                 .update(cx, |shell, cx| shell
-                    .show_minibuffer("blocked", "", window, cx))
+                    .mount_minibuffer("blocked", "", window, cx))
                 .is_none()
         );
-        assert!(!shell.update(cx, |shell, cx| shell.hide_minibuffer(window, cx)));
+        assert!(!shell.update(cx, |shell, cx| shell.unmount_minibuffer(window, cx)));
     });
     redraw(&mut visual);
     visual.simulate_keystrokes("escape");
@@ -452,9 +452,7 @@ fn transient_minibuffer_dirty_state_does_not_make_a_clean_document_unsaved(
 }
 
 #[gpui::test]
-fn editing_surface_does_not_pretend_to_implement_read_confirmation_or_cancel(
-    cx: &mut TestAppContext,
-) {
+fn bare_mount_keeps_plain_edit_bindings_without_read_semantics(cx: &mut TestAppContext) {
     let (mut visual, _) = open("body", cx);
     let (shell, mini, _) = show(&mut visual, "P: ", "");
     visual.simulate_input("abc");
@@ -478,7 +476,7 @@ fn mounting_and_editing_without_paint_ends_old_sessions_before_the_new_kill_chai
     let (mini, editor) = visual.update(|window, cx| {
         let shell = app_shell(window, cx);
         let mini = shell.update(cx, |shell, cx| {
-            shell.show_minibuffer("P: ", "ab\ncd", window, cx).unwrap()
+            shell.mount_minibuffer("P: ", "ab\ncd", window, cx).unwrap()
         });
         let editor = mini.read(cx).editor().clone();
         for key in ["alt-<", "ctrl-f", "ctrl-f", "ctrl-f", "ctrl-k", "ctrl-k"] {

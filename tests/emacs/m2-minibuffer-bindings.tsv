@@ -1,0 +1,12 @@
+# emacs-version: 31.1
+# driving: emacs -Q --batch, lookup-key on minibuffer-local-must-match-map
+# context: M-x runs completing-read with REQUIRE-MATCH t, so RET/C-j use the
+#          must-match map and its parent minibuffer-local-completion-map
+# probe: (lookup-key minibuffer-local-must-match-map (kbd "..."))
+#
+RET	minibuffer-complete-and-exit
+C-m	minibuffer-complete-and-exit
+TAB	minibuffer-complete
+C-i	minibuffer-complete
+C-g	abort-minibuffers
+ESC	PREFIX

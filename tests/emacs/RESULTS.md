@@ -100,3 +100,24 @@
 GNU Emacs 31.1 `-Q` / fundamental-mode 的绑定查询与缩进选项已固定于 [m1-bindings.tsv](m1-bindings.tsv)，M1 注册绑定由 `tests/keymap.rs` 逐项对照。`ESC ESC` 是前缀，`ESC ESC ESC` 为 `keyboard-escape-quit`；`C-x C-g`、`ESC C-g` 无绑定。
 
 这是原始查询，不含 GUI 键名翻译：`<tab>` / `<return>` / `<backspace>` 的原始查询为 nil，不能据此判定真实 GUI 按键未绑定。基础缩进的固定选项与 26 组直接函数调用结果由 [m1-indent.el](m1-indent.el) 断言；字符运动、GUI Delete 与 `C-d` 的 region 差异、三次 ESC 的状态由 [m1-editing.el](m1-editing.el) 断言。不代表 semacs 命令执行或真实 command loop 验收通过。
+
+### M2 `M-x` 读入会话参照
+
+隔离 pty（`drive.py` 的 `m2-mx-*` 用例）在真实 command loop 中确认：
+
+| 用例 | 稳定结果 |
+|---|---|
+| `m2-mx-complete` | `M-x ` 的 prompt_end=5（1-based）；输入 `for` 后两次 TAB 都不改变输入并打开候选列表 |
+| `m2-mx-exit` | 输入 `forw` 后 RET 补全为 `forward-` 且**留在** minibuffer；随后输入 `z` 得到 `forward-z` |
+| `m2-mx-unique` | 输入 `kill-regi` 后 RET 补全为 `kill-region`、退出并在正文执行（回显 `The mark is not set now, so there is no region`） |
+| `m2-mx-unknown` | 输入 `nosuchcmd` 后 RET 留在 minibuffer；随后 C-g 退出并回显 `Quit` |
+| `m2-mx-empty` | 空输入 RET 立即退出，正文回显 `` ‘’ is not a valid command name `` |
+| `m2-mx-cancel` | 正文输入 `ab` 后 M-x 输入 `abc` 再 C-g：退出回显 `Quit`，正文文本、point 保持，随后输入 `z` 继续写正文 |
+
+`for` 在 Emacs 完整 obarray 中已经是最长公共前缀（`fortune-*`、`format-*`、`forward-*` 共享 `for`），因此首个 TAB 不插入字符。semacs 的命令集不同，同一前缀通常会补到 `forward-`；补全结果差异来自候选集，不是补全算法。
+
+`M-x` 使用 `require-match` 的 `completing-read`，因此 RET 走 must-match map。批量查询 `minibuffer-local-must-match-map` 得到 RET / C-m → `minibuffer-complete-and-exit`，TAB / C-i → `minibuffer-complete`，C-g → `abort-minibuffers`，ESC 为前缀，已固定于 [m2-minibuffer-bindings.tsv](m2-minibuffer-bindings.tsv)。
+
+`minibuffer-complete-and-exit` 的源码与探针共同确认：空输入直接退出；精确匹配直接退出；否则先补全，只有补全后成为唯一精确匹配才在同一次 RET 退出；已在公共前缀且仍多候选时 RET 不产生可见消息；无候选时报告 `No match`。`simple.el` 的 `execute-extended-command` 使用 `` `%s' is not a valid command name ``，显示层按 text-quoting-style 呈现为弯引号，上述记录按显示结果书写。
+
+候选集合在 Emacs 中是全部 `commandp` 符号；semacs 使用自己的注册表并排除会话命令，候选列表显示在 echo area 而不是 `*Completions*` buffer。这些差异属于产品已登记的实现边界，不是 Emacs 行为差异。本记录不证明真实 Wayland / IME 或 semacs 的 `M-x` 已通过验收。

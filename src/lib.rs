@@ -11,5 +11,6 @@ pub mod keymap;
 pub mod minibuffer;
 mod platform;
 mod prompt;
+pub mod session;
 pub mod text;
 pub mod view;

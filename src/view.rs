@@ -16,7 +16,7 @@ use crate::command::{Command, Scope};
 use crate::display::{FontMeasure, IndexedRow, LayoutKey, LayoutSettings, WrapIndex, WrapJob};
 use crate::editing::{
     CommandOutcome, CommandViewport, EditTarget, InputDisposition, KillRing, RecenterPosition,
-    TAB_WIDTH, ViewportRequest,
+    RouteError, TAB_WIDTH, ViewportRequest,
 };
 use crate::input::{DisplayChange, DisplaySnapshot, SessionToken};
 use crate::keymap::Keymap;
@@ -962,24 +962,23 @@ impl BufferView {
 
     #[cfg(test)]
     fn key_down(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
-        let outer = Keymap::default();
         self.route_key(
             &event.keystroke,
             event.prefer_character_input,
-            &outer,
+            None,
             window,
             cx,
         );
     }
 
-    /// Routes one keystroke through `outer` (application or session commands)
-    /// and this view's edit keymap. Commands in a higher layer are only reported,
-    /// never executed here.
+    /// Routes one keystroke through the optional layer above this view (body:
+    /// application commands, session: minibuffer commands) and this view's edit
+    /// keymap. Commands in a higher layer are only reported, never executed here.
     pub(crate) fn route_key(
         &mut self,
         stroke: &Keystroke,
         prefer_character_input: bool,
-        outer: &Keymap,
+        outer: Option<&Keymap>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> KeyRoute {
@@ -987,29 +986,35 @@ impl BufferView {
             return KeyRoute::Unhandled;
         }
         let display = self.display_snapshot().id();
-        let viewport = self.index.as_ref().and_then(|index| {
-            self.content_bounds
-                .filter(|_| index.key().display == display && index.key().settings == self.settings)
-                .map(|bounds| {
-                    let height = f32::from(self.settings.line_height);
-                    motion::Viewport {
-                        index,
-                        first_row: (f32::from(self.scroll.y) / height).floor() as usize,
-                        visible_rows: (f32::from(bounds.size.height) / height).floor().max(1.)
-                            as usize,
-                    }
-                })
-        });
-        let before_point = self.target.buffer().point();
-        let result = self.target.dispatch_keystroke(
-            self.target.token(),
-            stroke,
-            prefer_character_input,
-            &[outer, &self.keymap],
-            viewport
-                .as_ref()
-                .map(|viewport| viewport as &dyn CommandViewport),
+        let viewport = motion::Viewport::for_view(
+            self.index.as_ref(),
+            self.content_bounds,
+            self.scroll,
+            &self.settings,
+            display,
         );
+        let before_point = self.target.buffer().point();
+        let token = self.target.token();
+        let result = match outer {
+            Some(outer) => self.target.dispatch_keystroke(
+                token,
+                stroke,
+                prefer_character_input,
+                &[outer, &self.keymap],
+                viewport
+                    .as_ref()
+                    .map(|viewport| viewport as &dyn CommandViewport),
+            ),
+            None => self.target.dispatch_keystroke(
+                token,
+                stroke,
+                prefer_character_input,
+                &[&self.keymap],
+                viewport
+                    .as_ref()
+                    .map(|viewport| viewport as &dyn CommandViewport),
+            ),
+        };
         match result {
             Ok(route) => match route.disposition {
                 InputDisposition::TextInput => return KeyRoute::Unhandled,
@@ -1023,20 +1028,89 @@ impl BufferView {
                 }
                 InputDisposition::Ignored => return KeyRoute::Unhandled,
             },
-            Err(error) => {
-                if !self.target.input().is_composing() {
-                    self.invalidate_input_registration();
-                }
-                if self.target.buffer().point() != before_point {
-                    self.pending_recenter = None;
-                    self.reveal_caret = true;
-                    window.notify_text_selection_changed(&self.focus);
-                }
-                self.message = Some(error.to_string().into());
-                cx.notify();
-            }
+            Err(error) => self.fail(error, before_point, window, cx),
         }
         KeyRoute::Handled
+    }
+
+    /// Runs a command the owner selected for this target (for example after a
+    /// read session confirmed a command name). The target must already own a
+    /// fresh input session.
+    pub(crate) fn execute_command(
+        &mut self,
+        command: Command,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let display = self.display_snapshot().id();
+        let viewport = motion::Viewport::for_view(
+            self.index.as_ref(),
+            self.content_bounds,
+            self.scroll,
+            &self.settings,
+            display,
+        );
+        let before_point = self.target.buffer().point();
+        let result = self.target.execute_with_viewport(
+            self.target.token(),
+            command,
+            viewport
+                .as_ref()
+                .map(|viewport| viewport as &dyn CommandViewport),
+        );
+        match result {
+            Ok(outcome) => {
+                self.invalidate_input_registration();
+                self.finish_command(outcome, window, cx);
+            }
+            Err(error) => self.fail(error, before_point, window, cx),
+        }
+    }
+
+    /// Replaces the editable input area, used by the owner of a read session.
+    pub(crate) fn replace_input(
+        &mut self,
+        text: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let buffer = self.target.buffer();
+        let range = buffer.read_only_prefix()..ByteOffset(buffer.text().len());
+        let token = self.target.token();
+        match self.target.replace_text_range(token, range, text) {
+            Ok(update) => self.finish_command(
+                CommandOutcome {
+                    update: Some(update),
+                    reveal_point: true,
+                    ..CommandOutcome::default()
+                },
+                window,
+                cx,
+            ),
+            Err(error) => {
+                let point = self.target.buffer().point();
+                self.fail(error, point, window, cx);
+            }
+        }
+    }
+
+    fn fail(
+        &mut self,
+        error: RouteError,
+        before_point: ByteOffset,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if !self.target.input().is_composing() {
+            self.invalidate_input_registration();
+        }
+        if self.target.buffer().point() != before_point {
+            self.pending_recenter = None;
+            self.reveal_caret = true;
+            window.notify_text_selection_changed(&self.focus);
+        }
+        self.message = Some(error.to_string().into());
+        cx.notify();
     }
 
     fn scroll_wheel(&mut self, event: &ScrollEvent, _: &mut Window, cx: &mut Context<Self>) {

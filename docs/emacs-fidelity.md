@@ -28,6 +28,7 @@
 - mark ring、`C-x C-x`、`C-u`、按键重复及 isearch 的保真度；是否实施仍由发布范围决定。
 - mode line 格式可不同，但至少提供 buffer 名、dirty 与行列。
 - `kill-line` 在 EOB 的提示细节，以及第 6 节批准的 IME / 文件格式策略；与 Emacs 的差异须在用户可见说明中登记。
+- 补全候选只来自本产品注册表，结果集与 Emacs obarray 不同；候选列表在 echo area 显示，不提供 `*Completions*` buffer 与候选选择。
 - 普通确认走 minibuffer 查询会话；OS 窗口关闭等平台触发且无法可靠聚焦 minibuffer 的确认可使用窗口级确认，但须安全默认取消，并作为受控平台差异登记。
 
 ### F3：明确不同（须登记，必要时提示用户）
@@ -136,7 +137,8 @@
 - 字段边界独立于只读属性，由共享命令层使用。目前支持在不可变前缀中固定的分界：C-a 从输入字段移到当前逻辑行首，但不进入 prompt；已在 prompt 内时仍可移到该字段内的行首。C-k 的范围止于所在字段的行尾 / 末端。字符移动和 buffer 跳转不统一截断到输入区；C-e 仍到逻辑行末，不能把所有 motion 都限制在字段内。
 - 删除 prompt 的 kill 先复制，再报告只读文本错误；C-k 还移到复制范围末端。yank 的整个 buffer 只读检查发生在设置 mark 前；仅插入位置为只读文本时，非空 yank 设置 mark 后因插入受保护而失败。空 ring 和空字符串 yank 保留既定的 mark 副作用，不创建文本编辑。
 - prompt / 初始输入在创建目标时初始化，不属于用户 undo 组；minibuffer 的 modified 不代表文件未保存。正文与 minibuffer 的 history、point / mark、输入会话和布局独立，kill ring 仍应用内共享。
-- M1 最小 minibuffer 仅是可挂载、聚焦的编辑组件，沿用 M1 编辑 keymap；RET / C-j 仍执行编辑换行，C-g 仍停用 region 并回显 Quit，不假装完成读入确认 / 取消。M-x、读入专用绑定、补全及完整会话由 M2 接入。
+- 读入 / 查询会话在 minibuffer 之上增加会话层：RET 确认、C-g 取消并回显 `Quit`、TAB 做基础补全；没有会话的裸挂载仍是普通编辑目标，沿用编辑 keymap。同一时间只允许一个会话，不做递归 minibuffer。确认与取消都先结束会话、恢复 origin 的 point / mark / 滚动 / 输入会话与焦点，再在 origin 上执行命令，不作用于 minibuffer 或当前碰巧聚焦的其它目标；旧会话的迟到结果按 origin 与会话 id 隔离。
+- `M-x` 读 `M-x ` 后的命令名：精确名直接执行；否则先补全，只有补全后成为唯一候选才在同一次 RET 退出；空输入按参照退出并报告无效命令名。命令名、路径与 buffer 名补全只做前缀匹配与最长公共前缀，做候选列表，不做模糊匹配、循环选择或历史搜索；候选列表显示在 echo area，不提供 `*Completions*` buffer。
 
 ### IME 与生命周期
 

@@ -104,7 +104,7 @@ fn focused_minibuffer_owns_tab_and_a_retained_hidden_target_does_not_intercept(
     let (shell, mini) = visual.update(|window, cx| {
         let shell = app_shell(window, cx);
         let mini = shell.update(cx, |shell, cx| {
-            shell.show_minibuffer("P: ", "", window, cx).unwrap()
+            shell.mount_minibuffer("P: ", "", window, cx).unwrap()
         });
         (shell, mini)
     });
@@ -114,7 +114,7 @@ fn focused_minibuffer_owns_tab_and_a_retained_hidden_target_does_not_intercept(
         assert!(mini.focus_handle(cx).is_focused(window));
         assert_eq!(mini.read(cx).contents(cx), "\t");
         assert_eq!(body.read(cx).buffer().text().to_string(), "body");
-        assert!(shell.update(cx, |shell, cx| shell.hide_minibuffer(window, cx)));
+        assert!(shell.update(cx, |shell, cx| shell.unmount_minibuffer(window, cx)));
     });
     redraw(&mut visual);
     visual.simulate_keystrokes("tab");

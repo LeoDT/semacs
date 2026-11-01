@@ -61,21 +61,18 @@ fn activate(visual: &mut VisualTestContext, shell: &Entity<AppShell>, index: usi
     redraw(visual);
 }
 
-fn show_session(
-    visual: &mut VisualTestContext,
-    shell: &Entity<AppShell>,
-    prompt: &str,
-) -> Entity<BufferView> {
-    let editor = visual.update(|window, cx| {
-        let minibuffer = shell
-            .update(cx, |shell, cx| {
-                shell.show_minibuffer(prompt, "", window, cx)
-            })
-            .expect("session opens");
-        minibuffer.read(cx).editor().clone()
-    });
+fn open_mx(visual: &mut VisualTestContext, shell: &Entity<AppShell>) -> Entity<BufferView> {
+    visual.simulate_keystrokes("alt-x");
     redraw(visual);
-    editor
+    visual.read(|cx| {
+        shell
+            .read(cx)
+            .minibuffer()
+            .expect("M-x opens a session")
+            .read(cx)
+            .editor()
+            .clone()
+    })
 }
 
 fn assert_focused(visual: &mut VisualTestContext, view: &Entity<BufferView>) {
@@ -185,11 +182,11 @@ fn application_commands_are_requests_and_never_edit_the_wrong_target(cx: &mut Te
         assert_eq!(first.read(cx).buffer().text().to_string(), "alpha\n");
         assert!(!first.read(cx).buffer().is_modified());
     });
-    visual.simulate_keystrokes("alt-x");
+    visual.simulate_keystrokes("ctrl-x b");
     visual.read(|cx| {
         assert_eq!(
             first.read(cx).message(),
-            Some("execute-extended-command is not available yet")
+            Some("switch-to-buffer is not available yet")
         );
     });
 
@@ -206,13 +203,13 @@ fn application_commands_are_requests_and_never_edit_the_wrong_target(cx: &mut Te
         assert_eq!(first.read(cx).buffer().text().to_string(), "alpha\n");
         assert_eq!(
             first.read(cx).message(),
-            Some("execute-extended-command is not available yet")
+            Some("switch-to-buffer is not available yet")
         );
     });
     visual.simulate_input("Z");
     redraw(&mut visual);
 
-    let session = show_session(&mut visual, &shell, "Input: ");
+    let session = open_mx(&mut visual, &shell);
     visual.simulate_keystrokes("ctrl-x ctrl-f");
     redraw(&mut visual);
     visual.read(|cx| {
@@ -235,10 +232,12 @@ fn application_commands_are_requests_and_never_edit_the_wrong_target(cx: &mut Te
     let refused =
         visual.update(|window, cx| shell.update(cx, |shell, cx| shell.activate(0, window, cx)));
     assert!(!refused, "a session keeps its origin active");
-    visual.update(|window, cx| {
-        assert!(shell.update(cx, |shell, cx| shell.hide_minibuffer(window, cx)));
-    });
+    visual.simulate_keystrokes("ctrl-g");
     redraw(&mut visual);
+    visual.read(|cx| {
+        assert!(shell.read(cx).session().is_none());
+        assert!(shell.read(cx).minibuffer().is_none());
+    });
     let active = shell.read_with(&visual, |shell, _| shell.active_view().clone());
     assert_focused(&mut visual, &active);
 }

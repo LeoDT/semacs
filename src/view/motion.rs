@@ -1,11 +1,38 @@
-use crate::display::WrapIndex;
+use gpui_kit::{Bounds, Pixels};
+
+use crate::display::{LayoutSettings, WrapIndex};
 use crate::editing::{CommandViewport, PageMotion, RouteError};
+use crate::input::DisplayId;
 use crate::text::ByteOffset;
 
 pub(super) struct Viewport<'a> {
     pub index: &'a WrapIndex,
     pub first_row: usize,
     pub visible_rows: usize,
+}
+
+impl<'a> Viewport<'a> {
+    /// Commands may only use a wrap index that matches the current display and
+    /// layout settings; stale geometry is reported as not ready instead of used.
+    pub(super) fn for_view(
+        index: Option<&'a WrapIndex>,
+        content_bounds: Option<Bounds<Pixels>>,
+        scroll: gpui_kit::Point<Pixels>,
+        settings: &'a LayoutSettings,
+        display: DisplayId,
+    ) -> Option<Self> {
+        let index = index?;
+        let bounds = content_bounds
+            .filter(|_| index.key().display == display && index.key().settings == *settings)?;
+        let line_height = f32::from(settings.line_height);
+        Some(Self {
+            index,
+            first_row: (f32::from(scroll.y) / line_height).floor() as usize,
+            visible_rows: (f32::from(bounds.size.height) / line_height)
+                .floor()
+                .max(1.) as usize,
+        })
+    }
 }
 
 impl CommandViewport for Viewport<'_> {

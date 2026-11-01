@@ -586,6 +586,26 @@ impl EditTarget {
         self.replace_command_grouped(token, range, text, EditGroup::Isolated)
     }
 
+    /// Replaces committed text through the shared edit entry as one command
+    /// edit. Used by the owner of a read session (completion, kind-specific
+    /// rewrites), never by platform input.
+    pub fn replace_text_range(
+        &mut self,
+        token: SessionToken,
+        range: Range<ByteOffset>,
+        text: &str,
+    ) -> Result<InputUpdate, RouteError> {
+        let update = self.input.command_edit_grouped(
+            &mut self.buffer,
+            token,
+            range,
+            text,
+            EditGroup::Isolated,
+        )?;
+        self.interrupt_command_chain();
+        Ok(update)
+    }
+
     fn replace_command_grouped(
         &mut self,
         token: SessionToken,
