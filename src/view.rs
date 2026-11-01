@@ -11,6 +11,7 @@ use gpui_kit::component::ActiveTheme;
 use gpui_kit::*;
 use unicode_segmentation::UnicodeSegmentation;
 
+use crate::appearance::FontSettings;
 use crate::buffer::{Buffer, EditError, SavePoint};
 use crate::command::{Command, Scope};
 use crate::display::{FontMeasure, IndexedRow, LayoutKey, LayoutSettings, WrapIndex, WrapJob};
@@ -23,6 +24,7 @@ use crate::keymap::Keymap;
 use crate::platform::{BufferInputHandler, InputOperation};
 use crate::text::ByteOffset;
 
+mod cursor;
 mod initial;
 mod motion;
 
@@ -75,12 +77,14 @@ struct RowPart {
     x: Pixels,
     width: Pixels,
     line: Option<ShapedLine>,
+    cursor_stops: Vec<usize>,
 }
 
 struct ShapedRow {
     source: IndexedRow,
     parts: Vec<RowPart>,
     width: Pixels,
+    space_width: Pixels,
 }
 
 impl ShapedRow {
@@ -128,6 +132,7 @@ impl ShapedRow {
                         ..ByteOffset(row.start.0 + offset + content.len()),
                     x,
                     width,
+                    cursor_stops: cursor::cursor_stops(&line),
                     line: Some(line),
                 });
                 x += width;
@@ -144,6 +149,7 @@ impl ShapedRow {
                     x,
                     width,
                     line: None,
+                    cursor_stops: Vec::new(),
                 });
                 x += width;
                 phase = px(0.);
@@ -155,6 +161,7 @@ impl ShapedRow {
             source: row,
             parts,
             width: x,
+            space_width: metrics.width(" ").max(px(1.)),
         }
     }
 
@@ -353,6 +360,7 @@ pub struct BufferView {
     input_geometry: Option<InputGeometry>,
     message: Option<SharedString>,
     _input_subscriptions: Vec<Subscription>,
+    _font_subscription: Subscription,
     #[cfg(test)]
     geometry_refreshes: usize,
 }
@@ -364,14 +372,24 @@ impl BufferView {
     }
 
     pub fn with_target(target: EditTarget, cx: &mut Context<Self>) -> Self {
+        let fonts = cx.default_global::<FontSettings>().clone();
+        let mut observed_fonts = fonts.clone();
+        let font_subscription = cx.observe_global::<FontSettings>(move |view, cx| {
+            let fonts = cx.global::<FontSettings>().clone();
+            if fonts != observed_fonts {
+                view.set_font(fonts.font(), fonts.size(), fonts.line_height(), cx);
+                view.reveal_caret = true;
+                observed_fonts = fonts;
+            }
+        });
         Self {
             target,
             keymap: Keymap::for_scope(Scope::Edit),
             focus: cx.focus_handle(),
             settings: LayoutSettings {
-                font: font("monospace"),
-                font_size: px(16.),
-                line_height: px(24.),
+                font: fonts.font(),
+                font_size: fonts.size(),
+                line_height: fonts.line_height(),
                 wrap_width: px(1.),
                 tab_size: TAB_WIDTH,
             },
@@ -395,6 +413,7 @@ impl BufferView {
             input_geometry: None,
             message: None,
             _input_subscriptions: Vec::new(),
+            _font_subscription: font_subscription,
             #[cfg(test)]
             geometry_refreshes: 0,
         }
@@ -445,6 +464,10 @@ impl BufferView {
     pub fn display_snapshot(&self) -> DisplaySnapshot {
         self.target.display_snapshot()
     }
+    pub fn line_height(&self) -> Pixels {
+        self.settings.line_height
+    }
+
     pub fn wrap_index(&self) -> Option<&WrapIndex> {
         self.index.as_ref()
     }
@@ -467,6 +490,17 @@ impl BufferView {
                     .filter(|layout| layout.key.display == self.display_snapshot().id())
             })
             .or(current)
+    }
+
+    fn cursor(&self) -> Option<cursor::Cursor> {
+        let layout = self.viewport_layout()?;
+        let index = self.index.as_ref()?;
+        if layout.key != *index.key() {
+            return None;
+        }
+        let offset = self.display_snapshot().selected_range().end;
+        let row = index.row_for_offset(offset)?;
+        layout.cursor(offset, row.index)
     }
 
     pub fn region_bounds(&self) -> Vec<Bounds<Pixels>> {
@@ -1301,22 +1335,17 @@ impl Element for TextCanvas {
                 view.refresh_input_geometry(window);
             }
         });
-        let (layout, focus, caret, marked, region) = {
+        let (layout, cursor, marked, region) = {
             let view = self.view.read(cx);
             let Some(layout) = view.paint_layout().cloned() else {
                 return;
             };
             let focus = view.focus.is_focused(window);
             let snapshot = view.display_snapshot();
-            let point = snapshot.selected_range().end;
-            let caret = view
-                .index
-                .as_ref()
-                .and_then(|index| layout.bounds_for_range(point..point, index));
+            let cursor = focus.then(|| view.cursor()).flatten();
             (
                 layout,
-                focus,
-                caret,
+                cursor,
                 snapshot.marked_range(),
                 view.region_bounds(),
             )
@@ -1329,20 +1358,22 @@ impl Element for TextCanvas {
                 for bounds in region {
                     window.paint_quad(fill(bounds, cx.theme().selection));
                 }
+                if let Some(cursor) = &cursor {
+                    window.paint_quad(fill(cursor.bounds, cx.theme().foreground));
+                }
                 for row in &layout.rows {
                     let origin = layout.origin(row);
+                    let cursor = cursor
+                        .as_ref()
+                        .filter(|cursor| cursor.row == row.source.index);
                     for part in &row.parts {
-                        if let Some(line) = &part.line {
-                            line.paint(
-                                point(origin.x + part.x, origin.y),
-                                layout.key.settings.line_height,
-                                TextAlign::Left,
-                                None,
-                                window,
-                                cx,
-                            )
-                            .unwrap();
-                        }
+                        part.paint_with_cursor(
+                            point(origin.x + part.x, origin.y),
+                            layout.key.settings.line_height,
+                            cursor,
+                            window,
+                            cx,
+                        );
                     }
                 }
                 if let Some(marked) = marked {
@@ -1356,21 +1387,22 @@ impl Element for TextCanvas {
                                 (row.x_for_offset(start), row.x_for_offset(end))
                         {
                             let origin = layout.origin(row);
-                            window.paint_quad(fill(
-                                Bounds::new(
-                                    point(
-                                        origin.x + left,
-                                        origin.y + layout.key.settings.line_height - px(2.),
-                                    ),
-                                    size((right - left).max(px(1.)), px(1.)),
+                            let underline = Bounds::new(
+                                point(
+                                    origin.x + left,
+                                    origin.y + layout.key.settings.line_height - px(2.),
                                 ),
-                                cx.theme().foreground,
-                            ));
+                                size((right - left).max(px(1.)), px(1.)),
+                            );
+                            window.paint_quad(fill(underline, cx.theme().foreground));
+                            if let Some(cursor) = &cursor {
+                                let overlap = underline.intersect(&cursor.bounds);
+                                if overlap.size.width > px(0.) && overlap.size.height > px(0.) {
+                                    window.paint_quad(fill(overlap, cx.theme().background));
+                                }
+                            }
                         }
                     }
-                }
-                if focus && let Some(caret) = caret {
-                    window.paint_quad(fill(caret, cx.theme().foreground));
                 }
             },
         );

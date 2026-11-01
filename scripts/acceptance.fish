@@ -5,8 +5,8 @@ function fail
     exit 1
 end
 
-if test (count $argv) -ne 3; or not contains -- $argv[1] perf ime manual open-diagnostic; or test "$argv[3]" != --consent
-    echo "Usage: fish scripts/acceptance.fish <perf|ime|manual|open-diagnostic> NEW_OUTPUT_DIRECTORY --consent" >&2
+if test (count $argv) -ne 3; or not contains -- $argv[1] perf display-perf ime manual open-diagnostic; or test "$argv[3]" != --consent
+    echo "Usage: fish scripts/acceptance.fish <perf|display-perf|ime|manual|open-diagnostic> NEW_OUTPUT_DIRECTORY --consent" >&2
     exit 2
 end
 set -l mode $argv[1]
@@ -25,11 +25,17 @@ if test "$mode" = ime
     test -n "$HYPRLAND_INSTANCE_SIGNATURE"; or fail "IME automation requires Hyprland"
 end
 test ! -e "$output"; or fail "output must not exist: $output"
+set -l untracked (git ls-files --others --exclude-standard -z | string split0)
 python3 -c 'import pathlib,sys; pathlib.Path(sys.argv[1]).mkdir(parents=True, exist_ok=False)' "$output"
 or fail "cannot create output"
 git rev-parse HEAD > "$output/git-head.txt"
 git status --short > "$output/git-status.txt"
-git diff --no-ext-diff > "$output/source.patch"
+git diff --no-ext-diff --binary > "$output/source.patch"
+or fail "cannot capture tracked source changes"
+for file in $untracked
+    git diff --no-ext-diff --binary --no-index -- /dev/null "$file" >> "$output/source.patch"
+    test $status -le 1; or fail "cannot capture untracked source: $file"
+end
 echo "Output: $output"
 echo "Build logs are saved; any failure stops the batch without retries."
 cargo build --release --bin semacs --example perf_native --features native-profiler --target-dir "$root/target" > "$output/build.log" 2>&1
@@ -43,6 +49,14 @@ if test "$mode" = open-diagnostic
     or fail "fixture generation failed"
     python3 -B scripts/perf_native.py "$output/sample.txt" "$output/open-diagnostic" --consent --m2-open-diagnostic --sample mixed --runs 1
     or fail "single-open diagnostic stopped; keep CSV / frames.csv / views.csv / preparation.csv / diagnostic.json and report this directory"
+else if test "$mode" = display-perf
+    echo "Display regression: mixed/single-ascii × 3; hardware rendering required."
+    echo "Native CPU/submission timings only, NOT GPU execution or screen presentation."
+    echo "No M1/M2 matrix or OS key injection; do not type in, resize or close test windows."
+    python3 -B scripts/perf_sample.py "$output/sample.txt"
+    or fail "fixture generation failed"
+    python3 -B scripts/perf_native.py "$output/sample.txt" "$output/native-display" --consent --sample mixed --sample single-ascii --runs 3
+    or fail "display regression stopped; keep this directory and report it, do not rerun"
 else if test "$mode" = perf
     echo "Native CPU/submission tests only, NOT GPU execution or presentation."
     echo "Do not type in, resize or close test windows. No OS key injection."
@@ -94,4 +108,4 @@ else
 end
 printf '%s\n' "$mode completed; review environment/CSV/logs and remaining coverage before acceptance" > "$output/COMPLETED.txt"
 echo "Batch complete: $output"
-echo "Send this path back for review. Success is not by itself full M2/M3 acceptance."
+echo "Send this path back for review. Success is not by itself full phase acceptance."

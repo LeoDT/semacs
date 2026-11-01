@@ -9,7 +9,8 @@ semacs 将 Emacs 的操作模型带到现代 GPU UI，不复刻 Emacs 外观或 
 | [技术决策](decisions.md) | 关键技术选择、理由与长期边界 |
 | [实施计划](plan.md) | 里程碑与交付顺序 |
 | [性能预算](performance.md) | 量化预算、指标含义和必要测量入口 |
-| [宿主验收](acceptance.md) | M2 / M3 fish 入口、真实桌面步骤与证据边界 |
+| [宿主验收](acceptance.md) | 阶段 A / M2 / M3 fish 入口、真实桌面步骤与证据边界 |
+| [显示设置验收](records/a-display-local.md) | 阶段 A 本地 / 人工 / 宿主性能证据及未测边界 |
 | [M2 / M3 验收记录](records/m2-m3-local.md) | 本地与宿主证据、阶段验收结论及保留限制 |
 | [R1 验收归档](records/r1.md) | 固定的实测结果、环境、验收结论与限制 |
 | [M1 性能验收](records/m1-performance.md) | 已确认的验收结论、完整矩阵实测及未测边界 |

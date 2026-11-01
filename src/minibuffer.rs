@@ -55,11 +55,11 @@ impl Focusable for Minibuffer {
 }
 
 impl Render for Minibuffer {
-    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         div()
             .id("minibuffer")
             .w_full()
-            .h(px(40.))
+            .h(self.editor.read(cx).line_height() + px(16.))
             .flex_shrink_0()
             .child(self.editor.clone())
     }

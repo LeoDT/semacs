@@ -364,6 +364,10 @@ impl AppShell {
         let (id, kind) = (session.id(), session.kind().clone());
         match kind {
             ReadKind::Command => self.confirm_command(id, window, cx),
+            ReadKind::FontFamily => {
+                let input = self.session_input(cx).unwrap_or_default();
+                self.confirm_font_family(id, &input, window, cx);
+            }
             ReadKind::FindFile => self.confirm_find_file(id, window, cx),
             ReadKind::WriteFile => self.confirm_write_file(id, window, cx),
             ReadKind::SwitchToBuffer { default } => {

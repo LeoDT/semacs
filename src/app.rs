@@ -15,6 +15,7 @@ use crate::minibuffer::Minibuffer;
 use crate::session::{Answer, ReadKind, ReadSession};
 use crate::view::{BufferView, KeyLayers, KeyRoute};
 
+mod appearance;
 mod buffer_commands;
 mod closing;
 mod documents;
@@ -194,6 +195,12 @@ impl AppShell {
         match command {
             Command::ExecuteExtendedCommand => {
                 self.begin_read(ReadKind::Command, origin, "", window, cx);
+            }
+            Command::SetFontFamily => {
+                self.begin_read(ReadKind::FontFamily, origin, "", window, cx);
+            }
+            Command::IncreaseFontSize | Command::DecreaseFontSize | Command::ResetFontSize => {
+                self.change_font_size(command, origin, cx);
             }
             Command::FindFile => {
                 self.begin_read(ReadKind::FindFile, origin, "", window, cx);

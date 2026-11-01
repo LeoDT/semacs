@@ -16,22 +16,32 @@ use crate::view::BufferView;
 pub enum ReadKind {
     /// `M-x`: read a command name and run it on the origin.
     Command,
+    FontFamily,
     /// `C-x C-f`: read a path and visit it from the origin.
     FindFile,
     /// `C-x C-w`: read a path and write the buffer there.
     WriteFile,
     /// `C-x b`: read an existing buffer name and activate it.
-    SwitchToBuffer { default: Option<String> },
+    SwitchToBuffer {
+        default: Option<String>,
+    },
     /// A `write-file` target already exists.
     Overwrite(PathBuf),
     /// A visited file changed on disk since it was read or saved.
     ExternalChange(PathBuf),
     /// `C-x k`: read the name of the buffer to kill.
-    KillBuffer { default: String },
+    KillBuffer {
+        default: String,
+    },
     /// A modified buffer would be killed.
-    KillBufferConfirm { name: String },
+    KillBufferConfirm {
+        name: String,
+    },
     /// Exit coordination asks whether to save one dirty buffer.
-    ExitSave { path: Option<PathBuf>, name: String },
+    ExitSave {
+        path: Option<PathBuf>,
+        name: String,
+    },
     /// Dirty buffers remain after the per-buffer answers.
     ExitModified,
 }
@@ -82,6 +92,7 @@ impl ReadKind {
     pub fn prompt(&self) -> String {
         match self {
             ReadKind::Command => "M-x ".to_owned(),
+            ReadKind::FontFamily => "Font family: ".to_owned(),
             ReadKind::FindFile => "Find file: ".to_owned(),
             ReadKind::WriteFile => "Write file: ".to_owned(),
             ReadKind::SwitchToBuffer { default } => match default {

@@ -219,6 +219,40 @@ class DriverTests(unittest.TestCase):
         self.assertTrue(metadata["restored"])
         self.assertEqual(metadata["error"], "STOP: budget")
 
+    def test_display_baseline_limits_coverage_and_stops_on_failure(self):
+        fixture = self.root / "fixture"
+        fixture.write_bytes(b"x" * (8 * 1024 * 1024))
+        binary = self.root / "probe"
+        binary.touch()
+        expected = [(sample, run) for sample in ("mixed", "single-ascii") for run in range(1, 4)]
+        for fail in (False, True):
+            with self.subTest(fail=fail):
+                output = self.root / ("failed" if fail else "success")
+                argv = ["perf_native.py", str(fixture), str(output), "--consent",
+                        "--sample", "mixed", "--sample", "single-ascii", "--runs", "3",
+                        "--binary", str(binary)]
+                with patch.object(sys, "argv", argv), patch.object(runner, "Desktop") as desktop, \
+                     patch.object(runner, "command", return_value="font"), \
+                     patch.object(runner, "run_probe", return_value=native_rows()) as probe, \
+                     patch("sys.stdout", new=io.StringIO()):
+                    if fail:
+                        probe.side_effect = RuntimeError("STOP: font budget")
+                        with self.assertRaisesRegex(RuntimeError, "STOP: font budget"):
+                            runner.main()
+                    else:
+                        runner.main()
+                    calls = [(call.args[2], call.args[3]) for call in probe.call_args_list]
+                    self.assertEqual(calls, expected[:1] if fail else expected)
+                    args = probe.call_args.args[0]
+                    self.assertFalse(args.software or args.ime or args.m1 or args.m2)
+                    desktop.return_value.restore.assert_called_once()
+                metadata = json.loads((output / "environment.json").read_text())
+                self.assertEqual(metadata["completed"], not fail)
+                self.assertTrue(metadata["restored"])
+                self.assertEqual(metadata["samples"], ["mixed", "single-ascii"])
+                self.assertEqual(metadata["runs"], 3)
+                self.assertEqual((output / "summary.json").exists(), not fail)
+
     def test_modes_and_pacing_require_explicit_consent_and_correct_mode(self):
         for flags in ([], ["--consent", "--m1", "--ime"], ["--consent", "--m1", "--m2"],
                       ["--consent", "--interval-ms", "50"],

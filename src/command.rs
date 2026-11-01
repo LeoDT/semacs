@@ -93,6 +93,10 @@ commands! {
     Undo => "undo", Edit, ["ctrl-/" => "C-/", "ctrl-_" => "C-_", "ctrl-x u" => "C-x u"];
     UndoRedo => "undo-redo", Edit, ["ctrl-?" => "C-?", "ctrl-alt-_" => "C-M-_"];
     ExecuteExtendedCommand => "execute-extended-command", Application, ["alt-x" => "M-x"];
+    SetFontFamily => "set-font-family", Application, [];
+    IncreaseFontSize => "increase-font-size", Application, [];
+    DecreaseFontSize => "decrease-font-size", Application, [];
+    ResetFontSize => "reset-font-size", Application, [];
     FindFile => "find-file", Application, ["ctrl-x ctrl-f" => "C-x C-f"];
     SaveBuffer => "save-buffer", Application, ["ctrl-x ctrl-s" => "C-x C-s"];
     WriteFile => "write-file", Application, ["ctrl-x ctrl-w" => "C-x C-w"];

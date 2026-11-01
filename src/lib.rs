@@ -1,4 +1,5 @@
 pub mod app;
+pub mod appearance;
 pub mod buffer;
 mod buffers;
 pub mod command;
