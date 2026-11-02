@@ -101,6 +101,7 @@ commands! {
     Undo => "undo", Edit, ["ctrl-/" => "C-/", "ctrl-_" => "C-_", "ctrl-x u" => "C-x u"];
     UndoRedo => "undo-redo", Edit, ["ctrl-?" => "C-?", "ctrl-alt-_" => "C-M-_"];
     ExecuteExtendedCommand => "execute-extended-command", Application, ["alt-x" => "M-x"];
+    ReloadConfiguration => "reload-configuration", Application, [];
     SetFontFamily => "set-font-family", Application, [];
     IncreaseFontSize => "increase-font-size", Application, [];
     DecreaseFontSize => "decrease-font-size", Application, [];

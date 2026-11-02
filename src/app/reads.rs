@@ -3,7 +3,7 @@ use crate::command::Command;
 use crate::completion::CandidateAction;
 use crate::files;
 use crate::minibuffer::Minibuffer;
-use crate::session::{self, Answer, ReadKind, ReadSession};
+use crate::session::{Answer, ReadKind, ReadSession};
 use crate::view::BufferView;
 use gpui_kit::{App, AppContext, Context, Entity, Focusable, Window};
 use std::path::Path;
@@ -81,7 +81,7 @@ impl AppShell {
 
     fn confirm_command(&mut self, id: u64, window: &mut Window, cx: &mut Context<Self>) {
         let input = self.session_input(cx).unwrap_or_default();
-        if let Some(command) = session::session_command(&input) {
+        if let Some(command) = self.commands.named(&input) {
             if let Some(target) = self.end_session(id, window, cx) {
                 self.run_command(command, &target, window, cx);
             }

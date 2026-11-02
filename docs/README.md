@@ -16,11 +16,13 @@ semacs 将 Emacs 的操作模型带到现代 GPU UI，不复刻 Emacs 外观或 
 | [性能预算](performance.md) | 量化预算、指标定义及适用条件，不记录当前通过状态 |
 | [验收流程](acceptance.md) | 本地 / 宿主分工、可执行入口、人工步骤和安全要求，不记录历史批次结论 |
 | [实施计划](plan.md) | 当前工作、后续依赖、待决 / 未排期事项与已完成摘要 |
+| [JS 配置](scripting.md) | 配置入口、宿主 API 使用与实现资源限额；行为契约仍见保真度文档 |
 
 ## 按需参考与冻结记录
 
 | 材料 | 用途 |
 |---|---|
+| [最小脚本接入本地验证](records/d-scripting-local.md) / [宿主冒烟](records/d-scripting-host.md) | 阶段 D 配置 / 命令 / 键位 / 变换隔离、静态检查、headless 回归及宿主主功能确认；宿主另有消息重叠反馈，按记录保留 |
 | [候选式 minibuffer 本地验证](records/b-minibuffer-local.md) / [宿主验收](records/b-minibuffer-host.md) | 阶段 B 本地检查、headless 基线、用户人工确认及证据边界 |
 | [buffer / view 与 split 本地验证](records/c-split-local.md) / [验收自动化与多 view 基线](records/c-automation-local.md) / [真实 IME 宿主验收](records/c-split-host.md) | 阶段 C 本地回归、headless 基线及定向宿主证据与边界 |
 | [多 view 原生性能工具本地验证](records/c-native-performance-local.md) / [宿主验证](records/c-native-performance-host.md) | 阶段 C 定向原生自动测量的工具身份、离线检查、代表性性能结果及聚合基线边界 |

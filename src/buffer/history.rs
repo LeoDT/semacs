@@ -218,7 +218,7 @@ impl Buffer {
                 doc.snapshot
                     .text
                     .slice(edit.range.start.0..edit.range.end.0),
-                doc.mark,
+                doc.mark.position(),
                 doc.modified,
             )
         };
@@ -310,7 +310,8 @@ impl Buffer {
         };
         let mut doc = self.document.borrow_mut();
         if let Some(offset) = restore_mark {
-            doc.mark = Some(ByteOffset(group.start.0 + offset));
+            doc.mark
+                .set(Some(ByteOffset(group.start.0 + offset)), false);
         }
         if redo {
             group.undo_mark = inverse_mark;
@@ -323,7 +324,7 @@ impl Buffer {
             doc.modified = group.modified_before;
             doc.history.redo.push(group);
         }
-        doc.mark_active = false;
+        doc.mark.deactivate();
         Ok(applied)
     }
 }

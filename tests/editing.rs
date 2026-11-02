@@ -674,7 +674,7 @@ fn commands_above_the_edit_target_are_reported_not_executed() {
         let route = route.unwrap();
         assert_eq!(
             route.disposition,
-            InputDisposition::Requested(command),
+            InputDisposition::Requested(command.into()),
             "{keys}"
         );
         assert_eq!(target.buffer().text().to_string(), "abc");

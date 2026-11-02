@@ -14,6 +14,7 @@ use unicode_segmentation::UnicodeSegmentation;
 use crate::appearance::FontSettings;
 use crate::buffer::{Buffer, BufferSnapshot};
 use crate::command::{Command, Scope};
+use crate::command_registry::CommandId;
 use crate::display::{FontMeasure, IndexedRow, LayoutKey, LayoutSettings, WrapIndex, WrapJob};
 use crate::editing::{
     CommandOutcome, CommandViewport, EditTarget, InputDisposition, KillRing, RecenterPosition,
@@ -56,7 +57,7 @@ pub(crate) enum KeyRoute {
     /// The view consumed the key sequence; stop further propagation.
     Handled,
     /// A command owned by a layer above the edit target; the owner executes it.
-    Requested(Command),
+    Requested(CommandId),
     /// Leave the key to platform text input or framework handlers.
     Unhandled,
 }
@@ -1240,6 +1241,38 @@ impl BufferView {
         }
     }
 
+    pub(crate) fn clear_pending(&mut self, cx: &mut Context<Self>) {
+        self.target.clear_pending();
+        self.message = None;
+        self.invalidate_input_registration();
+        cx.notify();
+    }
+
+    pub(crate) fn capture_region(
+        &self,
+    ) -> Result<(crate::editing::RegionTransform, String), String> {
+        if !self.accepting_input {
+            return Err("Script target is not accepting input".into());
+        }
+        self.target.capture_region(crate::scripting::MAX_TEXT_BYTES)
+    }
+
+    pub(crate) fn apply_region_transform(
+        &mut self,
+        target: crate::editing::RegionTransform,
+        output: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Result<(), String> {
+        if !self.accepting_input {
+            return Err("Script result discarded: target is not accepting input".into());
+        }
+        let outcome = self.target.apply_region_transform(target, output)?;
+        self.invalidate_input_registration();
+        self.finish_command(outcome, window, cx);
+        Ok(())
+    }
+
     /// Replaces the editable input area, used by the owner of a read session.
     pub(crate) fn replace_input(
         &mut self,
@@ -1463,7 +1496,7 @@ mod candidate_tests;
 #[cfg(test)]
 mod history_tests;
 #[cfg(test)]
-mod input_tests;
+pub(crate) mod input_tests;
 #[cfg(test)]
 mod minibuffer_tests;
 #[cfg(test)]

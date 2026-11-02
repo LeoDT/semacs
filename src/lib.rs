@@ -3,6 +3,7 @@ pub mod appearance;
 pub mod buffer;
 mod buffers;
 pub mod command;
+pub mod command_registry;
 pub mod completion;
 pub mod display;
 pub mod editing;
@@ -17,6 +18,7 @@ mod platform;
 #[cfg(feature = "native-profiler")]
 pub mod preparation_trace;
 mod saves;
+pub mod scripting;
 pub mod session;
 pub mod text;
 pub mod view;

@@ -7,6 +7,7 @@ use gpui_kit::{KeyDownEvent, Keystroke};
 
 use crate::buffer::{Buffer, EditError, EditGroup, SavePoint};
 use crate::command::{Command, Scope};
+use crate::command_registry::CommandId;
 use crate::input::{
     DisplayChange, DisplaySnapshot, InputError, InputSession, InputUpdate, SessionToken,
 };
@@ -19,7 +20,10 @@ mod indent;
 mod kill;
 mod kill_ring;
 mod motion;
+mod transform;
 mod viewport;
+
+pub(crate) use transform::RegionTransform;
 
 pub use kill_ring::KillRing;
 pub use viewport::{CommandViewport, PageMotion, RecenterPosition, ViewportRequest};
@@ -105,7 +109,7 @@ pub enum InputDisposition {
     Handled,
     /// The command belongs to a layer above the edit target. The owner must
     /// execute it; the target has not changed any state for it.
-    Requested(Command),
+    Requested(CommandId),
     Ignored,
 }
 
@@ -123,9 +127,9 @@ impl Route {
         }
     }
 
-    fn requested(command: Command) -> Self {
+    fn requested(command: impl Into<CommandId>) -> Self {
         Self {
-            disposition: InputDisposition::Requested(command),
+            disposition: InputDisposition::Requested(command.into()),
             outcome: CommandOutcome::default(),
         }
     }
@@ -210,6 +214,12 @@ impl EditTarget {
 
     pub fn is_pending(&self) -> bool {
         self.keys.is_pending()
+    }
+
+    pub(crate) fn clear_pending(&mut self) {
+        self.keys.clear();
+        self.buffer.break_history_group();
+        self.interrupt_command_chain();
     }
 
     pub fn set_read_only(&mut self, read_only: bool) {
@@ -337,6 +347,11 @@ impl EditTarget {
                     Ok(Route::requested(command))
                 }
             },
+            Dispatch::Script(command) => {
+                self.buffer.break_history_group();
+                self.interrupt_command_chain();
+                Ok(Route::requested(CommandId::Script(command)))
+            }
             Dispatch::Pending(message) => {
                 self.last_command = None;
                 Ok(Route::handled(CommandOutcome::message(message)))

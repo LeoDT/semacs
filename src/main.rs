@@ -35,10 +35,20 @@ fn main() -> ExitCode {
             window_min_size: Some(size(px(480.0), px(320.0))),
             ..Default::default()
         };
-        gpui_kit::open_window(options, cx, move |window, cx| {
-            cx.new(|cx| AppShell::new(buffer, window, cx))
+        cx.spawn(async move |cx| {
+            let path = semacs::scripting::config_path();
+            let result = match &path {
+                Ok(path) => semacs::scripting::load(path.clone()).await,
+                Err(error) => Err(error.clone()),
+            };
+            cx.update(|cx| {
+                gpui_kit::open_window(options, cx, move |window, cx| {
+                    cx.new(|cx| AppShell::with_configuration(buffer, path.ok(), result, window, cx))
+                })
+                .expect("failed to open semacs window");
+            });
         })
-        .expect("failed to open semacs window");
+        .detach();
     });
 
     ExitCode::SUCCESS

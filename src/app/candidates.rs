@@ -6,7 +6,6 @@ use std::sync::{
 use gpui_kit::{Context, Task, Window};
 
 use super::AppShell;
-use crate::command::{COMMANDS, Scope};
 use crate::completion::{self, Candidate, CandidateAction, CandidateList, CandidateResolution};
 use crate::files;
 use crate::session::ReadKind;
@@ -114,18 +113,12 @@ impl AppShell {
             });
         } else {
             let candidates = match &kind {
-                ReadKind::Command => COMMANDS
+                ReadKind::Command => self
+                    .commands
+                    .commands()
                     .iter()
-                    .filter(|spec| spec.scope != Scope::ReadSession)
-                    .map(|spec| {
-                        Candidate::named(
-                            spec.name.into(),
-                            spec.bindings
-                                .iter()
-                                .map(|binding| binding.reference)
-                                .collect::<Vec<_>>()
-                                .join(" / "),
-                        )
+                    .map(|command| {
+                        Candidate::named(command.name.clone(), command.annotation.clone())
                     })
                     .collect(),
                 ReadKind::SwitchToBuffer { .. } | ReadKind::KillBuffer { .. } => self

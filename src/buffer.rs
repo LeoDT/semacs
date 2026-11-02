@@ -1,6 +1,6 @@
 //! Shared committed documents and view-local points. Preedit lives in input.
 
-use std::cell::{Cell, RefCell};
+use std::cell::RefCell;
 use std::ops::Range;
 use std::rc::{Rc, Weak};
 
@@ -11,8 +11,11 @@ use crate::files::{DecodedFile, FileFormat, FileIdentity, FileStamp};
 use crate::text::{ByteOffset, Rope};
 
 mod history;
+mod selection;
 pub(crate) use history::EditGroup;
 use history::HistoryState;
+pub(crate) use selection::RegionId;
+use selection::{TrackedMark, TrackedPoint};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct BufferId(u64);
@@ -88,9 +91,8 @@ struct Document {
     snapshot: BufferSnapshot,
     revision: u64,
     last_edit: Option<AppliedEdit>,
-    points: Vec<Weak<Cell<usize>>>,
-    mark: Option<ByteOffset>,
-    mark_active: bool,
+    points: Vec<Weak<TrackedPoint>>,
+    mark: TrackedMark,
     read_only: bool,
     read_only_prefix: ByteOffset,
     path: Option<PathBuf>,
@@ -114,7 +116,7 @@ impl Document {
 
 pub struct Buffer {
     document: Rc<RefCell<Document>>,
-    point: Rc<Cell<usize>>,
+    point: Rc<TrackedPoint>,
     view_id: u64,
 }
 
@@ -154,7 +156,7 @@ impl Buffer {
             .and_then(Path::file_name)
             .map(|name| name.to_string_lossy().into_owned())
             .unwrap_or_else(|| "*scratch*".to_owned());
-        let point = Rc::new(Cell::new(0));
+        let point = Rc::new(TrackedPoint::new(0));
         let points = vec![Rc::downgrade(&point)];
         let document = Document {
             snapshot: BufferSnapshot {
@@ -167,8 +169,7 @@ impl Buffer {
             revision: 0,
             last_edit: None,
             points,
-            mark: None,
-            mark_active: false,
+            mark: TrackedMark::default(),
             read_only: false,
             read_only_prefix: ByteOffset(0),
             path,
@@ -188,7 +189,7 @@ impl Buffer {
     }
 
     pub fn new_view(&self) -> Buffer {
-        let point = Rc::new(Cell::new(self.point().0));
+        let point = Rc::new(TrackedPoint::new(self.point().0));
         let mut doc = self.document.borrow_mut();
         doc.points.retain(|point| point.strong_count() > 0);
         doc.points.push(Rc::downgrade(&point));
@@ -275,6 +276,15 @@ impl Buffer {
     pub fn snapshot_id(&self) -> SnapshotId {
         self.document.borrow().snapshot.id
     }
+    pub(crate) fn region_id(&self) -> RegionId {
+        let doc = self.document.borrow();
+        RegionId {
+            snapshot: doc.snapshot.id,
+            view: self.view_id,
+            point_revision: self.point.revision(),
+            mark_revision: doc.mark.revision(),
+        }
+    }
     pub fn text(&self) -> Rope {
         self.document.borrow_mut().snapshot.text.clone()
     }
@@ -289,10 +299,10 @@ impl Buffer {
         Ok(())
     }
     pub fn mark(&self) -> Option<ByteOffset> {
-        self.document.borrow().mark
+        self.document.borrow().mark.position()
     }
     pub fn mark_active(&self) -> bool {
-        self.document.borrow().mark_active
+        self.document.borrow().mark.is_active()
     }
     pub fn region(&self) -> Option<Range<ByteOffset>> {
         let mark = self
@@ -305,15 +315,14 @@ impl Buffer {
             return Err(EditError::InvalidRange);
         }
         let mut doc = self.document.borrow_mut();
-        doc.mark = Some(point);
-        doc.mark_active = true;
+        doc.mark.set(Some(point), true);
         doc.touch();
         Ok(())
     }
     pub fn deactivate_mark(&mut self) {
         let mut doc = self.document.borrow_mut();
-        if doc.mark_active {
-            doc.mark_active = false;
+        if doc.mark.is_active() {
+            doc.mark.deactivate();
             doc.touch();
         }
     }
@@ -447,14 +456,15 @@ impl Buffer {
             }
         });
         self.point.set(start + inserted);
-        if let Some(mark) = &mut doc.mark {
+        let mark = doc.mark.position().map(|mut mark| {
             if mark.0 > old_end {
                 mark.0 = mark.0 - removed + inserted;
             } else if mark.0 > start {
-                *mark = ByteOffset(start);
+                mark = ByteOffset(start);
             }
-        }
-        doc.mark_active = false;
+            mark
+        });
+        doc.mark.set(mark, false);
         doc.modified = true;
         let after = doc.snapshot.id;
         let applied = AppliedEdit {

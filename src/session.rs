@@ -143,11 +143,6 @@ impl ReadKind {
     }
 }
 
-/// Resolves a name `M-x` may run; session commands stay internal.
-pub fn session_command(name: &str) -> Option<Command> {
-    Command::named(name).filter(|command| command.scope() != Scope::ReadSession)
-}
-
 /// One minibuffer read session.
 pub struct ReadSession {
     id: u64,
@@ -225,18 +220,5 @@ impl ReadSession {
 
     pub(crate) fn keymap(&self) -> &Keymap {
         &self.keymap
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn session_commands_are_not_resolvable_through_mx() {
-        assert_eq!(session_command("forward-char"), Some(Command::ForwardChar));
-        assert_eq!(session_command("save-buffer"), Some(Command::SaveBuffer));
-        assert_eq!(session_command("minibuffer-complete"), None);
-        assert_eq!(session_command("nosuch"), None);
     }
 }

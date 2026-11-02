@@ -2,9 +2,14 @@
 
 use std::collections::HashMap;
 
-use gpui_kit::{KeyDownEvent, Keystroke, Modifiers};
+use gpui_kit::{KeyDownEvent, Keystroke, Modifiers, OperatingSystem};
 
 use crate::command::{COMMANDS, Command, Scope};
+use crate::command_registry::{CommandId, ScriptCommand};
+
+mod configuration;
+
+pub(crate) const DEFAULT_PREFIXES: [&str; 3] = ["ctrl-x", "ctrl-h", "escape"];
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Key {
@@ -66,11 +71,17 @@ impl Key {
     }
 }
 
-pub fn parse_sequence(keys: &'static str) -> Result<Vec<Key>, BindError> {
+pub fn parse_sequence(keys: &str) -> Result<Vec<Key>, BindError> {
     let sequence: Vec<_> = keys
         .split_whitespace()
         .map(|key| {
-            Keystroke::parse(key)
+            if key
+                .split('-')
+                .any(|part| part.eq_ignore_ascii_case("secondary"))
+            {
+                return Err(BindError::InvalidKey(key.to_owned()));
+            }
+            Keystroke::parse_with_os(key, OperatingSystem::Unknown)
                 .map(|stroke| Key::from_keystroke(&stroke))
                 .map_err(|_| BindError::InvalidKey(key.to_owned()))
         })
@@ -96,9 +107,17 @@ pub enum BindError {
     Conflict(String),
 }
 
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
+enum Binding {
+    #[default]
+    Prefix,
+    Command(CommandId),
+    Unbound,
+}
+
 #[derive(Default)]
 struct Node {
-    command: Option<Command>,
+    binding: Binding,
     children: HashMap<Key, Node>,
 }
 
@@ -110,6 +129,7 @@ pub struct Keymap {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Lookup {
     Command(Command),
+    Script(ScriptCommand),
     Prefix,
     Unbound,
 }
@@ -121,38 +141,46 @@ enum LayerLookup {
 }
 
 impl Keymap {
-    pub fn bind(&mut self, sequence: &[Key], command: Command) -> Result<(), BindError> {
-        self.insert(sequence, Some(command))
+    pub fn bind(
+        &mut self,
+        sequence: &[Key],
+        command: impl Into<CommandId>,
+    ) -> Result<(), BindError> {
+        self.insert(sequence, Binding::Command(command.into()))
     }
 
     pub fn define_prefix(&mut self, sequence: &[Key]) -> Result<(), BindError> {
-        self.insert(sequence, None)
+        self.insert(sequence, Binding::Prefix)
     }
 
-    fn insert(&mut self, sequence: &[Key], command: Option<Command>) -> Result<(), BindError> {
+    pub(crate) fn disable(&mut self, sequence: &[Key]) -> Result<(), BindError> {
+        self.insert(sequence, Binding::Unbound)
+    }
+
+    fn insert(&mut self, sequence: &[Key], binding: Binding) -> Result<(), BindError> {
         if sequence.is_empty() {
             return Err(BindError::EmptySequence);
         }
         let keys: Vec<_> = sequence.iter().flat_map(Key::canonical).collect();
         let mut node = &mut self.root;
         for key in &keys[..keys.len() - 1] {
-            if node.command.is_some() {
+            if node.binding != Binding::Prefix {
                 return Err(BindError::Conflict(label(sequence)));
             }
             node = node.children.entry(key.clone()).or_default();
         }
-        if node.command.is_some() {
+        if node.binding != Binding::Prefix {
             return Err(BindError::Conflict(label(sequence)));
         }
         match node.children.entry(keys.last().unwrap().clone()) {
             std::collections::hash_map::Entry::Occupied(entry) => {
-                if command.is_some() || entry.get().command.is_some() {
+                if binding != Binding::Prefix || entry.get().binding != Binding::Prefix {
                     return Err(BindError::Conflict(label(sequence)));
                 }
             }
             std::collections::hash_map::Entry::Vacant(entry) => {
                 entry.insert(Node {
-                    command,
+                    binding,
                     children: HashMap::new(),
                 });
             }
@@ -163,7 +191,7 @@ impl Keymap {
     fn lookup(&self, sequence: &[Key]) -> LayerLookup {
         let mut node = &self.root;
         for key in sequence.iter().flat_map(Key::canonical) {
-            if node.command.is_some() {
+            if node.binding != Binding::Prefix {
                 return LayerLookup::Shadowed;
             }
             let Some(child) = node.children.get(&key) else {
@@ -171,17 +199,38 @@ impl Keymap {
             };
             node = child;
         }
-        LayerLookup::Match(match node.command {
-            Some(command) => Lookup::Command(command),
-            None => Lookup::Prefix,
-        })
+        match node.binding {
+            Binding::Command(CommandId::Native(command)) => {
+                LayerLookup::Match(Lookup::Command(command))
+            }
+            Binding::Command(CommandId::Script(command)) => {
+                LayerLookup::Match(Lookup::Script(command))
+            }
+            Binding::Prefix => LayerLookup::Match(Lookup::Prefix),
+            Binding::Unbound => LayerLookup::Shadowed,
+        }
+    }
+
+    pub fn for_body() -> Self {
+        let mut map = Self::for_scope(Scope::Application);
+        for spec in COMMANDS.iter().filter(|spec| spec.scope == Scope::Edit) {
+            for binding in spec.bindings {
+                map.bind(&parse_sequence(binding.keys).unwrap(), spec.command)
+                    .unwrap();
+            }
+        }
+        map
+    }
+
+    fn canonical_sequence(sequence: &[Key]) -> Vec<Key> {
+        sequence.iter().flat_map(Key::canonical).collect()
     }
 
     /// Default bindings for one command scope. Layers combine scopes at dispatch
     /// time; a single map never mixes edit, application and session commands.
     pub fn for_scope(scope: Scope) -> Self {
         let mut map = Self::default();
-        for prefix in ["ctrl-x", "ctrl-h", "escape"] {
+        for prefix in DEFAULT_PREFIXES {
             map.define_prefix(&parse_sequence(prefix).expect("valid default prefix"))
                 .expect("nonconflicting default prefix");
         }
@@ -235,6 +284,7 @@ pub fn lookup(layers: &[&Keymap], sequence: &[Key]) -> Lookup {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Dispatch {
     Command(Command),
+    Script(ScriptCommand),
     Pending(String),
     Undefined(String),
     SelfInsert,
@@ -287,6 +337,10 @@ impl KeymapState {
             Lookup::Command(command) => {
                 self.clear();
                 Dispatch::Command(command)
+            }
+            Lookup::Script(command) => {
+                self.clear();
+                Dispatch::Script(command)
             }
             Lookup::Prefix => Dispatch::Pending(label(&self.pending)),
             Lookup::Unbound => {

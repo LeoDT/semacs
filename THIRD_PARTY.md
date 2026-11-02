@@ -11,6 +11,18 @@
   and covered-source availability in the dependency audit before distributing
   binaries. semacs uses the matcher, not nucleo's picker runtime or query syntax.
 
+## JavaScript runtime dependency
+
+- `rquickjs`, `rquickjs-core` and `rquickjs-sys` 0.14.0 are registry
+  dependencies under MIT; manifests and the top-level license were reviewed.
+  Attribution includes Mees Delzenne and Rquickjs Contributors.
+- `rquickjs-sys` includes upstream QuickJS-NG C sources under MIT, attributed
+  in its license to Fabrice Bellard, Charlie Gordon, Ben Noordhuis and
+  Saúl Ibarra Corretgé. semacs does not vendor or patch those sources and
+  does not install QuickJS's standalone `std` / `os` modules.
+- Include runtime / engine notices and transitive dependency licenses in the
+  dependency audit before distributing binaries.
+
 ## Zed text components
 
 - Repository: <https://github.com/zed-industries/zed>

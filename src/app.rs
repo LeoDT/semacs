@@ -7,6 +7,7 @@ use gpui_kit::*;
 use crate::buffer::Buffer;
 use crate::buffers::{BufferSet, BufferSlot};
 use crate::command::{Command, Scope};
+use crate::command_registry::{CommandId, CommandRegistry};
 use crate::editing::KillRing;
 use crate::exit::Closing;
 use crate::frame;
@@ -21,6 +22,9 @@ mod candidates;
 mod closing;
 mod documents;
 mod reads;
+mod scripting;
+#[cfg(test)]
+mod scripting_tests;
 mod windows;
 
 impl Global for KillRing {}
@@ -44,7 +48,13 @@ pub struct AppShell {
     panes: crate::panes::Panes<u64>,
     body_panes: HashMap<u64, windows::BodyPane>,
     next_pane: u64,
-    application_keymap: Keymap,
+    body_keymap: Keymap,
+    commands: CommandRegistry,
+    script_host: Option<crate::scripting::ScriptHost>,
+    config_generation: u64,
+    config_path: Option<PathBuf>,
+    reload_task: Option<Task<()>>,
+    script_task: Option<Task<()>>,
     startup_directory: PathBuf,
     minibuffer: Option<MinibufferMount>,
     session: Option<ReadSession>,
@@ -94,7 +104,13 @@ impl AppShell {
             panes: crate::panes::Panes::new(0),
             body_panes: HashMap::from([(0, pane)]),
             next_pane: 1,
-            application_keymap: Keymap::for_scope(Scope::Application),
+            body_keymap: Keymap::for_body(),
+            commands: CommandRegistry::default(),
+            script_host: None,
+            config_generation: 0,
+            config_path: None,
+            reload_task: None,
+            script_task: None,
             startup_directory: std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
             minibuffer: None,
             session: None,
@@ -152,11 +168,7 @@ impl AppShell {
         {
             (minibuffer.view.read(cx).editor().clone(), None, true)
         } else {
-            (
-                self.active_view().clone(),
-                Some(&self.application_keymap),
-                true,
-            )
+            (self.active_view().clone(), Some(&self.body_keymap), true)
         };
         let single_key = self
             .session
@@ -186,18 +198,16 @@ impl AppShell {
             KeyRoute::Unhandled => false,
             KeyRoute::Handled => true,
             KeyRoute::Requested(command) => {
-                match command.scope() {
-                    Scope::Application => self.execute_application(command, &view, window, cx),
-                    Scope::ReadSession => {
-                        if single_key && command == Command::MinibufferCompleteAndExit {
-                            self.answer_query(Answer::key(stroke), window, cx);
-                        } else {
-                            self.execute_session(command, window, cx);
-                        }
+                if let CommandId::Native(command) = command
+                    && command.scope() == Scope::ReadSession
+                {
+                    if single_key && command == Command::MinibufferCompleteAndExit {
+                        self.answer_query(Answer::key(stroke), window, cx);
+                    } else {
+                        self.execute_session(command, window, cx);
                     }
-                    Scope::Edit => {
-                        debug_assert!(false, "{} is not a layered command", command.name())
-                    }
+                } else {
+                    self.run_command(command, &view, window, cx);
                 }
                 true
             }
@@ -215,6 +225,7 @@ impl AppShell {
             Command::ExecuteExtendedCommand => {
                 self.begin_read(ReadKind::Command, origin, "", window, cx);
             }
+            Command::ReloadConfiguration => self.reload_configuration(origin, window, cx),
             Command::SetFontFamily => {
                 self.begin_read(ReadKind::FontFamily, origin, "", window, cx);
             }
@@ -260,11 +271,18 @@ impl AppShell {
 
     fn run_command(
         &mut self,
-        command: Command,
+        command: CommandId,
         target: &Entity<BufferView>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        let command = match command {
+            CommandId::Native(command) => command,
+            CommandId::Script(command) => {
+                self.execute_script(command, target, window, cx);
+                return;
+            }
+        };
         match command.scope() {
             Scope::Edit => target.update(cx, |view, cx| view.execute_command(command, window, cx)),
             Scope::Application => self.execute_application(command, target, window, cx),

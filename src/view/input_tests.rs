@@ -59,7 +59,7 @@ pub(super) fn redraw(cx: &mut VisualTestContext) {
     cx.update(|window, cx| window.draw(cx).clear(cx));
 }
 
-pub(super) fn handler(editor: &Entity<BufferView>, cx: &VisualTestContext) -> BufferInputHandler {
+pub(crate) fn handler(editor: &Entity<BufferView>, cx: &VisualTestContext) -> BufferInputHandler {
     cx.read(|cx| {
         let view = editor.read(cx);
         BufferInputHandler {

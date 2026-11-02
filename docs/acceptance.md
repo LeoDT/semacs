@@ -13,7 +13,7 @@
 
 ## 本地检查与 headless 入口
 
-实现阶段收尾执行 `cargo test --all-targets`、`cargo clippy --all-targets -- -D warnings`、`cargo fmt --check` 和差异检查；若改动 profiler / 驱动，还检查相应 feature 和工具（`cargo test --all-targets --features native-profiler`、对应 Clippy 及 `python3 -B -m unittest discover -s tests -p 'test_*.py'`）。日常小改动按影响检查，纯文档整理不机械重跑产品测试。修改 split IME 驱动时，另运行 `python3 -B -m unittest discover -s scripts -p 'test_split_ime.py' -v`（不访问桌面）。修改人工 fixture / 验证工具时，另运行 `python3 -B -m unittest discover -s scripts -p 'test_m2_manual.py' -v`；fish 入口用 `fish --no-execute scripts/acceptance.fish` 检查语法，二者均不启动桌面窗口。
+实现阶段收尾执行 `cargo test --all-targets`、`cargo clippy --all-targets -- -D warnings`、`cargo fmt --check` 和差异检查；若改动 profiler / 驱动，还检查相应 feature 和工具（`cargo test --all-targets --features native-profiler`、对应 Clippy 及 `python3 -B -m unittest discover -s tests -p 'test_*.py'`）。日常小改动按影响检查，纯文档整理不机械重跑产品测试。修改 split IME 驱动时，另运行 `python3 -B -m unittest discover -s scripts -p 'test_split_ime.py' -v`（不访问桌面）。修改人工 fixture / 验证工具时，另运行 `python3 -B -m unittest discover -s scripts -p 'test_m2_manual.py' -v`；脚本接入冒烟驱动另运行 `python3 -B -m unittest discover -s scripts -p 'test_scripting_manual.py' -v`；fish 入口用 `fish --no-execute scripts/acceptance.fish` 检查语法，以上检查均不启动桌面窗口。
 
 有输入 / 布局性能影响时，可在不访问桌面的 TestPlatform / TestTextSystem 上运行：
 
@@ -34,6 +34,18 @@ target/release/examples/perf_candidates .pi/tmp/NEW-candidate-fixture
 该入口在 960×640 的 TestPlatform / TestTextSystem 上各测三轮命令过滤、文件过滤和候选导航；文件 fixture 为 2000 个目录项，保留产物。它不是原生候选呈现或平台 IME 验收。
 
 `perf_view` 测视图布局 / 绘制与基础输入；`perf_m1` 测有界命令链与未等待布局的输入段，ready 只代表末键恢复，不是原生长时间持续输入。文件层入口为 `examples/perf_load.rs` / `scripts/perf_baseline.sh`。具体参数、样本和断言以工具为准；headless 结果不替代原生字体、GPU 或真实 IME 证据。
+
+## 阶段 D：配置与脚本本地回归
+
+`cargo test --all-targets` 覆盖配置入口缺失 / 错误 / 超限、事务重载、键位覆盖与取消、脚本异常、region 及迟到结果隔离；配置 fixture 只在 `.pi/tmp/` 创建，不读取用户真实配置、不启动桌面。专用 worker 的集成测试显式允许测试调度器等待外部线程；输入路由与编辑状态仍由 TestPlatform 验证。
+
+若本地已有 TypeScript 编译器，可额外校验示例与类型声明；它不是 semacs 的运行依赖：
+
+```sh
+tsc --allowJs --checkJs --noEmit --strict --target es2020 --lib es2020 examples/init.js types/semacs.d.ts
+```
+
+headless 不能证明原生启动无字体闪变或真实 IME 行为。取得本轮同意后，最小宿主冒烟使用下文 `scripting` 模式，隔离 `XDG_CONFIG_HOME` 并只操作可丢弃配置 / 文本；不覆盖用户已有 `init.js`，也不把历史阶段的宿主结果当作本阶段通过。新的批次仍须另行取得同意。
 
 ## 阶段 C：自动功能回归与多 view 基线
 
@@ -75,11 +87,35 @@ fish scripts/acceptance.fish MODE NEW_OUTPUT_DIRECTORY --consent
 | `ime` | mixed / single-ascii 各三轮真实正文 IME；需要 Hyprland、wtype、fcitx5-remote，grim 可选。完整 minibuffer IME 仍需人工观察。 |
 | `manual` | 两个正式窗口的键盘文件 / IME / OS 关闭流程，按下文操作，脚本核对观察回答与磁盘字节。 |
 | `candidates` | 一个正式窗口的候选 / 路径 / buffer、字体布局及正文 / minibuffer IME 人工检查；不自动注键、不运行性能矩阵。 |
+| `scripting` | 两个正式窗口，隔离配置的首次显示、脚本命令 / undo、成功 / 失败重载及失败启动回退；用户按终端步骤操作，驱动核对磁盘字节。不截图、不全局注键、不改变 IME，不运行性能矩阵。 |
 | `open-diagnostic` | 一次 mixed 文件打开的定向诊断，不继续其他样本或编辑矩阵，不作为验收。 |
 
-自动性能模式打开测试窗口，内部使用合成 GPUI 输入；不要输入、移动 / 调整或关闭测试窗口。只有 `ime` 注入真实 OS 按键：期间不要操作键鼠，驱动注键前检查目标焦点并恢复原焦点 / 输入法。`split-ime` 不注键；仅按窗口顶部提示输入，不做其他编辑。`manual` / `candidates` 不自动注键，按提示操作，不可将未观察到的项目答 yes。
+自动性能模式打开测试窗口，内部使用合成 GPUI 输入；不要输入、移动 / 调整或关闭测试窗口。只有 `ime` 注入真实 OS 按键：期间不要操作键鼠，驱动注键前检查目标焦点并恢复原焦点 / 输入法。`split-ime` 不注键；仅按窗口顶部提示输入，不做其他编辑。`manual` / `candidates` / `scripting` 不自动注键，按提示操作，不可将未观察到的项目答 yes。
 
 原生性能验收要求硬件渲染；软件诊断不能套用硬件验收结论。fish 入口不提供软件降级；底层驱动的 `--software` 仅供另行授权的诊断。普通原生 / IME 模式在每份窗口报告完成后判定，M1 / M2 / split-perf 还会在测量过程中检查既有预算；失败停止后续运行。模式与参数含义见 [驱动](../scripts/perf_native.py)，不以本页重述完整动作矩阵。
+
+## 阶段 D：最小脚本宿主冒烟
+
+需本轮单独同意，在正常 fish / Wayland 宿主终端运行：
+
+```fish
+fish scripts/acceptance.fish scripting .pi/tmp/d-scripting-host-NEW --consent
+```
+
+输出目录必须尚不存在。入口只构建正式 release `semacs`，保存源码差异、二进制 SHA-256、环境、每窗 stdout / stderr、各阶段配置快照及 `scripting/result.json`；不构建或启动性能 probe。
+
+[驱动](../scripts/scripting_manual.py) 只给它启动的两个子进程设置独立 `XDG_CONFIG_HOME`，不修改终端环境或用户配置。新建的 `commands.txt`、`fallback.txt` 是全部编辑目标。脚本不注键、不改变输入法、不截图；本轮仅输入 ASCII，请用户自行选择英文输入，并照常在测试窗口和终端之间切换焦点。
+
+具体编号按终端提示操作，保持窗口打开直到驱动要求关闭：
+
+1. 第一窗口以 24px 配置打开 `alpha beta`。观察首次正文是否直接使用较大字号；通过 `C-c u` 做大写变换，一次 undo 恢复，再经 `M-x smoke-uppercase-region` 变换并保存。回终端确认启动和命令两项，独立检查磁盘为 `ALPHA beta\n`。
+2. 驱动原子替换本批配置为 32px 和 lowercase 命令；用户显式重载。确认旧命令 / 键位移除、新字号和 `C-c l` 生效，变换并保存为 `alpha beta\n`。
+3. 驱动写入故意抛错的配置，试图改为 40px 并取消 `C-c l`。用户重载应报告错误并保持上一阶段字号和键位；用原生输入插入大写 `X`，再用保留的脚本键位转换，保存为 `xalpha beta\n`。确认后按提示关闭第一窗口。
+4. 第二窗口沿用错误配置，打开独立 `fallback.txt`。先观察默认字号与配置错误，再用原生输入插入大写 `Z` 并保存为 `Zfallback\n`。回终端确认两项后，按提示关闭。
+
+每次保存等待 clean 后再回终端；脚本核对当前和非目标文件的精确字节。不要额外编辑或打开用户工作文件，不手工修改 fixture / 配置。任何异常、未观察、EOF、异常退出或字节不符立即停批，保留 STOP 与失败报告，不自动重试。失败 / 中断会终止**驱动自己启动的测试子进程**，不会向其他窗口发送操作；未正常关闭时最多等待 120 秒，超时同样失败。
+
+成功仅表示六项人工观察、两次正常退出及独立磁盘字节检查通过。“未观察到默认字号闪变”是人工观察，不是逐帧证明；性能、真实 IME、GPU / 实际呈现仍未测。回传整个输出目录，即使失败也保留所有产物。
 
 ## 阶段 C：最小宿主配合
 

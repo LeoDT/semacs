@@ -8,8 +8,8 @@ function fail
     exit 1
 end
 
-if test (count $argv) -ne 3; or not contains -- $argv[1] perf display-perf split-perf ime split-ime manual candidates open-diagnostic; or test "$argv[3]" != --consent
-    echo "Usage: fish scripts/acceptance.fish <perf|display-perf|split-perf|ime|split-ime|manual|candidates|open-diagnostic> NEW_OUTPUT_DIRECTORY --consent" >&2
+if test (count $argv) -ne 3; or not contains -- $argv[1] perf display-perf split-perf ime split-ime manual candidates scripting open-diagnostic; or test "$argv[3]" != --consent
+    echo "Usage: fish scripts/acceptance.fish <perf|display-perf|split-perf|ime|split-ime|manual|candidates|scripting|open-diagnostic> NEW_OUTPUT_DIRECTORY --consent" >&2
     exit 2
 end
 set -l mode $argv[1]
@@ -48,7 +48,7 @@ for file in $untracked
 end
 echo "Output: $output"
 echo "Build logs are saved; any failure stops the batch without retries."
-if test "$mode" = candidates
+if contains -- "$mode" candidates scripting
     cargo build --release --bin semacs --target-dir "$root/target" > "$output/build.log" 2>&1
 else if test "$mode" = split-ime
     cargo build --release --bin semacs --example native_split_ime --target-dir "$root/target" > "$output/build.log" 2>&1
@@ -122,6 +122,19 @@ else if test "$mode" = split-ime
     end > "$output/environment.txt" 2>&1
     python3 -B scripts/split_ime.py "$output/split-ime" --consent
     or fail "split IME integration stopped; preserve this directory and report it, do not rerun"
+else if test "$mode" = scripting
+    begin
+        uname -a
+        rustc --version
+        printf 'WAYLAND_DISPLAY=%s\nXDG_SESSION_TYPE=%s\nXDG_CURRENT_DESKTOP=%s\nLANG=%s\n' "$WAYLAND_DISPLAY" "$XDG_SESSION_TYPE" "$XDG_CURRENT_DESKTOP" "$LANG"
+        fc-match monospace
+    end > "$output/environment.txt" 2>&1
+    echo "Two manual scripting smoke windows, isolated XDG_CONFIG_HOME and disposable text."
+    echo "No OS key injection, IME changes, screenshots or performance measurements."
+    echo "Follow the numbered terminal prompts; leave each window open until asked to close it."
+    echo "Any failure stops the batch and terminates only the child test app; all artifacts are kept."
+    python3 -B scripts/scripting_manual.py "$output/scripting" --binary "$root/target/release/semacs" --consent
+    or fail "scripting smoke stopped; keep and report $output, do not rerun"
 else if test "$mode" = candidates
     begin
         uname -a
