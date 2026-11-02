@@ -32,6 +32,7 @@ struct Group {
     redo_mark: Option<usize>,
     modified_before: bool,
     modified_after: bool,
+    origin: u64,
 }
 
 #[derive(Default)]
@@ -52,6 +53,7 @@ impl History {
         group.id = GroupId(self.next_group_id);
         if self.merging
             && let Some(previous) = self.undo.last_mut()
+            && previous.origin == group.origin
             && previous.kind == group.kind
             && previous.point_after == group.point_before
         {
@@ -168,23 +170,16 @@ impl History {
     }
 }
 
-fn collapsed_mark(buffer: &Buffer, start: ByteOffset, len: usize) -> Option<usize> {
-    buffer
-        .mark
-        .filter(|mark| *mark > start && mark.0 <= start.0 + len)
-        .map(|mark| mark.0 - start.0)
-}
-
 impl Buffer {
     pub fn break_history_group(&mut self) {
-        self.history.merging = false;
+        self.document.borrow_mut().history.merging = false;
     }
 
     /// The current history state, captured when a save starts.
     pub(crate) fn save_point(&self) -> SavePoint {
         SavePoint {
-            buffer: self.snapshot.id.buffer,
-            state: self.history.current_state(),
+            buffer: self.snapshot_id().buffer,
+            state: self.document.borrow().history.current_state(),
         }
     }
 
@@ -198,14 +193,16 @@ impl Buffer {
     /// Applies an asynchronous save result to the state it captured. A result
     /// whose history state is no longer reachable cannot clear dirty.
     pub fn mark_saved_at(&mut self, point: SavePoint) -> Result<(), EditError> {
-        if point.buffer != self.snapshot.id.buffer {
+        if point.buffer != self.snapshot_id().buffer {
             return Err(EditError::WrongTarget);
         }
-        if !self.history.mark_saved(point.state) {
+        if !self.document.borrow_mut().history.mark_saved(point.state) {
             return Err(EditError::StaleSnapshot);
         }
         self.break_history_group();
-        self.modified = self.history.current_state() != point.state;
+        let mut doc = self.document.borrow_mut();
+        doc.modified = doc.history.current_state() != point.state;
+        doc.touch();
         Ok(())
     }
 
@@ -215,28 +212,39 @@ impl Buffer {
         kind: EditGroup,
     ) -> Result<Option<AppliedEdit>, EditError> {
         self.validate_edit(&edit)?;
+        let (removed, mark, modified) = {
+            let doc = self.document.borrow();
+            (
+                doc.snapshot
+                    .text
+                    .slice(edit.range.start.0..edit.range.end.0),
+                doc.mark,
+                doc.modified,
+            )
+        };
+        let removed_len = edit.range.end.0 - edit.range.start.0;
         let group = Group {
             id: GroupId(0),
             kind,
             start: edit.range.start,
-            removed: self.text().slice(edit.range.start.0..edit.range.end.0),
+            removed,
             inserted: Rope::from(edit.text),
-            point_before: self.point,
+            point_before: self.point(),
             point_after: ByteOffset(edit.range.start.0 + edit.text.len()),
-            undo_mark: collapsed_mark(
-                self,
-                edit.range.start,
-                edit.range.end.0 - edit.range.start.0,
-            ),
+            undo_mark: mark
+                .filter(|m| *m > edit.range.start && m.0 <= edit.range.start.0 + removed_len)
+                .map(|m| m.0 - edit.range.start.0),
             redo_mark: None,
-            modified_before: self.modified,
+            modified_before: modified,
             modified_after: true,
+            origin: self.view_id,
         };
         let applied = self.apply_edit(edit)?;
+        let mut doc = self.document.borrow_mut();
         if applied.is_some() {
-            self.history.record(group);
+            doc.history.record(group);
         } else if kind == EditGroup::Isolated {
-            self.break_history_group();
+            doc.history.merging = false;
         }
         Ok(applied)
     }
@@ -244,31 +252,39 @@ impl Buffer {
     pub fn undo(&mut self) -> Result<Option<AppliedEdit>, EditError> {
         self.replay(false)
     }
-
     pub fn redo(&mut self) -> Result<Option<AppliedEdit>, EditError> {
         self.replay(true)
     }
 
     fn replay(&mut self, redo: bool) -> Result<Option<AppliedEdit>, EditError> {
-        if self.read_only {
+        if self.is_read_only() {
             return Err(EditError::ReadOnly);
         }
         self.break_history_group();
-        let stack = if redo {
-            &mut self.history.redo
-        } else {
-            &mut self.history.undo
-        };
-        let Some(mut group) = stack.pop() else {
-            return Ok(None);
+        let mut group = {
+            let mut doc = self.document.borrow_mut();
+            let stack = if redo {
+                &mut doc.history.redo
+            } else {
+                &mut doc.history.undo
+            };
+            let Some(group) = stack.pop() else {
+                return Ok(None);
+            };
+            group
         };
         let (removed, inserted, restore_mark) = if redo {
             (&group.removed, &group.inserted, group.redo_mark)
         } else {
             (&group.inserted, &group.removed, group.undo_mark)
         };
-        let restore_mark = restore_mark.filter(|_| self.mark == Some(group.start));
-        let inverse_mark = collapsed_mark(self, group.start, removed.len());
+        let mark = self.mark();
+        let restore_mark = restore_mark.filter(|_| mark == Some(group.start));
+        let inverse_mark = {
+            let m = self.mark();
+            m.filter(|m| *m > group.start && m.0 <= group.start.0 + removed.len())
+                .map(|m| m.0 - group.start.0)
+        };
         let text = inserted.to_string();
         let result = self.apply_edit(Edit {
             snapshot: self.snapshot_id(),
@@ -281,31 +297,33 @@ impl Buffer {
             },
         });
         let applied = match result {
-            Ok(applied) => applied,
-            Err(error) => {
+            Ok(a) => a,
+            Err(e) => {
+                let mut d = self.document.borrow_mut();
                 if redo {
-                    self.history.redo.push(group);
+                    d.history.redo.push(group);
                 } else {
-                    self.history.undo.push(group);
+                    d.history.undo.push(group);
                 }
-                return Err(error);
+                return Err(e);
             }
         };
+        let mut doc = self.document.borrow_mut();
         if let Some(offset) = restore_mark {
-            self.mark = Some(ByteOffset(group.start.0 + offset));
+            doc.mark = Some(ByteOffset(group.start.0 + offset));
         }
         if redo {
             group.undo_mark = inverse_mark;
-            self.point = group.start;
-            self.modified = group.modified_after;
-            self.history.undo.push(group);
+            self.point.set(group.start.0);
+            doc.modified = group.modified_after;
+            doc.history.undo.push(group);
         } else {
             group.redo_mark = inverse_mark;
-            self.point = group.point_before;
-            self.modified = group.modified_before;
-            self.history.redo.push(group);
+            self.point.set(group.point_before.0);
+            doc.modified = group.modified_before;
+            doc.history.redo.push(group);
         }
-        self.deactivate_mark();
+        doc.mark_active = false;
         Ok(applied)
     }
 }
@@ -335,24 +353,38 @@ mod tests {
         for i in 0..COUNT {
             edit(&mut buffer, i..i, "x", EditGroup::Insert);
         }
-        assert_eq!(buffer.history.undo.len(), 1);
-        assert_eq!(buffer.history.undo[0].inserted.len(), COUNT);
-        assert!(buffer.history.undo[0].removed.is_empty());
+        assert_eq!(buffer.document.borrow_mut().history.undo.len(), 1);
+        assert_eq!(
+            buffer.document.borrow_mut().history.undo[0].inserted.len(),
+            COUNT
+        );
+        assert!(
+            buffer.document.borrow_mut().history.undo[0]
+                .removed
+                .is_empty()
+        );
         buffer.break_history_group();
         for i in (0..COUNT).rev() {
             edit(&mut buffer, i..i + 1, "", EditGroup::BackwardDelete);
         }
-        assert_eq!(buffer.history.undo.len(), 2);
-        assert_eq!(buffer.history.undo[1].removed.len(), COUNT);
-        assert!(buffer.history.undo[1].inserted.is_empty());
+        assert_eq!(buffer.document.borrow_mut().history.undo.len(), 2);
+        assert_eq!(
+            buffer.document.borrow_mut().history.undo[1].removed.len(),
+            COUNT
+        );
+        assert!(
+            buffer.document.borrow_mut().history.undo[1]
+                .inserted
+                .is_empty()
+        );
         buffer.undo().unwrap().unwrap();
         assert_eq!(buffer.text().len(), COUNT);
         buffer.undo().unwrap().unwrap();
         assert!(buffer.text().is_empty());
-        assert_eq!(buffer.history.redo.len(), 2);
+        assert_eq!(buffer.document.borrow_mut().history.redo.len(), 2);
         edit(&mut buffer, 0..0, "new", EditGroup::Insert);
-        assert!(buffer.history.redo.is_empty());
-        assert_eq!(buffer.history.undo.len(), 1);
+        assert!(buffer.document.borrow_mut().history.redo.is_empty());
+        assert_eq!(buffer.document.borrow_mut().history.undo.len(), 1);
     }
 
     #[test]
@@ -371,11 +403,25 @@ mod tests {
             Err(EditError::InvalidRange)
         );
         edit(&mut buffer, 0..0, "", EditGroup::Isolated);
-        assert!(buffer.history.undo.is_empty());
-        assert_eq!(buffer.history.redo.len(), 1);
+        assert!(buffer.document.borrow_mut().history.undo.is_empty());
+        assert_eq!(buffer.document.borrow_mut().history.redo.len(), 1);
         assert_eq!(buffer.snapshot_id(), snapshot);
         assert!(!buffer.is_modified());
         buffer.redo().unwrap().unwrap();
         assert_eq!(buffer.text().to_string(), "中");
+    }
+
+    #[test]
+    fn history_groups_never_merge_across_view_origins() {
+        let mut first = Buffer::scratch();
+        edit(&mut first, 0..0, "a", EditGroup::Insert);
+        let mut second = first.new_view();
+        // Creating a view is inert: the original view can continue its group.
+        edit(&mut first, 1..1, "b", EditGroup::Insert);
+        assert_eq!(first.document.borrow_mut().history.undo.len(), 1);
+        edit(&mut second, 2..2, "c", EditGroup::Insert);
+        let doc = first.document.borrow_mut();
+        assert_eq!(doc.history.undo.len(), 2);
+        assert_ne!(doc.history.undo[0].origin, doc.history.undo[1].origin);
     }
 }

@@ -133,10 +133,10 @@ impl AppShell {
                     .iter()
                     .filter(|slot| {
                         !matches!(kind, ReadKind::SwitchToBuffer { .. })
-                            || &slot.view != self.active_view()
+                            || slot.id() != self.active_buffer_id()
                     })
                     .map(|slot| {
-                        let buffer = slot.view.read(cx).buffer();
+                        let buffer = &slot.buffer;
                         let annotation = format!(
                             "{} {}",
                             if buffer.is_modified() { "**" } else { "--" },

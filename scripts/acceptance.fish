@@ -8,8 +8,8 @@ function fail
     exit 1
 end
 
-if test (count $argv) -ne 3; or not contains -- $argv[1] perf display-perf ime manual candidates open-diagnostic; or test "$argv[3]" != --consent
-    echo "Usage: fish scripts/acceptance.fish <perf|display-perf|ime|manual|candidates|open-diagnostic> NEW_OUTPUT_DIRECTORY --consent" >&2
+if test (count $argv) -ne 3; or not contains -- $argv[1] perf display-perf split-perf ime split-ime manual candidates open-diagnostic; or test "$argv[3]" != --consent
+    echo "Usage: fish scripts/acceptance.fish <perf|display-perf|split-perf|ime|split-ime|manual|candidates|open-diagnostic> NEW_OUTPUT_DIRECTORY --consent" >&2
     exit 2
 end
 set -l mode $argv[1]
@@ -26,6 +26,12 @@ if test "$mode" = ime
         command -q $binary; or fail "missing $binary"
     end
     test -n "$HYPRLAND_INSTANCE_SIGNATURE"; or fail "IME automation requires Hyprland"
+end
+if test "$mode" = split-ime
+    for binary in hyprctl grim
+        command -q $binary; or fail "split-ime requires $binary"
+    end
+    test -n "$HYPRLAND_INSTANCE_SIGNATURE"; or fail "split-ime requires Hyprland"
 end
 test ! -e "$output"; or fail "output must not exist: $output"
 set -l untracked (git ls-files --others --exclude-standard -z | string split0)
@@ -44,6 +50,8 @@ echo "Output: $output"
 echo "Build logs are saved; any failure stops the batch without retries."
 if test "$mode" = candidates
     cargo build --release --bin semacs --target-dir "$root/target" > "$output/build.log" 2>&1
+else if test "$mode" = split-ime
+    cargo build --release --bin semacs --example native_split_ime --target-dir "$root/target" > "$output/build.log" 2>&1
 else
     cargo build --release --bin semacs --example perf_native --features native-profiler --target-dir "$root/target" > "$output/build.log" 2>&1
 end
@@ -59,6 +67,17 @@ if test "$mode" = open-diagnostic
     or fail "fixture generation failed"
     python3 -B scripts/perf_native.py "$output/sample.txt" "$output/open-diagnostic" --consent --m2-open-diagnostic --sample mixed --runs 1
     or fail "single-open diagnostic stopped; keep CSV / frames.csv / views.csv / preparation.csv / diagnostic.json and report this directory"
+else if test "$mode" = split-perf
+    echo "Shared-buffer dual-view performance: right/below × mixed/single-ascii × 3."
+    echo "Selected-view budgets retained; all-view ready is a separate baseline with no new threshold."
+    echo "CPU/platform submission only, NOT GPU execution or screen presentation."
+    echo "No screenshots, IME changes or OS key injection. Do not type in, resize or close probes."
+    python3 -B scripts/perf_sample.py "$output/sample.txt"
+    or fail "fixture generation failed"
+    for direction in right below
+        python3 -B scripts/perf_native.py "$output/sample.txt" "$output/split-$direction" --consent --split $direction --sample mixed --sample single-ascii --runs 3
+        or fail "split performance stopped; keep and report this directory, do not rerun"
+    end
 else if test "$mode" = display-perf
     echo "Display regression: mixed/single-ascii × 3; hardware rendering required."
     echo "Native CPU/submission timings only, NOT GPU execution or screen presentation."
@@ -89,6 +108,20 @@ else if test "$mode" = ime
     or fail "fixture generation failed"
     python3 -B scripts/perf_native.py "$output/sample.txt" "$output/native-ime" --consent --ime --sample mixed --sample single-ascii --runs 3
     or fail "IME failed; keep logs/screenshots and report it"
+else if test "$mode" = split-ime
+    echo "Auto-asserted split/body/minibuffer IME integration, NOT a performance benchmark."
+    echo "Follow the probe instructions: at each of three targets, ni -> Escape, then ni -> commit 你."
+    echo "Use your usual Chinese Pinyin input method; wait for each instruction. No other editing."
+    echo "No global key injection or scripted IME changes. Do not resize or close the probe."
+    echo "PRIVACY: six screenshots capture the ENTIRE probe monitor, including other visible windows."
+    echo "Hide sensitive windows on that monitor before continuing. Original focus will be restored."
+    begin
+        uname -a
+        rustc --version
+        fc-match monospace
+    end > "$output/environment.txt" 2>&1
+    python3 -B scripts/split_ime.py "$output/split-ime" --consent
+    or fail "split IME integration stopped; preserve this directory and report it, do not rerun"
 else if test "$mode" = candidates
     begin
         uname -a

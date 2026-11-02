@@ -63,6 +63,33 @@ pub(super) fn paint(at: Instant) -> PaintState {
 }
 
 #[test]
+fn paint_pairing_discards_stale_observations_and_preserves_future_ones() {
+    let start = Instant::now();
+    let stale = start - Duration::from_millis(1);
+    let current = start + Duration::from_micros(500);
+    let future = start + Duration::from_millis(3);
+    let mut paints = std::collections::VecDeque::from([stale, current, future]);
+    assert_eq!(
+        super::take_paint(&mut paints, &frame(start), |at| *at),
+        Some(current)
+    );
+    assert_eq!(
+        super::take_paint(&mut paints, &frame(start), |at| *at),
+        None
+    );
+    assert_eq!(paints.front(), Some(&future));
+    assert_eq!(
+        super::take_paint(&mut paints, &frame(future), |at| *at),
+        Some(future)
+    );
+    assert!(paints.is_empty());
+    assert_eq!(
+        super::take_paint(&mut paints, &frame(future), |at| *at),
+        None
+    );
+}
+
+#[test]
 fn previous_frames_do_not_complete_a_new_action() {
     let mut measurement = Measurement::new(Step::Insert, "abc".into(), false);
     let earlier = measurement.start - Duration::from_secs(1);

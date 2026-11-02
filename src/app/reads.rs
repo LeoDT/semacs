@@ -23,6 +23,9 @@ impl AppShell {
         self.cancel_file_open();
         let prompt = kind.prompt();
         self.mount_minibuffer(&prompt, initial, window, cx)?;
+        for view in self.all_views() {
+            view.update(cx, |view, cx| view.suspend_input(cx));
+        }
         let id = self
             .next_session_id
             .checked_add(1)
@@ -156,6 +159,7 @@ impl AppShell {
             return None;
         }
         self.remove_minibuffer(cx);
+        self.update_selected_views(cx);
         let target = session.origin().clone();
         let active = self.active_view().clone();
         active.update(cx, |view, cx| view.restore_input(window, cx));
@@ -219,7 +223,7 @@ impl AppShell {
         let index = self
             .buffers
             .iter()
-            .position(|slot| slot.view.read(cx).buffer().display_name() == name);
+            .position(|slot| slot.buffer.display_name() == name);
         let Some(index) = index else {
             self.message_minibuffer(format!("No buffer named {name}"), cx);
             return;
@@ -242,7 +246,7 @@ impl AppShell {
         let index = self
             .buffers
             .iter()
-            .position(|slot| slot.view.read(cx).buffer().display_name() == name);
+            .position(|slot| slot.buffer.display_name() == name);
         let Some(index) = index else {
             self.message_minibuffer(format!("No buffer named {name}"), cx);
             return;
@@ -264,6 +268,7 @@ impl AppShell {
             return false;
         }
         self.remove_minibuffer(cx);
+        self.update_selected_views(cx);
         let view = self.active_view().clone();
         view.update(cx, |view, cx| view.restore_input(window, cx));
         cx.notify();
@@ -354,7 +359,7 @@ impl AppShell {
             return;
         }
         if answer == Answer::No {
-            self.cancel_save_confirmation();
+            self.cancel_save_confirmation(cx);
         }
         let Some(target) = self.end_session(id, window, cx) else {
             return;
@@ -369,7 +374,7 @@ impl AppShell {
             }
             ReadKind::KillBufferConfirm { .. } => match answer {
                 Answer::Yes => {
-                    if let Some(index) = self.buffers.index_of(&target) {
+                    if let Some(index) = self.buffer_index(&target, cx) {
                         self.remove_buffer(index, window, cx);
                     }
                 }
@@ -380,7 +385,7 @@ impl AppShell {
                 if answer == Answer::No {
                     self.process_next_exit(window, cx);
                 } else {
-                    self.wait_for_save(&target);
+                    self.wait_for_save(target.read(cx).buffer().snapshot_id().buffer);
                     if !self.save_buffer(&target, window, cx) {
                         if !target.read(cx).buffer().is_modified() {
                             self.process_next_exit(window, cx);
@@ -407,7 +412,7 @@ impl AppShell {
         let Some(id) = self.session.as_ref().map(ReadSession::id) else {
             return;
         };
-        self.cancel_save_confirmation();
+        self.cancel_save_confirmation(cx);
         if let Some(target) = self.end_session(id, window, cx) {
             self.cancel_closing();
             self.show_message(&target, "Quit", cx);

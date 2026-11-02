@@ -13,7 +13,7 @@
 
 ## 本地检查与 headless 入口
 
-实现阶段收尾执行 `cargo test --all-targets`、`cargo clippy --all-targets -- -D warnings`、`cargo fmt --check` 和差异检查；若改动 profiler / 驱动，还检查相应 feature 和工具。日常小改动按影响检查，纯文档整理不机械重跑产品测试。修改人工 fixture / 验证工具时，另运行 `python3 -B -m unittest discover -s scripts -p 'test_m2_manual.py' -v`；fish 入口用 `fish --no-execute scripts/acceptance.fish` 检查语法，二者均不启动桌面窗口。
+实现阶段收尾执行 `cargo test --all-targets`、`cargo clippy --all-targets -- -D warnings`、`cargo fmt --check` 和差异检查；若改动 profiler / 驱动，还检查相应 feature 和工具（`cargo test --all-targets --features native-profiler`、对应 Clippy 及 `python3 -B -m unittest discover -s tests -p 'test_*.py'`）。日常小改动按影响检查，纯文档整理不机械重跑产品测试。修改 split IME 驱动时，另运行 `python3 -B -m unittest discover -s scripts -p 'test_split_ime.py' -v`（不访问桌面）。修改人工 fixture / 验证工具时，另运行 `python3 -B -m unittest discover -s scripts -p 'test_m2_manual.py' -v`；fish 入口用 `fish --no-execute scripts/acceptance.fish` 检查语法，二者均不启动桌面窗口。
 
 有输入 / 布局性能影响时，可在不访问桌面的 TestPlatform / TestTextSystem 上运行：
 
@@ -35,6 +35,27 @@ target/release/examples/perf_candidates .pi/tmp/NEW-candidate-fixture
 
 `perf_view` 测视图布局 / 绘制与基础输入；`perf_m1` 测有界命令链与未等待布局的输入段，ready 只代表末键恢复，不是原生长时间持续输入。文件层入口为 `examples/perf_load.rs` / `scripts/perf_baseline.sh`。具体参数、样本和断言以工具为准；headless 结果不替代原生字体、GPU 或真实 IME 证据。
 
+## 阶段 C：自动功能回归与多 view 基线
+
+分屏 / 关闭 / buffer 替换、共享 history / 保存队列、point / scroll 隔离、minibuffer 恢复及模拟 IME 生命周期优先由 Rust 自动回归验证，不再让用户重复整套功能清单。
+
+多 view 大文件基线可在 headless 环境运行：
+
+```sh
+cargo build --release --example perf_split
+RUNS=3 target/release/examples/perf_split .pi/tmp/perf-sample.txt
+```
+
+输入种子沿用上节生成入口。左右 / 上下两种双 view 布局、六类约 8 MiB 样本各三轮；自动断言共享文本、独立 point / scroll、跨 view undo / redo、可见正文及最终兼容布局。输出 action / front 与两个 view 全部就绪的耗时，并测改宽、字体和稳定绘制。双 view 聚合就绪是新基线，不把旧单 view 固定尺寸门限直接套到新聚合指标，也不据此改动原预算。它不是原生性能或真实 IME 验收。
+
+## 阶段 C：定向原生性能
+
+`split-perf` 是独立的自动性能批次，不重复功能 / IME 清单，也不运行旧六类全矩阵。左右 / 上下两种共享 buffer 双 view，mixed / single-ascii 各三轮，共 12 个原生窗口；每窗自动完成冷打开、split / 选择、独立 point / scroll 准备、共享编辑、滚动、改宽、字体、强制重绘与稳定观察。请求 960×640，报告记录实际正文尺寸；改宽与字体沿用 view 层测量入口，不冒充正式配置命令的端到端时延。
+
+报告分别保存选中 view 首次目标提交、选中 view ready 和同一份场景中全部 view ready；适用门限及聚合基线边界见[性能预算](performance.md)。源码 / 二进制与 fixture 身份、原始 CSV、每轮结果与跨轮 min / max 均保留；驱动核对样本、方向、release、完整动作序列及正文断言。测量过程中遇到超限、空白、缺失观察或超时即保留部分报告并停批，不重试、不跳过失败方向。整体 `acceptance=false`，不将选中 view 预算通过与全部 view 聚合基线合并为整体验收结论。
+
+本模式无需人工编辑，不注入 OS 按键、不改变 IME、不截图；运行期间不要操作测试窗口。真实环境执行仍须本轮单独同意，按下节 fish 入口运行。
+
 ## 宿主 fish 入口
 
 仅在对应测试已获同意后，将 `MODE` 和 `NEW_OUTPUT_DIRECTORY` 替换为选定模式及新目录：
@@ -47,16 +68,26 @@ fish scripts/acceptance.fish MODE NEW_OUTPUT_DIRECTORY --consent
 
 | 模式 | 适用范围 |
 |---|---|
+| `split-perf` | 阶段 C 共享 buffer 双 view 定向性能：两种布局、mixed / single-ascii 各三轮；选中 view 沿用对应预算，全部 view ready 单独作基线；无需人工编辑、不截图。 |
 | `display-perf` | mixed / single-ascii 各三轮的原生基础性能代表性复测，包含字体变化与绘制；不跑 M1 持续输入或 M2 文件矩阵。 |
 | `perf` | 文件 / buffer M2 六类矩阵、普通原生六类矩阵及 M1 两类代表性持续输入；开销较大，不作为每次改动的默认检查。 |
+| `split-ime` | 阶段 C 自动断言的真实 IME 集成：用户仅按屏幕提示输入三组拼音取消 / 提交；其余操作与检查自动完成。需 Hyprland、grim，不全局注键、不代改输入法，截取测试所在整块显示器供离线审查，不运行性能矩阵。 |
 | `ime` | mixed / single-ascii 各三轮真实正文 IME；需要 Hyprland、wtype、fcitx5-remote，grim 可选。完整 minibuffer IME 仍需人工观察。 |
 | `manual` | 两个正式窗口的键盘文件 / IME / OS 关闭流程，按下文操作，脚本核对观察回答与磁盘字节。 |
 | `candidates` | 一个正式窗口的候选 / 路径 / buffer、字体布局及正文 / minibuffer IME 人工检查；不自动注键、不运行性能矩阵。 |
 | `open-diagnostic` | 一次 mixed 文件打开的定向诊断，不继续其他样本或编辑矩阵，不作为验收。 |
 
-自动性能模式打开测试窗口，内部使用合成 GPUI 输入；不要输入、移动 / 调整或关闭测试窗口。只有 `ime` 注入真实 OS 按键：期间不要操作键鼠，驱动注键前检查目标焦点并恢复原焦点 / 输入法。`manual` / `candidates` 不自动注键，按提示操作，不可将未观察到的项目答 yes。
+自动性能模式打开测试窗口，内部使用合成 GPUI 输入；不要输入、移动 / 调整或关闭测试窗口。只有 `ime` 注入真实 OS 按键：期间不要操作键鼠，驱动注键前检查目标焦点并恢复原焦点 / 输入法。`split-ime` 不注键；仅按窗口顶部提示输入，不做其他编辑。`manual` / `candidates` 不自动注键，按提示操作，不可将未观察到的项目答 yes。
 
-原生性能验收要求硬件渲染；软件诊断不能套用硬件验收结论。fish 入口不提供软件降级；底层驱动的 `--software` 仅供另行授权的诊断。普通原生 / IME 模式在每份窗口报告完成后判定，M1 / M2 还会在测量过程中检查既有预算；失败停止后续运行。模式与参数含义见 [驱动](../scripts/perf_native.py)，不以本页重述完整动作矩阵。
+原生性能验收要求硬件渲染；软件诊断不能套用硬件验收结论。fish 入口不提供软件降级；底层驱动的 `--software` 仅供另行授权的诊断。普通原生 / IME 模式在每份窗口报告完成后判定，M1 / M2 / split-perf 还会在测量过程中检查既有预算；失败停止后续运行。模式与参数含义见 [驱动](../scripts/perf_native.py)，不以本页重述完整动作矩阵。
+
+## 阶段 C：最小宿主配合
+
+`split-ime` 在正常 fish / Wayland 宿主终端运行一次命令，自动完成准备、操作和断言。用户仅在右正文、左正文、minibuffer 三个目标依次按顶部提示完成“ni → Escape，再 ni → 提交你”，每一步等待下一条提示；不要额外编辑、移动 / 缩放或关闭测试窗口。输入法由用户照常启用与控制，脚本不全局注键、不代改输入法状态，避免全局注键的焦点检查与实际发送之间存在竞态。它只读写本批新建样本；结束或失败时尝试恢复原窗口焦点并核对，原窗口已关闭则报告无法恢复，不转而修改其他窗口输入法。任何失败保留日志和 STOP，不自动重试。
+
+测试覆盖三个实际输入目标，各执行预编辑取消与重新预编辑提交；共保存六张候选窗截图。为避免输入法 popup 位于窗口外而被裁掉，截图覆盖测试窗口所在的**整块显示器**，可能包含其他可见窗口；取得本轮测试同意前须说明这一范围，用户运行前先隐藏敏感内容。probe 内嵌正式 AppShell，仅顶部增加操作提示；准备分屏、切 view、取消 minibuffer 和保存使用正式命令路由中的合成 GPUI 键。拼音、Escape 和选择“你”提交由用户经真实输入法输入，通常空格首选为“你”；不是首选时请明确选“你”，不能改 fixture 预期或把环境配置差异静默算作通过。不能把合成准备命令表述为 OS 键盘覆盖。
+
+结果自动核对文本只提交一次、共享文本与独立 point、非目标无 marked、兼容 caret 在目标布局内、minibuffer 不修改正文、恢复原 view，以及最终独立磁盘字节。`result.json` 的成功只表示上述自动集成断言通过；不表示截图中的候选窗视觉位置已确认，更不是原生时延、GPU 或完整编辑功能矩阵通过。助手离线审查六张候选截图后，如仍有无法判断的视觉项目再明确请求用户补充观察。
 
 ## 显示设置：定向原生性能复测
 

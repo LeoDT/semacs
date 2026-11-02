@@ -1,126 +1,92 @@
-//! Buffer collection, activation / MRU order, and Emacs-style unique names.
-
 use std::collections::HashSet;
 use std::ops::{Index, IndexMut};
 use std::path::Path;
 
-use gpui_kit::{Entity, Subscription};
-
+use crate::buffer::{Buffer, BufferId};
 use crate::saves::SaveState;
-use crate::view::BufferView;
 
 pub(crate) struct BufferSlot {
-    pub view: Entity<BufferView>,
-    pub _subscription: Subscription,
+    pub buffer: Buffer,
     pub save: SaveState,
 }
 
 impl BufferSlot {
-    pub fn new(view: Entity<BufferView>, subscription: Subscription) -> Self {
+    pub fn new(buffer: Buffer) -> Self {
         Self {
-            view,
-            _subscription: subscription,
+            buffer,
             save: SaveState::default(),
         }
     }
+
+    pub fn id(&self) -> BufferId {
+        self.buffer.snapshot_id().buffer
+    }
 }
 
-/// Owns the buffer collection. `active` is the only buffer that may hold focus;
-/// `mru` keeps `other-buffer` and exit prompts in access order.
+/// Owns document state and save lifecycle independently of any editing view.
 pub(crate) struct BufferSet {
     slots: Vec<BufferSlot>,
-    active: usize,
-    mru: Vec<Entity<BufferView>>,
+    mru: Vec<BufferId>,
 }
 
 impl BufferSet {
     pub fn new(slot: BufferSlot) -> Self {
-        let view = slot.view.clone();
+        let id = slot.id();
         Self {
             slots: vec![slot],
-            active: 0,
-            mru: vec![view],
+            mru: vec![id],
         }
     }
 
     pub fn len(&self) -> usize {
         self.slots.len()
     }
-
     pub fn is_empty(&self) -> bool {
         self.slots.is_empty()
     }
-
     pub fn iter(&self) -> impl Iterator<Item = &BufferSlot> {
         self.slots.iter()
     }
 
     pub fn push(&mut self, slot: BufferSlot) -> usize {
-        let view = slot.view.clone();
+        let id = slot.id();
         self.slots.push(slot);
-        self.mru.retain(|existing| existing != &view);
-        self.mru.insert(0, view);
+        self.touch(id);
         self.slots.len() - 1
     }
 
-    /// Removes a slot and keeps `active` on a surviving buffer. The caller
-    /// restores input / focus when the active buffer was removed or the set was
-    /// emptied.
-    pub fn remove(&mut self, index: usize) -> BufferSlot {
-        let slot = self.slots.remove(index);
-        self.mru.retain(|view| view != &slot.view);
-        if index < self.active {
-            self.active -= 1;
-        } else if index == self.active {
-            self.active = self
-                .mru
-                .first()
-                .and_then(|view| self.index_of(view))
-                .unwrap_or(0);
-        }
-        slot
+    pub fn remove(&mut self, id: BufferId) -> Option<BufferSlot> {
+        let index = self.index_of(id)?;
+        self.mru.retain(|existing| *existing != id);
+        Some(self.slots.remove(index))
     }
 
-    pub fn index_of(&self, view: &Entity<BufferView>) -> Option<usize> {
-        self.slots.iter().position(|slot| &slot.view == view)
+    pub fn index_of(&self, id: BufferId) -> Option<usize> {
+        self.slots.iter().position(|slot| slot.id() == id)
     }
 
     pub fn get(&self, index: usize) -> Option<&BufferSlot> {
         self.slots.get(index)
     }
 
-    pub fn active_index(&self) -> usize {
-        self.active
+    pub fn touch(&mut self, id: BufferId) {
+        if self.index_of(id).is_some() {
+            self.mru.retain(|existing| *existing != id);
+            self.mru.insert(0, id);
+        }
     }
 
-    pub fn active_view(&self) -> &Entity<BufferView> {
-        &self.slots[self.active].view
-    }
-
-    pub fn set_active(&mut self, index: usize) {
-        debug_assert!(index < self.slots.len());
-        self.active = index;
-    }
-
-    pub fn touch(&mut self, view: &Entity<BufferView>) {
-        self.mru.retain(|existing| existing != view);
-        self.mru.insert(0, view.clone());
-    }
-
-    pub fn views_in_mru(&self) -> &[Entity<BufferView>] {
+    pub fn ids_in_mru(&self) -> &[BufferId] {
         &self.mru
     }
 
-    /// `other-buffer`: the most recently used buffer that is not active.
-    pub fn other_view(&self) -> Option<&Entity<BufferView>> {
-        let active = self.active_view();
-        self.mru.iter().find(|view| *view != active)
+    pub fn other_buffer(&self, current: BufferId) -> Option<BufferId> {
+        self.mru.iter().copied().find(|id| *id != current)
     }
 }
 
 impl Index<usize> for BufferSet {
     type Output = BufferSlot;
-
     fn index(&self, index: usize) -> &Self::Output {
         &self.slots[index]
     }

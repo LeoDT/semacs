@@ -112,7 +112,13 @@ fn retained_file_candidates_are_not_used_by_pending_actions_or_empty_results(
                     dir.path().join("b")
                 };
                 assert_eq!(
-                    shell.read(cx).active_view().read(cx).buffer().path(),
+                    shell
+                        .read(cx)
+                        .active_view()
+                        .read(cx)
+                        .buffer()
+                        .path()
+                        .as_deref(),
                     Some(path.as_path())
                 );
             });
@@ -222,7 +228,13 @@ fn directory_ret_enters_and_complete_directory_preselects_input_without_opening_
     visual.read(|cx| {
         assert!(shell.read(cx).session().is_none());
         assert_eq!(
-            shell.read(cx).active_view().read(cx).buffer().path(),
+            shell
+                .read(cx)
+                .active_view()
+                .read(cx)
+                .buffer()
+                .path()
+                .as_deref(),
             Some(child.as_path())
         );
         assert_eq!(body.read(cx).buffer().point(), ByteOffset(0));
@@ -281,7 +293,10 @@ fn raw_input_and_input_row_accept_new_paths_even_when_existing_names_match(
     visual.read(|cx| {
         assert!(shell.read(cx).session().is_none());
         let view = shell.read(cx).active_view().read(cx);
-        assert_eq!(view.buffer().path(), Some(dir.path().join("alp").as_path()));
+        assert_eq!(
+            view.buffer().path().as_deref(),
+            Some(dir.path().join("alp").as_path())
+        );
         assert!(view.buffer().text().is_empty());
     });
     assert!(!dir.path().join("alp").exists());

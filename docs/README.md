@@ -22,6 +22,8 @@ semacs 将 Emacs 的操作模型带到现代 GPU UI，不复刻 Emacs 外观或 
 | 材料 | 用途 |
 |---|---|
 | [候选式 minibuffer 本地验证](records/b-minibuffer-local.md) / [宿主验收](records/b-minibuffer-host.md) | 阶段 B 本地检查、headless 基线、用户人工确认及证据边界 |
+| [buffer / view 与 split 本地验证](records/c-split-local.md) / [验收自动化与多 view 基线](records/c-automation-local.md) / [真实 IME 宿主验收](records/c-split-host.md) | 阶段 C 本地回归、headless 基线及定向宿主证据与边界 |
+| [多 view 原生性能工具本地验证](records/c-native-performance-local.md) / [宿主验证](records/c-native-performance-host.md) | 阶段 C 定向原生自动测量的工具身份、离线检查、代表性性能结果及聚合基线边界 |
 | [显示设置验收](records/a-display-local.md) | 阶段 A 的固定证据及未测边界 |
 | [M2 / M3 验收](records/m2-m3-local.md) | 文件 / buffer 阶段验收、首屏诊断及修复的固定证据 |
 | [M1 性能验收](records/m1-performance.md) / [R1 验收](records/r1.md) | 已批准结论、当时环境、实测与限制 |

@@ -21,7 +21,7 @@ fn find_file_edit_save_preserves_bom_crlf_and_the_missing_final_newline(cx: &mut
     let view = active_view(&mut visual, &shell);
     visual.read(|cx| {
         let buffer = view.read(cx).buffer();
-        assert_eq!(buffer.path(), Some(path.as_path()));
+        assert_eq!(buffer.path().as_deref(), Some(path.as_path()));
         assert_eq!(buffer.text().to_string(), "a\nb");
         assert_eq!(
             buffer.format(),
@@ -189,7 +189,7 @@ fn failed_save_keeps_dirty_path_and_the_target_untouched(cx: &mut TestAppContext
         let view = view.read(cx);
         assert_eq!(view.buffer().text().to_string(), "Xbase");
         assert!(view.buffer().is_modified());
-        assert_eq!(view.buffer().path(), Some(path.as_path()));
+        assert_eq!(view.buffer().path().as_deref(), Some(path.as_path()));
         assert!(
             view.message()
                 .unwrap_or_default()
@@ -250,7 +250,7 @@ fn find_file_creates_a_new_empty_buffer_for_a_missing_path(cx: &mut TestAppConte
     let view = active_view(&mut visual, &shell);
     visual.read(|cx| {
         let buffer = view.read(cx).buffer();
-        assert_eq!(buffer.path(), Some(path.as_path()));
+        assert_eq!(buffer.path().as_deref(), Some(path.as_path()));
         assert_eq!(buffer.text().to_string(), "");
         assert!(!buffer.is_modified());
     });
@@ -347,7 +347,10 @@ fn find_file_completes_a_path_and_reuses_the_same_buffer(cx: &mut TestAppContext
     visual.simulate_keystrokes("enter");
     let first = active_view(&mut visual, &shell);
     visual.read(|cx| {
-        assert_eq!(first.read(cx).buffer().path(), Some(path.as_path()));
+        assert_eq!(
+            first.read(cx).buffer().path().as_deref(),
+            Some(path.as_path())
+        );
         assert_eq!(shell.read(cx).buffer_count(), 2);
     });
 
@@ -411,7 +414,13 @@ fn switch_to_buffer_completes_and_activates_another_buffer(cx: &mut TestAppConte
     visual.read(|cx| {
         assert_eq!(shell.read(cx).active_index(), beta_index);
         assert_eq!(
-            shell.read(cx).active_view().read(cx).buffer().path(),
+            shell
+                .read(cx)
+                .active_view()
+                .read(cx)
+                .buffer()
+                .path()
+                .as_deref(),
             Some(beta.as_path())
         );
     });
@@ -470,7 +479,13 @@ fn kill_buffer_replaces_the_last_buffer_and_confirms_dirty_buffers(cx: &mut Test
         assert_eq!(shell.read(cx).buffer_count(), 1);
         assert_eq!(shell.read(cx).active_index(), 0);
         assert_eq!(
-            shell.read(cx).active_view().read(cx).buffer().path(),
+            shell
+                .read(cx)
+                .active_view()
+                .read(cx)
+                .buffer()
+                .path()
+                .as_deref(),
             Some(beta.as_path())
         );
     });
@@ -497,7 +512,13 @@ fn kill_buffer_can_save_first(cx: &mut TestAppContext) {
         assert_eq!(shell.read(cx).buffer_count(), 1);
         assert_eq!(shell.read(cx).active_index(), 0);
         assert_eq!(
-            shell.read(cx).active_view().read(cx).buffer().path(),
+            shell
+                .read(cx)
+                .active_view()
+                .read(cx)
+                .buffer()
+                .path()
+                .as_deref(),
             Some(beta.as_path())
         );
     });
@@ -521,7 +542,7 @@ fn write_file_writes_bytes_and_updates_the_buffer_identity(cx: &mut TestAppConte
     redraw(&mut visual);
     visual.read(|cx| {
         let buffer = view.read(cx).buffer();
-        assert_eq!(buffer.path(), Some(target.as_path()));
+        assert_eq!(buffer.path().as_deref(), Some(target.as_path()));
         assert_eq!(buffer.display_name(), "target.txt");
         assert_eq!(buffer.text().to_string(), "oneX");
         assert!(!buffer.is_modified());
@@ -551,7 +572,10 @@ fn write_file_confirms_existing_targets_and_cancel_keeps_the_old_identity(cx: &m
     visual.simulate_keystrokes("n");
     redraw(&mut visual);
     visual.read(|cx| {
-        assert_eq!(view.read(cx).buffer().path(), Some(source.as_path()));
+        assert_eq!(
+            view.read(cx).buffer().path().as_deref(),
+            Some(source.as_path())
+        );
         assert_eq!(view.read(cx).message(), Some("Canceled"));
     });
     assert_eq!(fs::read(&target).unwrap(), b"old");
@@ -562,7 +586,10 @@ fn write_file_confirms_existing_targets_and_cancel_keeps_the_old_identity(cx: &m
     visual.simulate_keystrokes("y");
     redraw(&mut visual);
     visual.read(|cx| {
-        assert_eq!(view.read(cx).buffer().path(), Some(target.as_path()));
+        assert_eq!(
+            view.read(cx).buffer().path().as_deref(),
+            Some(target.as_path())
+        );
         assert!(!view.read(cx).buffer().is_modified());
     });
     assert_eq!(fs::read(&target).unwrap(), b"base");
@@ -591,7 +618,10 @@ fn externally_changed_files_need_explicit_confirmation(cx: &mut TestAppContext) 
     redraw(&mut visual);
     visual.read(|cx| {
         assert!(view.read(cx).buffer().is_modified());
-        assert_eq!(view.read(cx).buffer().path(), Some(path.as_path()));
+        assert_eq!(
+            view.read(cx).buffer().path().as_deref(),
+            Some(path.as_path())
+        );
     });
     assert_eq!(fs::read(&path).unwrap(), b"outside");
 

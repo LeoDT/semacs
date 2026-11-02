@@ -1,23 +1,24 @@
 use super::AppShell;
-use crate::buffer::Buffer;
+use crate::buffer::{Buffer, BufferId};
 use crate::buffers::{BufferSlot, available_name};
 use crate::exit::Closing;
 use crate::session::ReadKind;
 use crate::view::BufferView;
 use gpui_kit::{App, Context, Entity, Window};
 use std::collections::HashSet;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 impl AppShell {
-    /// Adds an inactive buffer and returns its index.
     pub fn create_buffer(
         &mut self,
         buffer: Buffer,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> usize {
-        let view = Self::create_view(buffer, window, cx);
-        self.insert_view(view, cx)
+        let index = self.buffers.push(BufferSlot::new(buffer));
+        self.rename_buffer(index, cx);
+        self.buffer_target(index, window, cx);
+        index
     }
 
     pub(super) fn insert_view(
@@ -25,8 +26,10 @@ impl AppShell {
         view: Entity<BufferView>,
         cx: &mut Context<Self>,
     ) -> usize {
-        let subscription = cx.observe(&view, |_, _, cx| cx.notify());
-        let index = self.buffers.push(BufferSlot::new(view, subscription));
+        let buffer = view.read(cx).buffer().new_view();
+        let id = buffer.snapshot_id().buffer;
+        let index = self.buffers.push(BufferSlot::new(buffer));
+        self.cache_view(*self.panes.selected(), id, view, cx);
         self.rename_buffer(index, cx);
         index
     }
@@ -35,46 +38,72 @@ impl AppShell {
         self.buffers.len()
     }
 
-    /// Gives only the new buffer a unique name. Existing buffers keep the names
-    /// they were created with, matching `emacs -Q` (no uniquify-style rename).
     pub(super) fn rename_buffer(&mut self, index: usize, cx: &mut Context<Self>) {
-        let (base, path) = {
-            let buffer = self.buffers[index].view.read(cx).buffer();
-            (buffer.base_name(), buffer.path().map(Path::to_path_buf))
-        };
+        let buffer = &self.buffers[index].buffer;
+        let (base, path) = (buffer.base_name(), buffer.path());
         let used: HashSet<String> = self
             .buffers
             .iter()
             .enumerate()
             .filter(|(other, _)| *other != index)
-            .map(|(_, slot)| slot.view.read(cx).buffer().display_name())
+            .map(|(_, slot)| slot.buffer.display_name())
             .collect();
         let name = available_name(&base, path.as_deref(), &used);
-        self.buffers[index]
-            .view
-            .update(cx, |view, cx| view.set_display_name(name, cx));
+        self.buffers[index].buffer.set_display_name(name);
+        self.refresh_buffer(self.buffers[index].id(), cx);
     }
 
     pub fn active_index(&self) -> usize {
-        self.buffers.active_index()
+        self.buffers
+            .index_of(self.body_panes[self.panes.selected()].current)
+            .expect("selected pane displays a live buffer")
     }
 
     pub fn active_view(&self) -> &Entity<BufferView> {
-        self.buffers.active_view()
+        self.body_panes[self.panes.selected()].active_view()
     }
 
     pub fn buffer_view(&self, index: usize) -> Option<&Entity<BufferView>> {
-        self.buffers.get(index).map(|slot| &slot.view)
+        let id = self.buffers.get(index)?.id();
+        self.body_panes[self.panes.selected()]
+            .editors
+            .get(&id)
+            .or_else(|| {
+                self.body_panes
+                    .values()
+                    .find_map(|pane| pane.editors.get(&id))
+            })
+            .map(|mount| &mount.view)
     }
 
-    /// A buffer's `default-directory`: its visited file's directory, or the
-    /// process startup directory for a buffer that has no file yet.
+    pub(super) fn buffer_index(&self, target: &Entity<BufferView>, cx: &App) -> Option<usize> {
+        self.buffers
+            .index_of(target.read(cx).buffer().snapshot_id().buffer)
+    }
+
+    pub(super) fn buffer_target(
+        &mut self,
+        index: usize,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Entity<BufferView> {
+        let id = self.buffers[index].id();
+        let pane = *self.panes.selected();
+        if let Some(mount) = self.body_panes[&pane].editors.get(&id) {
+            return mount.view.clone();
+        }
+        let buffer = self.buffers[index].buffer.new_view();
+        let view = Self::create_view(buffer, window, cx);
+        view.update(cx, |view, cx| view.suspend_input(cx));
+        self.cache_view(pane, id, view.clone(), cx);
+        view
+    }
+
     pub(super) fn default_directory_for(&self, view: &Entity<BufferView>, cx: &App) -> PathBuf {
         view.read(cx)
             .buffer()
             .path()
-            .and_then(Path::parent)
-            .map(Path::to_path_buf)
+            .and_then(|path| path.parent().map(ToOwned::to_owned))
             .unwrap_or_else(|| self.startup_directory.clone())
     }
 
@@ -84,31 +113,41 @@ impl AppShell {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let (modified, name) = {
-            let buffer = self.buffers[index].view.read(cx).buffer();
-            (buffer.is_modified(), buffer.display_name())
-        };
+        let buffer = &self.buffers[index].buffer;
+        let (modified, name) = (buffer.is_modified(), buffer.display_name());
         if modified {
-            let view = self.buffers[index].view.clone();
-            self.begin_read(ReadKind::KillBufferConfirm { name }, &view, "", window, cx);
+            let target = self.buffer_target(index, window, cx);
+            self.begin_read(
+                ReadKind::KillBufferConfirm { name },
+                &target,
+                "",
+                window,
+                cx,
+            );
         } else {
             self.remove_buffer(index, window, cx);
         }
     }
 
-    /// Activates an existing buffer. Switching only moves rendering and focus;
-    /// each buffer keeps its own point, mark, history, scroll and file identity.
-    /// Refused while a minibuffer session is open so it cannot be detached from
-    /// its target.
     pub fn activate(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) -> bool {
         if index >= self.buffers.len() || self.minibuffer.is_some() {
             return false;
         }
         self.cancel_file_open();
-        self.buffers.set_active(index);
-        let view = self.buffers.active_view().clone();
-        self.buffers.touch(&view);
-        view.update(cx, |view, cx| view.restore_input(window, cx));
+        let old = self.active_view().clone();
+        old.update(cx, |view, cx| view.suspend_input(cx));
+        let id = self.buffers[index].id();
+        let view = self.buffer_target(index, window, cx);
+        self.body_panes
+            .get_mut(self.panes.selected())
+            .unwrap()
+            .current = id;
+        self.buffers.touch(id);
+        self.update_selected_views(cx);
+        view.update(cx, |view, cx| {
+            view.invalidate_split_geometry();
+            view.restore_input(window, cx);
+        });
         cx.notify();
         true
     }
@@ -119,20 +158,49 @@ impl AppShell {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let was_active = index == self.buffers.active_index();
-        let removed = self.buffers.remove(index);
-        if matches!(&self.closing, Some(Closing::Kill(target)) if target == &removed.view) {
+        let id = self.buffers[index].id();
+        self.cancel_file_open();
+        if matches!(&self.closing, Some(Closing::Kill(target)) if *target == id) {
             self.closing = None;
         }
+        self.buffers.remove(id);
         if self.buffers.is_empty() {
-            let index = self.create_buffer(Buffer::scratch(), window, cx);
-            self.buffers.set_active(index);
-            let view = self.active_view().clone();
-            view.update(cx, |view, cx| view.restore_input(window, cx));
-        } else if was_active {
-            let view = self.active_view().clone();
-            view.update(cx, |view, cx| view.restore_input(window, cx));
+            self.create_buffer(Buffer::scratch(), window, cx);
         }
+        let replacement = self.buffers.ids_in_mru()[0];
+        let affected: Vec<_> = self
+            .body_panes
+            .iter()
+            .filter_map(|(pane_id, pane)| (pane.current == id).then_some(*pane_id))
+            .collect();
+        for pane_id in affected {
+            let view = if let Some(mount) = self.body_panes[&pane_id].editors.get(&replacement) {
+                mount.view.clone()
+            } else {
+                let index = self.buffers.index_of(replacement).unwrap();
+                let buffer = self.buffers[index].buffer.new_view();
+                let view = Self::create_view(buffer, window, cx);
+                self.cache_view(pane_id, replacement, view.clone(), cx);
+                view
+            };
+            self.body_panes.get_mut(&pane_id).unwrap().current = replacement;
+            view.update(cx, |view, cx| {
+                view.invalidate_split_geometry();
+                view.resume_accepting_input(cx);
+            });
+        }
+        for pane in self.body_panes.values_mut() {
+            if let Some(mount) = pane.editors.remove(&id) {
+                mount.view.update(cx, |view, cx| view.suspend_input(cx));
+            }
+        }
+        self.update_selected_views(cx);
+        let active = self.active_view().clone();
+        active.update(cx, |view, cx| view.restore_input(window, cx));
         cx.notify();
+    }
+
+    pub(super) fn active_buffer_id(&self) -> BufferId {
+        self.body_panes[self.panes.selected()].current
     }
 }

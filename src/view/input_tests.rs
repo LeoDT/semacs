@@ -578,7 +578,7 @@ fn actual_input_deltas_reuse_wrap_index_across_multiple_callbacks(cx: &mut TestA
         };
         assert_eq!(rows(index), rows(&full));
         let point = view.target.buffer().point();
-        assert!(range_to_utf16(view.target.buffer().text(), point..point).is_some());
+        assert!(range_to_utf16(&view.target.buffer().text(), point..point).is_some());
     });
 }
 

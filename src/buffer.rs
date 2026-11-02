@@ -1,6 +1,9 @@
-//! Authoritative committed text. Temporary platform composition lives in input.
+//! Shared committed documents and view-local points. Preedit lives in input.
 
+use std::cell::{Cell, RefCell};
 use std::ops::Range;
+use std::rc::{Rc, Weak};
+
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -81,9 +84,11 @@ pub enum EditError {
     TextReadOnly,
 }
 
-pub struct Buffer {
+struct Document {
     snapshot: BufferSnapshot,
-    point: ByteOffset,
+    revision: u64,
+    last_edit: Option<AppliedEdit>,
+    points: Vec<Weak<Cell<usize>>>,
     mark: Option<ByteOffset>,
     mark_active: bool,
     read_only: bool,
@@ -98,6 +103,21 @@ pub struct Buffer {
     history: history::History,
 }
 
+impl Document {
+    fn touch(&mut self) {
+        self.revision = self
+            .revision
+            .checked_add(1)
+            .expect("document revision exhausted");
+    }
+}
+
+pub struct Buffer {
+    document: Rc<RefCell<Document>>,
+    point: Rc<Cell<usize>>,
+    view_id: u64,
+}
+
 impl Buffer {
     pub fn scratch() -> Self {
         Self::new(
@@ -109,7 +129,6 @@ impl Buffer {
         )
     }
 
-    /// Visiting a path that does not exist starts an empty, unmodified buffer.
     pub fn new_file(path: PathBuf) -> Self {
         Self::new(
             Some(path),
@@ -121,70 +140,94 @@ impl Buffer {
     }
 
     pub fn new(path: Option<PathBuf>, file: DecodedFile) -> Self {
+        Self::from_text(path, Rope::from(file.text.as_str()), file.format)
+    }
+
+    pub(crate) fn from_text(path: Option<PathBuf>, text: Rope, format: FileFormat) -> Self {
         static NEXT_ID: AtomicU64 = AtomicU64::new(1);
         let id = NEXT_ID
             .try_update(Ordering::Relaxed, Ordering::Relaxed, |id| id.checked_add(1))
             .expect("buffer identity exhausted");
+        let view_id = next_view_id();
         let base_name = path
             .as_deref()
             .and_then(Path::file_name)
             .map(|name| name.to_string_lossy().into_owned())
             .unwrap_or_else(|| "*scratch*".to_owned());
-        let display_name = base_name.clone();
-        Self {
+        let point = Rc::new(Cell::new(0));
+        let points = vec![Rc::downgrade(&point)];
+        let document = Document {
             snapshot: BufferSnapshot {
                 id: SnapshotId {
                     buffer: BufferId(id),
                     version: TextVersion::default(),
                 },
-                text: Rope::from(file.text.as_str()),
+                text,
             },
-            point: ByteOffset(0),
+            revision: 0,
+            last_edit: None,
+            points,
             mark: None,
             mark_active: false,
             read_only: false,
             read_only_prefix: ByteOffset(0),
             path,
             identity: None,
-            base_name,
-            display_name,
+            base_name: base_name.clone(),
+            display_name: base_name,
             disk_stamp: None,
-            format: file.format,
+            format,
             modified: false,
             history: history::History::default(),
+        };
+        Self {
+            document: Rc::new(RefCell::new(document)),
+            point,
+            view_id,
         }
     }
 
-    /// Creates a buffer for a file whose text and metadata were read together.
+    pub fn new_view(&self) -> Buffer {
+        let point = Rc::new(Cell::new(self.point().0));
+        let mut doc = self.document.borrow_mut();
+        doc.points.retain(|point| point.strong_count() > 0);
+        doc.points.push(Rc::downgrade(&point));
+        Buffer {
+            document: self.document.clone(),
+            point,
+            view_id: next_view_id(),
+        }
+    }
+
     pub fn visiting(path: PathBuf, file: DecodedFile, stamp: Option<FileStamp>) -> Self {
         let mut buffer = Self::new(Some(path), file);
         buffer.set_disk_stamp(stamp);
         buffer
     }
 
-    /// Attaches the disk state a loader observed for this path. Intended for
-    /// loaders and tests that build a buffer without `files::load`.
     pub fn with_disk_stamp(mut self, stamp: Option<FileStamp>) -> Self {
         self.set_disk_stamp(stamp);
         self
     }
 
-    /// Creates an empty, unvisited buffer with an explicit name.
     pub fn named(name: &str) -> Self {
-        let mut buffer = Self::new(
+        let buffer = Self::new(
             None,
             DecodedFile {
                 text: String::new(),
                 format: FileFormat::default(),
             },
         );
-        buffer.base_name = name.to_owned();
-        buffer.display_name = name.to_owned();
+        {
+            let mut doc = buffer.document.borrow_mut();
+            doc.base_name = name.to_owned();
+            doc.display_name = name.to_owned();
+        }
         buffer
     }
 
     pub fn minibuffer(prompt: &str, initial: &str) -> Self {
-        let mut buffer = Self::new(
+        let buffer = Self::new(
             None,
             DecodedFile {
                 text: format!("{prompt}{initial}"),
@@ -193,177 +236,170 @@ impl Buffer {
         )
         .with_read_only_prefix(ByteOffset(prompt.len()))
         .expect("valid prompt boundary");
-        buffer.point = ByteOffset(buffer.text().len());
-        buffer.modified = true;
+        buffer.point.set(buffer.text().len());
+        buffer.document.borrow_mut().modified = true;
         buffer
     }
 
     pub fn with_read_only_prefix(mut self, end: ByteOffset) -> Result<Self, EditError> {
         self.validate_range(&(ByteOffset(0)..end))?;
-        self.read_only_prefix = end;
+        self.document.borrow_mut().read_only_prefix = end;
         self.break_history_group();
         Ok(self)
     }
-
     pub fn read_only_prefix(&self) -> ByteOffset {
-        self.read_only_prefix
+        self.document.borrow().read_only_prefix
     }
-
     pub fn check_writable_range(&self, range: Range<ByteOffset>) -> Result<(), EditError> {
         self.validate_range(&range)?;
-        if self.read_only {
+        let doc = self.document.borrow();
+        if doc.read_only {
             return Err(EditError::ReadOnly);
         }
-        if range.start < self.read_only_prefix {
+        if range.start < doc.read_only_prefix {
             return Err(EditError::TextReadOnly);
         }
         Ok(())
     }
+    pub(crate) fn revision(&self) -> u64 {
+        self.document.borrow().revision
+    }
+
+    pub(crate) fn last_edit(&self) -> Option<AppliedEdit> {
+        self.document.borrow().last_edit.clone()
+    }
 
     pub fn snapshot(&self) -> BufferSnapshot {
-        self.snapshot.clone()
+        self.document.borrow().snapshot.clone()
     }
-
     pub fn snapshot_id(&self) -> SnapshotId {
-        self.snapshot.id
+        self.document.borrow().snapshot.id
     }
-
-    pub fn text(&self) -> &Rope {
-        &self.snapshot.text
+    pub fn text(&self) -> Rope {
+        self.document.borrow_mut().snapshot.text.clone()
     }
-
     pub fn point(&self) -> ByteOffset {
-        self.point
+        ByteOffset(self.point.get())
     }
-
     pub fn set_point(&mut self, point: ByteOffset) -> Result<(), EditError> {
         if !self.text().is_char_boundary(point.0) {
             return Err(EditError::InvalidRange);
         }
-        self.point = point;
+        self.point.set(point.0);
         Ok(())
     }
-
     pub fn mark(&self) -> Option<ByteOffset> {
-        self.mark
+        self.document.borrow().mark
     }
-
     pub fn mark_active(&self) -> bool {
-        self.mark_active
+        self.document.borrow().mark_active
     }
-
     pub fn region(&self) -> Option<Range<ByteOffset>> {
         let mark = self
-            .mark
-            .filter(|mark| self.mark_active && *mark != self.point)?;
-        Some(self.point.min(mark)..self.point.max(mark))
+            .mark()
+            .filter(|mark| self.mark_active() && *mark != self.point())?;
+        Some(self.point().min(mark)..self.point().max(mark))
     }
-
     pub fn set_mark(&mut self, point: ByteOffset) -> Result<(), EditError> {
         if !self.text().is_char_boundary(point.0) {
             return Err(EditError::InvalidRange);
         }
-        self.mark = Some(point);
-        self.mark_active = true;
+        let mut doc = self.document.borrow_mut();
+        doc.mark = Some(point);
+        doc.mark_active = true;
+        doc.touch();
         Ok(())
     }
-
     pub fn deactivate_mark(&mut self) {
-        self.mark_active = false;
+        let mut doc = self.document.borrow_mut();
+        if doc.mark_active {
+            doc.mark_active = false;
+            doc.touch();
+        }
     }
-
     pub fn is_read_only(&self) -> bool {
-        self.read_only
+        self.document.borrow().read_only
     }
-
-    pub fn set_read_only(&mut self, read_only: bool) {
-        self.read_only = read_only;
+    pub fn set_read_only(&mut self, value: bool) {
+        let mut doc = self.document.borrow_mut();
+        doc.read_only = value;
+        doc.touch();
     }
-
     pub fn line_column(&self) -> (u32, usize) {
-        let point = self.text().offset_to_point(self.point.0);
-        let start = self
-            .text()
-            .point_to_offset(crate::text::Point::new(point.row, 0));
-        let summary = self
-            .text()
+        let text = self.text();
+        let point = text.offset_to_point(self.point().0);
+        let start = text.point_to_offset(crate::text::Point::new(point.row, 0));
+        let summary = text
             .cursor(start)
-            .summary::<crate::text::rope::TextSummary>(self.point.0);
+            .summary::<crate::text::rope::TextSummary>(self.point().0);
         (point.row + 1, summary.chars)
     }
-
-    pub fn path(&self) -> Option<&Path> {
-        self.path.as_deref()
+    pub fn path(&self) -> Option<PathBuf> {
+        self.document.borrow().path.clone()
     }
-
     pub fn display_name(&self) -> String {
-        self.display_name.clone()
+        self.document.borrow().display_name.clone()
     }
-
     pub fn base_name(&self) -> String {
-        self.base_name.clone()
+        self.document.borrow().base_name.clone()
     }
-
     pub(crate) fn set_display_name(&mut self, name: String) {
-        self.display_name = name;
+        let mut doc = self.document.borrow_mut();
+        doc.display_name = name;
+        doc.touch();
     }
-
     pub fn disk_stamp(&self) -> Option<FileStamp> {
-        self.disk_stamp
+        self.document.borrow().disk_stamp
     }
-
     pub fn identity(&self) -> Option<FileIdentity> {
-        self.identity
+        self.document.borrow().identity
     }
-
     pub(crate) fn set_disk_stamp(&mut self, stamp: Option<FileStamp>) {
-        self.identity = stamp.and_then(FileStamp::identity);
-        self.disk_stamp = stamp;
+        let mut d = self.document.borrow_mut();
+        d.identity = stamp.and_then(FileStamp::identity);
+        d.disk_stamp = stamp;
+        d.touch();
     }
-
-    /// Updates the visited file after a successful `write-file`.
     pub(crate) fn set_path(&mut self, path: PathBuf) {
-        self.base_name = path
+        let mut d = self.document.borrow_mut();
+        d.base_name = path
             .file_name()
-            .map(|name| name.to_string_lossy().into_owned())
+            .map(|n| n.to_string_lossy().into_owned())
             .unwrap_or_else(|| "*scratch*".to_owned());
-        self.display_name = self.base_name.clone();
-        self.path = Some(path);
+        d.display_name = d.base_name.clone();
+        d.path = Some(path);
+        d.touch();
     }
-
     pub fn format(&self) -> FileFormat {
-        self.format
+        self.document.borrow().format
     }
-
     pub fn is_modified(&self) -> bool {
-        self.modified
+        self.document.borrow().modified
     }
-
-    /// Every nonempty replacement is a committed edit, even with identical text.
     pub fn edit(&mut self, edit: Edit<'_>) -> Result<Option<AppliedEdit>, EditError> {
         self.edit_grouped(edit, EditGroup::Isolated)
     }
 
     fn validate_snapshot(&self, snapshot: SnapshotId) -> Result<(), EditError> {
-        if snapshot.buffer != self.snapshot.id.buffer {
+        let current = self.snapshot_id();
+        if snapshot.buffer != current.buffer {
             return Err(EditError::WrongTarget);
         }
-        if snapshot != self.snapshot.id {
+        if snapshot != current {
             return Err(EditError::StaleSnapshot);
         }
         Ok(())
     }
-
     fn validate_range(&self, range: &Range<ByteOffset>) -> Result<(), EditError> {
+        let text = self.text();
         if range.start > range.end
-            || !self.text().is_char_boundary(range.start.0)
-            || !self.text().is_char_boundary(range.end.0)
+            || !text.is_char_boundary(range.start.0)
+            || !text.is_char_boundary(range.end.0)
         {
             return Err(EditError::InvalidRange);
         }
         Ok(())
     }
-
     fn validate_edit(&self, edit: &Edit<'_>) -> Result<(), EditError> {
         self.validate_snapshot(edit.snapshot)?;
         self.validate_range(&edit.range)?;
@@ -372,13 +408,17 @@ impl Buffer {
         }
         Ok(())
     }
-
     fn apply_edit(&mut self, edit: Edit<'_>) -> Result<Option<AppliedEdit>, EditError> {
         self.validate_edit(&edit)?;
         if edit.range.is_empty() && edit.text.is_empty() {
             return Ok(None);
         }
-        let before = self.snapshot.id;
+        let mut doc = self.document.borrow_mut();
+        let before = doc.snapshot.id;
+        let old_end = edit.range.end.0;
+        let start = edit.range.start.0;
+        let removed = old_end - start;
+        let inserted = edit.text.len();
         let version = TextVersion(
             before
                 .version
@@ -386,27 +426,164 @@ impl Buffer {
                 .checked_add(1)
                 .expect("text version exhausted"),
         );
-        self.snapshot
-            .text
-            .replace(edit.range.start.0..edit.range.end.0, edit.text);
-        self.snapshot.id.version = version;
-        self.point = ByteOffset(edit.range.start.0 + edit.text.len());
-        if let Some(mark) = &mut self.mark {
-            if *mark > edit.range.end {
-                mark.0 = mark.0 - (edit.range.end.0 - edit.range.start.0) + edit.text.len();
-            } else if *mark > edit.range.start {
-                *mark = edit.range.start;
+        doc.snapshot.text.replace(start..old_end, edit.text);
+        doc.snapshot.id.version = version;
+        doc.points.retain(|weak| {
+            if let Some(point) = weak.upgrade() {
+                if !Rc::ptr_eq(&point, &self.point) {
+                    let p = point.get();
+                    let adjusted = if p <= start {
+                        p
+                    } else if p <= old_end {
+                        start
+                    } else {
+                        p - removed + inserted
+                    };
+                    point.set(adjusted);
+                }
+                true
+            } else {
+                false
+            }
+        });
+        self.point.set(start + inserted);
+        if let Some(mark) = &mut doc.mark {
+            if mark.0 > old_end {
+                mark.0 = mark.0 - removed + inserted;
+            } else if mark.0 > start {
+                *mark = ByteOffset(start);
             }
         }
-        self.deactivate_mark();
-        self.modified = true;
-
-        Ok(Some(AppliedEdit {
+        doc.mark_active = false;
+        doc.modified = true;
+        let after = doc.snapshot.id;
+        let applied = AppliedEdit {
             before,
-            after: self.snapshot.id,
-            new_range: edit.range.start..self.point,
+            after,
+            new_range: ByteOffset(start)..ByteOffset(start + inserted),
             old_range: edit.range,
             source: edit.source,
-        }))
+        };
+        doc.last_edit = Some(applied.clone());
+        doc.touch();
+        Ok(Some(applied))
+    }
+}
+
+fn next_view_id() -> u64 {
+    static NEXT: AtomicU64 = AtomicU64::new(1);
+    NEXT.try_update(Ordering::Relaxed, Ordering::Relaxed, |id| id.checked_add(1))
+        .expect("view identity exhausted")
+}
+
+#[cfg(test)]
+mod shared_tests {
+    use super::*;
+
+    fn replace(buffer: &mut Buffer, range: Range<usize>, value: &str) {
+        buffer
+            .edit(Edit {
+                snapshot: buffer.snapshot_id(),
+                range: ByteOffset(range.start)..ByteOffset(range.end),
+                text: value,
+                source: EditSource::Command,
+            })
+            .unwrap();
+    }
+
+    #[test]
+    fn views_share_text_and_adjust_independent_points() {
+        let mut first = Buffer::new(
+            None,
+            DecodedFile {
+                text: "abcd".into(),
+                format: FileFormat::default(),
+            },
+        );
+        first.set_point(ByteOffset(2)).unwrap();
+        let mut second = first.new_view();
+        second.set_point(ByteOffset(3)).unwrap();
+        replace(&mut first, 2..2, "XY");
+        assert_eq!(first.text().to_string(), "abXYcd");
+        assert_eq!(first.point(), ByteOffset(4));
+        assert_eq!(second.point(), ByteOffset(5));
+        let third = first.new_view();
+        assert_eq!(third.point(), ByteOffset(4));
+    }
+
+    #[test]
+    fn deletion_clamps_other_points_and_view_lifetime_is_independent() {
+        let mut first = Buffer::new(
+            None,
+            DecodedFile {
+                text: "abcdef".into(),
+                format: FileFormat::default(),
+            },
+        );
+        let mut second = first.new_view();
+        second.set_point(ByteOffset(4)).unwrap();
+        replace(&mut first, 2..5, "");
+        assert_eq!(second.point(), ByteOffset(2));
+        drop(second);
+        replace(&mut first, 0..1, "z");
+        assert_eq!(first.text().to_string(), "zbf");
+    }
+
+    #[test]
+    fn undo_and_redo_restore_only_the_calling_views_point() {
+        let mut first = Buffer::new(
+            None,
+            DecodedFile {
+                text: "abc".into(),
+                format: FileFormat::default(),
+            },
+        );
+        let mut second = first.new_view();
+        first.set_point(ByteOffset(1)).unwrap();
+        replace(&mut first, 1..1, "X");
+        first.set_point(ByteOffset(4)).unwrap();
+        second.undo().unwrap();
+        assert_eq!(second.point(), ByteOffset(1));
+        assert_eq!(first.point(), ByteOffset(3));
+        second.redo().unwrap();
+        assert_eq!(second.point(), ByteOffset(1));
+        assert_eq!(first.point(), ByteOffset(4));
+    }
+
+    #[test]
+    fn insertion_at_another_views_point_keeps_it_before_inserted_text() {
+        let mut first = Buffer::new(
+            None,
+            DecodedFile {
+                text: "abc".into(),
+                format: FileFormat::default(),
+            },
+        );
+        let mut second = first.new_view();
+        second.set_point(ByteOffset(1)).unwrap();
+        replace(&mut first, 1..1, "中");
+        assert_eq!(first.point(), ByteOffset(4));
+        assert_eq!(second.point(), ByteOffset(1));
+        drop(second);
+        replace(&mut first, 1..4, "");
+        assert_eq!(first.document.borrow().points.len(), 1);
+    }
+
+    #[test]
+    fn document_metadata_mark_and_save_state_are_shared() {
+        let mut first = Buffer::new_file(PathBuf::from("before.txt"));
+        let second = first.new_view();
+        first.set_mark(ByteOffset(0)).unwrap();
+        first.set_path(PathBuf::from("after.txt"));
+        first.set_disk_stamp(None);
+        assert_eq!(second.path(), Some(PathBuf::from("after.txt")));
+        assert_eq!(second.mark(), Some(ByteOffset(0)));
+        let save = first.begin_save();
+        replace(&mut first, 0..0, "x");
+        assert!(second.is_modified());
+        first.mark_saved_at(save).unwrap();
+        assert!(second.is_modified());
+        first.undo().unwrap();
+        assert!(!second.is_modified());
     }
 }

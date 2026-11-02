@@ -42,7 +42,7 @@ impl EditTarget {
         let copy = command == Command::KillRingSave;
         let (range, prepend) = if command == Command::KillLine {
             (
-                line_range(self.buffer.text(), point, self.field_range().end)?,
+                line_range(&self.buffer.text(), point, self.field_range().end)?,
                 false,
             )
         } else {

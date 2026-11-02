@@ -12,7 +12,7 @@ use gpui_kit::*;
 use unicode_segmentation::UnicodeSegmentation;
 
 use crate::appearance::FontSettings;
-use crate::buffer::{Buffer, EditError, SavePoint};
+use crate::buffer::{Buffer, BufferSnapshot};
 use crate::command::{Command, Scope};
 use crate::display::{FontMeasure, IndexedRow, LayoutKey, LayoutSettings, WrapIndex, WrapJob};
 use crate::editing::{
@@ -337,6 +337,10 @@ struct InputGeometry {
 
 pub struct BufferView {
     target: EditTarget,
+    observed_snapshot: BufferSnapshot,
+    observed_revision: u64,
+    selected: bool,
+    split_geometry_ready: bool,
     keymap: Keymap,
     focus: FocusHandle,
     settings: LayoutSettings,
@@ -383,6 +387,10 @@ impl BufferView {
             }
         });
         Self {
+            observed_snapshot: target.buffer().snapshot(),
+            observed_revision: target.buffer().revision(),
+            selected: true,
+            split_geometry_ready: false,
             target,
             keymap: Keymap::for_scope(Scope::Edit),
             focus: cx.focus_handle(),
@@ -423,47 +431,78 @@ impl BufferView {
         self.target.buffer()
     }
 
-    pub(crate) fn mark_saved_at(
-        &mut self,
-        point: SavePoint,
-        cx: &mut Context<Self>,
-    ) -> Result<(), EditError> {
-        let result = self.target.mark_saved_at(point);
-        cx.notify();
-        result
-    }
-
     pub(crate) fn set_read_only(&mut self, read_only: bool, cx: &mut Context<Self>) {
         self.target.set_read_only(read_only);
         self.invalidate_input_registration();
         cx.notify();
     }
 
-    pub(crate) fn begin_save(&mut self) -> SavePoint {
-        self.target.begin_save()
-    }
-
-    pub(crate) fn set_file_path(&mut self, path: std::path::PathBuf, cx: &mut Context<Self>) {
-        self.target.set_file_path(path);
-        cx.notify();
-    }
-
-    pub(crate) fn set_disk_stamp(
-        &mut self,
-        stamp: Option<crate::files::FileStamp>,
-        cx: &mut Context<Self>,
-    ) {
-        self.target.set_disk_stamp(stamp);
-        cx.notify();
-    }
-
-    pub(crate) fn set_display_name(&mut self, name: String, cx: &mut Context<Self>) {
-        self.target.set_display_name(name);
-        cx.notify();
-    }
     pub fn display_snapshot(&self) -> DisplaySnapshot {
         self.target.display_snapshot()
     }
+    pub(crate) fn buffer_changed(&self) -> bool {
+        self.buffer().revision() != self.observed_revision
+    }
+
+    pub(crate) fn synchronize_buffer(&mut self, cx: &mut Context<Self>) {
+        let revision = self.buffer().revision();
+        if revision == self.observed_revision {
+            return;
+        }
+        if let Some(change) = self
+            .target
+            .synchronize_buffer(self.observed_snapshot.text().len())
+        {
+            self.queue_change(change, cx);
+            self.invalidate_input_registration();
+            self.input_geometry = None;
+        }
+        self.observed_snapshot = self.buffer().snapshot();
+        self.observed_revision = revision;
+        cx.notify();
+    }
+
+    pub(crate) fn set_body_state(&mut self, visible: bool, selected: bool, cx: &mut Context<Self>) {
+        let selected = selected && visible;
+        if self.selected != selected || self.accepting_input != visible {
+            self.selected = selected;
+            self.accepting_input = visible;
+            cx.notify();
+        }
+    }
+
+    pub(crate) fn check_split(&self, axis: crate::panes::Axis) -> Result<(), &'static str> {
+        let bounds = self
+            .content_bounds
+            .filter(|_| self.split_geometry_ready)
+            .ok_or("Window layout not ready for splitting; try again")?;
+        let enough = match axis {
+            crate::panes::Axis::Horizontal => bounds.size.width >= px(320.),
+            crate::panes::Axis::Vertical => {
+                bounds.size.height >= self.settings.line_height * 6. + px(48.)
+            }
+        };
+        if enough {
+            Ok(())
+        } else {
+            Err("Window too small for splitting")
+        }
+    }
+
+    pub(crate) fn invalidate_split_geometry(&mut self) {
+        self.split_geometry_ready = false;
+    }
+
+    pub(crate) fn split_state(&self) -> (Buffer, Point<Pixels>) {
+        (self.buffer().new_view(), self.scroll)
+    }
+
+    pub(crate) fn initialize_scroll(&mut self, scroll: Point<Pixels>, cx: &mut Context<Self>) {
+        self.scroll = scroll;
+        self.reveal_caret = false;
+        cx.notify();
+    }
+
     pub fn line_height(&self) -> Pixels {
         self.settings.line_height
     }
@@ -589,6 +628,9 @@ impl BufferView {
     pub(crate) fn end_input(&mut self, cx: &mut Context<Self>) {
         if self.target.snapshot_for(self.target.token()).is_err() {
             return;
+        }
+        if self.target.is_pending() {
+            self.message = None;
         }
         let change = self.target.end_input();
         self.queue_change(change, cx);
@@ -871,6 +913,7 @@ impl BufferView {
         }
         let bounds = text_bounds(bounds);
         self.content_bounds = Some(bounds);
+        self.split_geometry_ready = true;
         self.ensure_index(bounds, cx);
         let index = self.index.as_ref().unwrap();
         if let Some(position) = self.pending_recenter
@@ -1152,6 +1195,8 @@ impl BufferView {
                 InputDisposition::Requested(command) => {
                     // The owner revokes input when it changes the target. An
                     // asynchronous request alone must not drop ongoing typing.
+                    self.message = None;
+                    cx.notify();
                     return KeyRoute::Requested(command);
                 }
                 InputDisposition::Ignored => return KeyRoute::Unhandled,
@@ -1347,7 +1392,11 @@ impl Element for TextCanvas {
                 layout,
                 cursor,
                 snapshot.marked_range(),
-                view.region_bounds(),
+                if view.selected {
+                    view.region_bounds()
+                } else {
+                    Vec::new()
+                },
             )
         };
         window.with_content_mask(
@@ -1423,6 +1472,8 @@ mod motion_tests;
 mod region_tests;
 #[cfg(test)]
 mod routing_tests;
+#[cfg(test)]
+mod split_tests;
 
 #[cfg(test)]
 mod tests {

@@ -29,6 +29,8 @@ mod diagnostic;
 mod m1;
 #[path = "support/native_m2.rs"]
 mod m2;
+#[path = "support/native_split.rs"]
+mod split;
 #[path = "support/m1_workload.rs"]
 mod workload;
 
@@ -99,6 +101,15 @@ fn collect_frames(
     paints: &RefCell<VecDeque<PaintState>>,
     window: &Window,
 ) -> Vec<(PresentedFrame, Option<PaintState>)> {
+    collect_paints(collector, paints, window, |paint| paint.at)
+}
+
+fn collect_paints<T>(
+    collector: &mut ForegroundJournalCollector,
+    paints: &RefCell<VecDeque<T>>,
+    window: &Window,
+    at: impl Fn(&T) -> Instant,
+) -> Vec<(PresentedFrame, Option<T>)> {
     let drained = collector.collect_unseen();
     assert_eq!(drained.lost, 0, "profiler overflow invalidates the run");
     let mut result = Vec::new();
@@ -106,24 +117,32 @@ fn collect_frames(
         if let ForegroundJournalEntry::Boundary(IntervalBoundary::Presented(frame)) = entry
             && frame.frame.window_id == window.window_handle().window_id()
         {
-            let mut paints = paints.borrow_mut();
-            while paints
-                .front()
-                .is_some_and(|paint| paint.at < frame.frame.draw_start)
-            {
-                paints.pop_front();
-            }
-            let paint = paints
-                .front()
-                .copied()
-                .filter(|paint| paint.at <= frame.frame.draw_end);
-            if paint.is_some() {
-                paints.pop_front();
-            }
+            let paint = take_paint(&mut paints.borrow_mut(), &frame, &at);
             result.push((frame, paint));
         }
     }
     result
+}
+
+fn take_paint<T>(
+    paints: &mut VecDeque<T>,
+    frame: &PresentedFrame,
+    at: impl Fn(&T) -> Instant,
+) -> Option<T> {
+    while paints
+        .front()
+        .is_some_and(|paint| at(paint) < frame.frame.draw_start)
+    {
+        paints.pop_front();
+    }
+    if paints
+        .front()
+        .is_some_and(|paint| at(paint) <= frame.frame.draw_end)
+    {
+        paints.pop_front()
+    } else {
+        None
+    }
 }
 
 struct Probe {
@@ -598,7 +617,7 @@ fn main() {
     let mut args = std::env::args_os().skip(1);
     let input =
         PathBuf::from(args.next().expect(
-            "expected MIXED_SAMPLE SAMPLE NEW_REPORT [--allow-software] [--external | --m1 | --m2-directory NEW_DIRECTORY]",
+            "expected MIXED_SAMPLE SAMPLE NEW_REPORT [--allow-software] [--external | --m1 | --m2-directory NEW_DIRECTORY | --split right|below]",
         ));
     let sample = args.next().expect("expected SAMPLE").into_string().unwrap();
     assert!(samples::NAMES.contains(&sample.as_str()));
@@ -607,6 +626,7 @@ fn main() {
     let mut allow_software = false;
     let mut external = false;
     let mut m1_mode = false;
+    let mut split_direction = None;
     let mut m2_directory = None;
     let mut m2_open_diagnostic = false;
     let mut config = m1::Config::default();
@@ -616,6 +636,12 @@ fn main() {
             "--allow-software" => allow_software = true,
             "--external" => external = true,
             "--m1" => m1_mode = true,
+            "--split" => {
+                let direction = args.next().expect("split direction: right or below");
+                let direction = direction.into_string().unwrap();
+                assert!(matches!(direction.as_str(), "right" | "below"));
+                split_direction = Some(direction);
+            }
             "--m2-open-diagnostic" => m2_open_diagnostic = true,
             "--m2-directory" => {
                 m2_directory = Some(PathBuf::from(args.next().expect("new M2 work directory")));
@@ -644,8 +670,12 @@ fn main() {
         }
     }
     assert!(
-        usize::from(external) + usize::from(m1_mode) + usize::from(m2_directory.is_some()) <= 1,
-        "external, M1 and M2 are separate measurements"
+        usize::from(external)
+            + usize::from(m1_mode)
+            + usize::from(m2_directory.is_some())
+            + usize::from(split_direction.is_some())
+            <= 1,
+        "external, M1, M2 and split are separate measurements"
     );
     assert!(!pacing_options || m1_mode, "pacing options require --m1");
     assert!(
@@ -657,6 +687,10 @@ fn main() {
         .expect("read deterministic mixed sample")
         .text;
     let text = samples::build(&sample, &mixed);
+    if let Some(direction) = split_direction {
+        split::run(text, sample, report, direction, allow_software);
+        return;
+    }
     let m2_directory = m2_directory.map(|directory| {
         m2::prepare(&directory, &text);
         directory

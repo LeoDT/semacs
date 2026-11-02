@@ -196,6 +196,14 @@ impl EditTarget {
         &self.input
     }
 
+    pub(crate) fn synchronize_buffer(&mut self, old_len: usize) -> Option<DisplayChange> {
+        let change = self.input.synchronize_buffer(&self.buffer, old_len)?;
+        self.keys.clear();
+        self.last_command = None;
+        self.goal_column = None;
+        Some(change)
+    }
+
     pub fn token(&self) -> SessionToken {
         self.input.token()
     }
@@ -215,18 +223,6 @@ impl EditTarget {
 
     pub fn begin_save(&mut self) -> SavePoint {
         self.buffer.begin_save()
-    }
-
-    pub(crate) fn set_file_path(&mut self, path: std::path::PathBuf) {
-        self.buffer.set_path(path);
-    }
-
-    pub(crate) fn set_disk_stamp(&mut self, stamp: Option<crate::files::FileStamp>) {
-        self.buffer.set_disk_stamp(stamp);
-    }
-
-    pub(crate) fn set_display_name(&mut self, name: String) {
-        self.buffer.set_display_name(name);
     }
 
     pub fn display_snapshot(&self) -> DisplaySnapshot {
@@ -418,7 +414,7 @@ impl EditTarget {
     ) -> Result<CommandOutcome, RouteError> {
         let point = self.buffer.point();
         let field = self.field_range();
-        let text = self.buffer.text();
+        let text = &self.buffer.text();
         let next = || {
             text.chars_at(point.0)
                 .next()

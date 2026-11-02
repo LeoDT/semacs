@@ -74,7 +74,10 @@ fn deleting_a_file_then_saving_recreates_it_without_an_external_change_prompt(
     redraw(&mut visual);
     visual.read(|cx| {
         assert!(shell.read(cx).session().is_none());
-        assert_eq!(view.read(cx).buffer().path(), Some(path.as_path()));
+        assert_eq!(
+            view.read(cx).buffer().path().as_deref(),
+            Some(path.as_path())
+        );
         assert!(!view.read(cx).buffer().is_modified());
     });
     assert_eq!(fs::read(&path).unwrap(), b"Xbase");
@@ -97,7 +100,7 @@ fn save_buffer_prompts_for_a_name_for_an_unvisited_buffer(cx: &mut TestAppContex
     visual.read(|cx| {
         assert!(shell.read(cx).session().is_none());
         let buffer = view.read(cx).buffer();
-        assert_eq!(buffer.path(), Some(target.as_path()));
+        assert_eq!(buffer.path().as_deref(), Some(target.as_path()));
         assert_eq!(buffer.display_name(), "saved.txt");
         assert!(!buffer.is_modified());
     });
@@ -141,7 +144,10 @@ fn find_file_reuses_the_file_object_for_links_and_dotdot(cx: &mut TestAppContext
     assert_eq!(first, linked, "a symlink must reuse its target buffer");
     visual.read(|cx| {
         assert_eq!(shell.read(cx).buffer_count(), 2);
-        assert_eq!(linked.read(cx).buffer().path(), Some(real.as_path()));
+        assert_eq!(
+            linked.read(cx).buffer().path().as_deref(),
+            Some(real.as_path())
+        );
     });
 
     let spelling = format!(
@@ -175,7 +181,13 @@ fn find_file_resolves_relative_paths_against_the_buffer_directory(cx: &mut TestA
     visual.read(|cx| {
         assert_eq!(shell.read(cx).buffer_count(), 2);
         assert_eq!(
-            shell.read(cx).active_view().read(cx).buffer().path(),
+            shell
+                .read(cx)
+                .active_view()
+                .read(cx)
+                .buffer()
+                .path()
+                .as_deref(),
             Some(other.as_path())
         );
     });
@@ -415,7 +427,13 @@ fn keyboard_only_open_edit_mx_save_switch_exit(cx: &mut TestAppContext) {
     redraw(&mut visual);
     visual.read(|cx| {
         assert_eq!(
-            shell.read(cx).active_view().read(cx).buffer().path(),
+            shell
+                .read(cx)
+                .active_view()
+                .read(cx)
+                .buffer()
+                .path()
+                .as_deref(),
             Some(target.as_path())
         )
     });
@@ -476,7 +494,10 @@ fn save_queued_behind_save_as_follows_the_new_file(cx: &mut TestAppContext) {
 
         visual.read(|cx| {
             assert!(shell.read(cx).session().is_none());
-            assert_eq!(view.read(cx).buffer().path(), Some(target.as_path()));
+            assert_eq!(
+                view.read(cx).buffer().path().as_deref(),
+                Some(target.as_path())
+            );
             assert!(!view.read(cx).buffer().is_modified());
         });
         assert_eq!(fs::read(&source).unwrap(), b"base");
@@ -543,7 +564,10 @@ fn failed_save_as_drops_dependent_saves_and_keeps_the_old_file(cx: &mut TestAppC
     redraw(&mut visual);
     visual.read(|cx| {
         assert!(shell.read(cx).session().is_none());
-        assert_eq!(view.read(cx).buffer().path(), Some(source.as_path()));
+        assert_eq!(
+            view.read(cx).buffer().path().as_deref(),
+            Some(source.as_path())
+        );
         assert_eq!(view.read(cx).buffer().text().to_string(), "XYbase");
         assert!(view.read(cx).buffer().is_modified());
         assert!(view.read(cx).message().unwrap().starts_with("Save failed:"));
@@ -572,7 +596,10 @@ fn canceled_save_as_drops_dependent_saves_and_allows_a_later_save(cx: &mut TestA
     redraw(&mut visual);
     visual.read(|cx| {
         assert!(shell.read(cx).session().is_none());
-        assert_eq!(view.read(cx).buffer().path(), Some(source.as_path()));
+        assert_eq!(
+            view.read(cx).buffer().path().as_deref(),
+            Some(source.as_path())
+        );
         assert!(view.read(cx).buffer().is_modified());
     });
     assert_eq!(fs::read(&source).unwrap(), b"base");
@@ -635,7 +662,13 @@ fn a_late_file_load_cannot_replace_a_new_read_session(cx: &mut TestAppContext) {
         assert!(shell.read(cx).session().is_none());
         assert_eq!(shell.read(cx).buffer_count(), 2);
         assert_eq!(
-            shell.read(cx).active_view().read(cx).buffer().path(),
+            shell
+                .read(cx)
+                .active_view()
+                .read(cx)
+                .buffer()
+                .path()
+                .as_deref(),
             Some(path.as_path())
         );
     });

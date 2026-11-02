@@ -48,7 +48,7 @@ pub fn open(
     buffer: Buffer,
     cx: &mut TestAppContext,
 ) -> (VisualTestContext, Entity<AppShell>, Entity<BufferView>) {
-    let buffer = match buffer.path().map(Path::to_path_buf) {
+    let buffer = match buffer.path() {
         Some(path) => buffer.with_disk_stamp(files::stamp(&path).unwrap()),
         None => buffer,
     };

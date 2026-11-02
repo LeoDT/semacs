@@ -5,9 +5,9 @@ use crate::saves::{SaveCompletion, SaveIntent, SaveOutcome, SaveRequest};
 use crate::session::ReadKind;
 use crate::view::{BufferView, InitialViewport};
 use gpui_kit::component::ActiveTheme;
-use gpui_kit::{AppContext, Bounds, Context, Entity, Pixels, Window};
+use gpui_kit::{App, AppContext, Bounds, Context, Entity, Pixels, Window};
 use std::io;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 #[cfg(test)]
 #[path = "opening_tests.rs"]
@@ -61,7 +61,7 @@ impl AppShell {
                     }
                     if shell.minibuffer.is_some()
                         || shell.active_view() != &opening.origin
-                        || shell.buffers.index_of(&opening.origin).is_none()
+                        || shell.buffer_index(&opening.origin, cx).is_none()
                     {
                         shell.cancel_file_open();
                         return;
@@ -73,7 +73,7 @@ impl AppShell {
                     }
                     let buffer = view.read(cx).buffer();
                     let existing = shell.buffers.iter().position(|slot| {
-                        let other = slot.view.read(cx).buffer();
+                        let other = &slot.buffer;
                         other.path() == buffer.path()
                             || (buffer.identity().is_some()
                                 && other.identity() == buffer.identity())
@@ -115,39 +115,45 @@ impl AppShell {
         let existing = self
             .buffers
             .iter()
-            .position(|slot| slot.view.read(cx).buffer().path() == Some(path.as_path()));
+            .position(|slot| slot.buffer.path().as_deref() == Some(path.as_path()));
         if let Some(index) = existing {
             self.activate(index, window, cx);
             return;
         }
         let origin = origin.clone();
+        let load_path = path.clone();
         self.file_task = Some(cx.spawn_in(window, async move |shell, cx| {
             let result = cx
                 .background_executor()
                 .spawn(async move {
-                    let buffer = match files::load(&path) {
-                        Ok(loaded) => Buffer::visiting(path.clone(), loaded.file, loaded.stamp),
+                    match files::load(&load_path) {
+                        Ok(loaded) => Ok((
+                            crate::text::Rope::from(loaded.file.text.as_str()),
+                            loaded.file.format,
+                            loaded.stamp,
+                        )),
                         Err(ReadError::Io(error)) if error.kind() == io::ErrorKind::NotFound => {
-                            Buffer::new_file(path.clone())
+                            Ok((crate::text::Rope::new(), Default::default(), None))
                         }
-                        Err(error) => return Err(format!("{}: {error}", path.display())),
-                    };
-                    Ok(buffer)
+                        Err(error) => Err(format!("{}: {error}", load_path.display())),
+                    }
                 })
                 .await;
             shell
                 .update_in(cx, |shell, window, cx| {
                     if shell.minibuffer.is_some()
                         || shell.active_view() != &origin
-                        || shell.buffers.index_of(&origin).is_none()
+                        || shell.buffer_index(&origin, cx).is_none()
                     {
                         return;
                     }
                     match result {
-                        Ok(buffer) => {
+                        Ok((text, format, stamp)) => {
+                            let buffer =
+                                Buffer::from_text(Some(path), text, format).with_disk_stamp(stamp);
                             let identity = buffer.identity();
                             let existing = shell.buffers.iter().position(|slot| {
-                                let other = slot.view.read(cx).buffer();
+                                let other = &slot.buffer;
                                 other.path() == buffer.path()
                                     || (identity.is_some() && other.identity() == identity)
                             });
@@ -186,11 +192,11 @@ impl AppShell {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
-        let Some(index) = self.buffers.index_of(target) else {
+        let Some(index) = self.buffer_index(target, cx) else {
             return false;
         };
         let saving = self.buffers[index].save.is_saving();
-        let buffer = target.read(cx).buffer();
+        let buffer = &self.buffers[index].buffer;
         if !saving && !buffer.is_modified() {
             self.show_message(target, "No changes need to be saved", cx);
             return false;
@@ -211,18 +217,19 @@ impl AppShell {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(index) = self.buffers.index_of(target) else {
+        let Some(index) = self.buffer_index(target, cx) else {
             return;
         };
-        let save_point = target.update(cx, |view, _| view.begin_save());
-        let buffer = target.read(cx).buffer();
+        let save_point = self.buffers[index].buffer.begin_save();
+        let generation = self.buffers[index].save.next_generation();
+        let buffer = &self.buffers[index].buffer;
         let request = SaveRequest {
-            generation: self.buffers[index].save.next_generation(),
+            generation,
             save_point,
             intent,
             confirmed: false,
             format: buffer.format(),
-            text: buffer.text().clone(),
+            text: buffer.text(),
         };
         if self.buffers[index].save.is_saving() {
             self.buffers[index].save.queue(request);
@@ -238,14 +245,15 @@ impl AppShell {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let view = self.buffers[index].view.clone();
-        let buffer = view.read(cx).buffer();
+        let buffer_id = self.buffers[index].id();
+        let buffer = &self.buffers[index].buffer;
         let path = match &request.intent {
-            SaveIntent::Current => buffer.path().map(Path::to_path_buf),
+            SaveIntent::Current => buffer.path(),
             SaveIntent::WriteFile(path) => Some(path.clone()),
         };
         let Some(path) = path else {
             self.buffers[index].save.take_pending();
+            let view = self.buffer_target(index, window, cx);
             self.after_save(
                 &view,
                 false,
@@ -263,7 +271,7 @@ impl AppShell {
                 .spawn(async move {
                     let result = request.write(&path, stamp);
                     SaveCompletion {
-                        view,
+                        buffer: buffer_id,
                         request,
                         path,
                         result,
@@ -285,19 +293,19 @@ impl AppShell {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if let Some(index) = self.buffers.index_of(target)
+        if let Some(index) = self.buffer_index(target, cx)
             && let Some(request) = self.buffers[index].save.confirm()
         {
             self.start_save(index, request, window, cx);
         }
     }
 
-    pub(super) fn cancel_save_confirmation(&mut self) {
+    pub(super) fn cancel_save_confirmation(&mut self, cx: &App) {
         if let Some(target) = self
             .session
             .as_ref()
             .map(|session| session.origin().clone())
-            && let Some(index) = self.buffers.index_of(&target)
+            && let Some(index) = self.buffer_index(&target, cx)
         {
             self.buffers[index].save.cancel_confirmation();
         }
@@ -310,12 +318,12 @@ impl AppShell {
         cx: &mut Context<Self>,
     ) {
         let SaveCompletion {
-            view,
+            buffer,
             request,
             path,
             result,
         } = completion;
-        let Some(index) = self.buffers.index_of(&view) else {
+        let Some(index) = self.buffers.index_of(buffer) else {
             return;
         };
         if !self.buffers[index].save.take_matching(&request) {
@@ -328,6 +336,7 @@ impl AppShell {
                     SaveIntent::Current => ReadKind::ExternalChange(path),
                     SaveIntent::WriteFile(_) => ReadKind::Overwrite(path),
                 };
+                let view = self.buffer_target(index, window, cx);
                 if self.begin_read(kind, &view, "", window, cx).is_some() {
                     self.buffers[index].save.await_confirmation(request);
                     return;
@@ -336,13 +345,15 @@ impl AppShell {
             }
             Ok(SaveOutcome::Written(stamp)) => {
                 let update_path = matches!(request.intent, SaveIntent::WriteFile(_));
-                view.update(cx, |view, cx| {
+                {
+                    let buffer = &mut self.buffers[index].buffer;
                     if update_path {
-                        view.set_file_path(path.clone(), cx);
+                        buffer.set_path(path.clone());
                     }
-                    view.set_disk_stamp(Some(stamp), cx);
-                    let _ = view.mark_saved_at(request.save_point, cx);
-                });
+                    buffer.set_disk_stamp(Some(stamp));
+                    let _ = buffer.mark_saved_at(request.save_point);
+                }
+                self.refresh_buffer(self.buffers[index].id(), cx);
                 if update_path {
                     self.rename_buffer(index, cx);
                 }
@@ -357,6 +368,7 @@ impl AppShell {
         if !saved {
             self.buffers[index].save.take_pending();
         }
+        let view = self.buffer_target(index, window, cx);
         self.after_save(&view, saved, message, window, cx);
         cx.notify();
     }

@@ -210,6 +210,37 @@ impl InputSession {
         }
     }
 
+    pub(crate) fn synchronize_buffer(
+        &mut self,
+        buffer: &Buffer,
+        old_len: usize,
+    ) -> Option<DisplayChange> {
+        if self.base == buffer.snapshot_id() {
+            return None;
+        }
+        let before = DisplayId {
+            committed: self.base,
+            session: self.token,
+            revision: self.revision,
+        };
+        let edit = buffer.last_edit().filter(|edit| edit.before == self.base);
+        let active = self.active;
+        *self = Self::new(buffer);
+        self.active = active;
+        Some(DisplayChange {
+            before,
+            after: self.display_id(buffer),
+            old_range: edit
+                .as_ref()
+                .map_or(ByteOffset(0)..ByteOffset(old_len), |edit| {
+                    edit.old_range.clone()
+                }),
+            new_range: edit.map_or(ByteOffset(0)..ByteOffset(buffer.text().len()), |edit| {
+                edit.new_range
+            }),
+        })
+    }
+
     pub fn token(&self) -> SessionToken {
         self.token
     }

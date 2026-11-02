@@ -2,12 +2,10 @@
 
 use std::collections::VecDeque;
 
-use gpui_kit::Entity;
-
-use crate::view::BufferView;
+use crate::buffer::BufferId;
 
 pub(crate) enum Closing {
-    Kill(Entity<BufferView>),
+    Kill(BufferId),
     Exit(ExitFlow),
 }
 
@@ -30,14 +28,9 @@ impl Closing {
         }
     }
 
-    pub fn after_save(
-        &mut self,
-        view: &Entity<BufferView>,
-        saved: bool,
-        modified: bool,
-    ) -> AfterSave {
+    pub fn after_save(&mut self, buffer: BufferId, saved: bool, modified: bool) -> AfterSave {
         match self {
-            Self::Kill(target) if target == view => {
+            Self::Kill(target) if *target == buffer => {
                 if !saved {
                     AfterSave::Cancel(None)
                 } else if modified {
@@ -46,7 +39,7 @@ impl Closing {
                     AfterSave::Kill
                 }
             }
-            Self::Exit(flow) if flow.is_waiting_for(view) => {
+            Self::Exit(flow) if flow.is_waiting_for(buffer) => {
                 flow.clear_waiting_save();
                 if !saved {
                     AfterSave::Cancel(None)
@@ -68,50 +61,47 @@ pub(crate) enum ExitBufferState {
 }
 
 pub(crate) enum ExitStep {
-    Ask(Entity<BufferView>),
+    Ask(BufferId),
     Wait,
     CheckRemaining,
 }
 
 pub(crate) struct ExitFlow {
-    remaining: VecDeque<Entity<BufferView>>,
-    waiting_save: Option<Entity<BufferView>>,
+    remaining: VecDeque<BufferId>,
+    waiting_save: Option<BufferId>,
 }
 
 impl ExitFlow {
-    pub fn new(remaining: impl IntoIterator<Item = Entity<BufferView>>) -> Self {
+    pub fn new(remaining: impl IntoIterator<Item = BufferId>) -> Self {
         Self {
             remaining: remaining.into_iter().collect(),
             waiting_save: None,
         }
     }
 
-    pub fn next(
-        &mut self,
-        mut state: impl FnMut(&Entity<BufferView>) -> Option<ExitBufferState>,
-    ) -> ExitStep {
-        while let Some(view) = self.remaining.pop_front() {
-            match state(&view) {
+    pub fn next(&mut self, mut state: impl FnMut(BufferId) -> Option<ExitBufferState>) -> ExitStep {
+        while let Some(buffer) = self.remaining.pop_front() {
+            match state(buffer) {
                 Some(ExitBufferState::Saving) => {
-                    self.waiting_save = Some(view);
+                    self.waiting_save = Some(buffer);
                     return ExitStep::Wait;
                 }
-                Some(ExitBufferState::Modified) => return ExitStep::Ask(view),
+                Some(ExitBufferState::Modified) => return ExitStep::Ask(buffer),
                 _ => {}
             }
         }
         ExitStep::CheckRemaining
     }
 
-    pub fn wait_for_save(&mut self, view: Entity<BufferView>) {
-        self.waiting_save = Some(view);
+    pub fn wait_for_save(&mut self, buffer: BufferId) {
+        self.waiting_save = Some(buffer);
     }
 
     pub fn clear_waiting_save(&mut self) {
         self.waiting_save = None;
     }
 
-    fn is_waiting_for(&self, view: &Entity<BufferView>) -> bool {
-        self.waiting_save.as_ref() == Some(view)
+    fn is_waiting_for(&self, buffer: BufferId) -> bool {
+        self.waiting_save == Some(buffer)
     }
 }

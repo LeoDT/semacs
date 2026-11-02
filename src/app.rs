@@ -1,7 +1,7 @@
+use std::collections::HashMap;
 use std::path::PathBuf;
 
 use gpui_kit::component::{ActiveTheme, v_flex};
-use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 
 use crate::buffer::Buffer;
@@ -21,6 +21,7 @@ mod candidates;
 mod closing;
 mod documents;
 mod reads;
+mod windows;
 
 impl Global for KillRing {}
 
@@ -40,6 +41,9 @@ struct MinibufferMount {
 /// may name inactive buffers; focus always returns to the active body view.
 pub struct AppShell {
     buffers: BufferSet,
+    panes: crate::panes::Panes<u64>,
+    body_panes: HashMap<u64, windows::BodyPane>,
+    next_pane: u64,
     application_keymap: Keymap,
     startup_directory: PathBuf,
     minibuffer: Option<MinibufferMount>,
@@ -53,8 +57,11 @@ pub struct AppShell {
 
 impl AppShell {
     pub fn new(buffer: Buffer, window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let registry_buffer = buffer.new_view();
+        let buffer_id = buffer.snapshot_id().buffer;
         let view = Self::create_view(buffer, window, cx);
-        let subscription = cx.observe(&view, |_, _, cx| cx.notify());
+        let subscription = cx.observe(&view, Self::view_changed);
+        let pane = windows::BodyPane::new(buffer_id, view.clone(), subscription);
         let owner = window.window_handle();
         let shell = cx.weak_entity();
         let keys_shell = shell.clone();
@@ -81,9 +88,12 @@ impl AppShell {
                 .update(cx, |shell, cx| shell.request_close(window, cx))
                 .unwrap_or(true)
         });
-        window.focus(&view.focus_handle(cx), cx);
+        view.update(cx, |view, cx| view.restore_input(window, cx));
         Self {
-            buffers: BufferSet::new(BufferSlot::new(view, subscription)),
+            buffers: BufferSet::new(BufferSlot::new(registry_buffer)),
+            panes: crate::panes::Panes::new(0),
+            body_panes: HashMap::from([(0, pane)]),
+            next_pane: 1,
             application_keymap: Keymap::for_scope(Scope::Application),
             startup_directory: std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
             minibuffer: None,
@@ -102,7 +112,10 @@ impl AppShell {
         cx: &mut Context<Self>,
     ) -> Entity<BufferView> {
         let view = cx.new(|cx| BufferView::new(buffer, cx));
-        view.update(cx, |view, cx| view.install_input_lifecycle(window, cx));
+        view.update(cx, |view, cx| {
+            view.install_input_lifecycle(window, cx);
+            view.suspend_input(cx);
+        });
         view
     }
 
@@ -220,13 +233,21 @@ impl AppShell {
             Command::SwitchToBuffer => {
                 let default = self
                     .buffers
-                    .other_view()
-                    .map(|view| view.read(cx).buffer().display_name());
+                    .other_buffer(self.active_buffer_id())
+                    .and_then(|id| self.buffers.index_of(id))
+                    .map(|index| self.buffers[index].buffer.display_name());
                 self.begin_read(ReadKind::SwitchToBuffer { default }, origin, "", window, cx);
             }
             Command::KillBuffer => {
                 let default = origin.read(cx).buffer().display_name();
                 self.begin_read(ReadKind::KillBuffer { default }, origin, "", window, cx);
+            }
+            Command::SplitWindowBelow
+            | Command::SplitWindowRight
+            | Command::OtherWindow
+            | Command::DeleteWindow
+            | Command::DeleteOtherWindows => {
+                self.window_command(command, window, cx);
             }
             Command::SaveBuffersKillTerminal => {
                 if self.begin_exit(window, cx) {
@@ -259,7 +280,7 @@ impl AppShell {
         message: impl Into<String>,
         cx: &mut Context<Self>,
     ) {
-        let view = if self.buffers.index_of(target) == Some(self.buffers.active_index()) {
+        let view = if target == self.active_view() {
             target.clone()
         } else {
             self.active_view().clone()
@@ -278,46 +299,19 @@ impl AppShell {
 
 impl Render for AppShell {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let editor = self.active_view().clone();
-        let buffer = editor.read(cx).buffer();
-        let position = buffer.line_column();
-        let mode_line = frame::mode_line(
-            buffer.display_name(),
-            buffer.format(),
-            buffer.is_modified(),
-            position,
-            cx,
-        );
+        let body = self.render_panes(self.panes.root(), cx);
         let message = self.echo_message(window, cx);
         let echo_area = frame::echo_area(&message, cx);
         let minibuffer = self
             .minibuffer
             .as_ref()
             .map(|minibuffer| minibuffer.view.clone());
-        let shell = cx.weak_entity();
         v_flex()
             .id("app")
             .size_full()
             .bg(cx.theme().background)
             .text_color(cx.theme().foreground)
-            .child(
-                v_flex()
-                    .flex_1()
-                    .min_h_0()
-                    .child(editor)
-                    .when(self.opening.is_some(), |body| {
-                        body.on_children_prepainted(move |bounds, window, cx| {
-                            if let Some(bounds) = bounds.first() {
-                                shell
-                                    .update(cx, |shell, cx| {
-                                        shell.prepare_opening(*bounds, window, cx)
-                                    })
-                                    .ok();
-                            }
-                        })
-                    }),
-            )
-            .child(mode_line)
+            .child(body)
             .children(minibuffer)
             .child(echo_area)
     }

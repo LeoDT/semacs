@@ -1,9 +1,9 @@
 use super::AppShell;
+use crate::buffer::BufferId;
 use crate::exit::{AfterSave, Closing, ExitBufferState, ExitFlow, ExitStep};
 use crate::session::{ReadKind, ReadSession};
 use crate::view::BufferView;
 use gpui_kit::{Context, Entity, Window};
-use std::path::Path;
 
 impl AppShell {
     pub(super) fn exiting(&self) -> bool {
@@ -14,9 +14,9 @@ impl AppShell {
         self.closing = None;
     }
 
-    pub(super) fn wait_for_save(&mut self, view: &Entity<BufferView>) {
+    pub(super) fn wait_for_save(&mut self, buffer: BufferId) {
         if let Some(flow) = self.closing.as_mut().and_then(Closing::exit_mut) {
-            flow.wait_for_save(view.clone());
+            flow.wait_for_save(buffer);
         }
     }
 
@@ -45,14 +45,18 @@ impl AppShell {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let modified = view.read(cx).buffer().is_modified();
+        let buffer = view.read(cx).buffer().snapshot_id().buffer;
+        let modified = self
+            .buffers
+            .index_of(buffer)
+            .is_some_and(|i| self.buffers[i].buffer.is_modified());
         let action = self.closing.as_mut().map_or(AfterSave::Message, |closing| {
-            closing.after_save(view, saved, modified)
+            closing.after_save(buffer, saved, modified)
         });
         match action {
             AfterSave::Kill => {
                 self.cancel_closing();
-                if let Some(index) = self.buffers.index_of(view) {
+                if let Some(index) = self.buffer_index(view, cx) {
                     self.remove_buffer(index, window, cx);
                 }
             }
@@ -71,14 +75,14 @@ impl AppShell {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(index) = self.buffers.index_of(target) else {
+        let Some(index) = self.buffer_index(target, cx) else {
             return;
         };
-        if !target.read(cx).buffer().is_modified() && !self.buffers[index].save.is_saving() {
+        if !self.buffers[index].buffer.is_modified() && !self.buffers[index].save.is_saving() {
             self.remove_buffer(index, window, cx);
             return;
         }
-        self.closing = Some(Closing::Kill(target.clone()));
+        self.closing = Some(Closing::Kill(target.read(cx).buffer().snapshot_id().buffer));
         if !self.save_buffer(target, window, cx) {
             self.cancel_closing();
         }
@@ -89,7 +93,7 @@ impl AppShell {
             return false;
         }
         if let Some(id) = self.session.as_ref().map(ReadSession::id) {
-            self.cancel_save_confirmation();
+            self.cancel_save_confirmation(cx);
             self.end_session(id, window, cx);
         }
         self.begin_exit(window, cx)
@@ -103,14 +107,14 @@ impl AppShell {
         self.end_all_input(cx);
         let remaining: Vec<_> = self
             .buffers
-            .views_in_mru()
+            .ids_in_mru()
             .iter()
-            .filter(|view| {
-                self.buffers.index_of(view).is_some_and(|index| {
-                    self.buffers[index].save.is_saving() || view.read(cx).buffer().is_modified()
+            .copied()
+            .filter(|id| {
+                self.buffers.index_of(*id).is_some_and(|index| {
+                    self.buffers[index].save.is_saving() || self.buffers[index].buffer.is_modified()
                 })
             })
-            .cloned()
             .collect();
         if remaining.is_empty() {
             return true;
@@ -124,11 +128,11 @@ impl AppShell {
         let Some(flow) = self.closing.as_mut().and_then(Closing::exit_mut) else {
             return;
         };
-        let step = flow.next(|view| {
-            self.buffers.index_of(view).map(|index| {
+        let step = flow.next(|id| {
+            self.buffers.index_of(id).map(|index| {
                 if self.buffers[index].save.is_saving() {
                     ExitBufferState::Saving
-                } else if view.read(cx).buffer().is_modified() {
+                } else if self.buffers[index].buffer.is_modified() {
                     ExitBufferState::Modified
                 } else {
                     ExitBufferState::Clean
@@ -137,23 +141,23 @@ impl AppShell {
         });
         match step {
             ExitStep::Wait => {}
-            ExitStep::Ask(target) => {
-                let buffer = target.read(cx).buffer();
-                let kind = ReadKind::ExitSave {
-                    path: buffer.path().map(Path::to_path_buf),
-                    name: buffer.display_name(),
+            ExitStep::Ask(id) => {
+                let Some(index) = self.buffers.index_of(id) else {
+                    return;
                 };
+                let (path, name) = (
+                    self.buffers[index].buffer.path(),
+                    self.buffers[index].buffer.display_name(),
+                );
+                let target = self.buffer_target(index, window, cx);
+                let kind = ReadKind::ExitSave { path, name };
                 if self.begin_read(kind, &target, "", window, cx).is_none() {
                     self.cancel_closing();
                     self.show_message(&target, "Cannot confirm exit; exit canceled", cx);
                 }
             }
             ExitStep::CheckRemaining => {
-                if self
-                    .buffers
-                    .iter()
-                    .any(|slot| slot.view.read(cx).buffer().is_modified())
-                {
+                if self.buffers.iter().any(|slot| slot.buffer.is_modified()) {
                     let origin = self.active_view().clone();
                     if self
                         .begin_read(ReadKind::ExitModified, &origin, "", window, cx)
@@ -176,8 +180,8 @@ impl AppShell {
     }
 
     pub(super) fn end_all_input(&mut self, cx: &mut Context<Self>) {
-        for slot in self.buffers.iter() {
-            slot.view.update(cx, |view, cx| view.end_input(cx));
+        for view in self.all_views() {
+            view.update(cx, |view, cx| view.end_input(cx));
         }
         if let Some(minibuffer) = &self.minibuffer {
             let editor = minibuffer.view.read(cx).editor().clone();

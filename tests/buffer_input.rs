@@ -67,7 +67,10 @@ fn startup_buffers_are_clean_and_preserve_new_file_identity() {
     assert_eq!(Buffer::scratch().path(), None);
     assert_eq!(Buffer::scratch().display_name(), "*scratch*");
     let new = Buffer::new_file(PathBuf::from("notes.txt"));
-    assert_eq!(new.path(), Some(PathBuf::from("notes.txt").as_path()));
+    assert_eq!(
+        new.path().as_deref(),
+        Some(PathBuf::from("notes.txt").as_path())
+    );
     assert_eq!(new.display_name(), "notes.txt");
 }
 
@@ -87,7 +90,10 @@ fn persistent_snapshots_version_every_replacement_and_preserve_format() {
     let before = buffer.snapshot();
     assert!(!buffer.is_modified());
     assert_eq!(buffer.display_name(), "notes.txt");
-    assert_eq!(buffer.path(), Some(PathBuf::from("notes.txt").as_path()));
+    assert_eq!(
+        buffer.path().as_deref(),
+        Some(PathBuf::from("notes.txt").as_path())
+    );
     assert_eq!(buffer.format(), format);
     assert_eq!(buffer.text().max_point(), Point::new(2, 0));
     let change = buffer

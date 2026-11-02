@@ -103,7 +103,7 @@ fn activating_buffers_only_moves_rendering_and_focus(cx: &mut TestAppContext) {
         let buffer = view.buffer();
         assert!(buffer.mark_active());
         assert_eq!(
-            buffer.path(),
+            buffer.path().as_deref(),
             Some(std::path::Path::new("/tmp/semacs-a.txt"))
         );
         assert!(buffer.is_modified());

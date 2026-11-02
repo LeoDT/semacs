@@ -452,7 +452,70 @@ def read_open_diagnostic(path, software, succeeded):
     return rows
 
 
-def read_report(path, software, ime, m1=None, m2=False):
+SPLIT_PHASES = (
+    ["boot", "split-and-select", "peer-scroll", "select-first", "insert", "delete",
+     "newline", "join", "burst-insert", "burst-delete"]
+    + ["scroll"] * 30 + ["resize", "font"] + ["forced"] * 30 + ["idle"]
+)
+
+
+def validate_split_report(content, rows, software, direction, sample):
+    if (sample not in SAMPLES or f"# mode=split; direction={direction}; sample={sample}; release=true; graphics=" not in content):
+        raise RuntimeError("split report mode / direction / release mismatch")
+    verdict = "not-applicable" if software else "true"
+    if (f"selected_budget_passed={verdict}; all_view_budget=not-established;" not in content
+            or [row["phase"] for row in rows] != SPLIT_PHASES):
+        raise RuntimeError("incomplete or reordered split report / verdict")
+    selected = [row.get("selected_view") for row in rows]
+    if (not all(selected) or selected[0] != selected[3]
+            or selected[1] == selected[0] or selected[2] != selected[1]
+            or any(value != selected[0] for value in selected[3:])):
+        raise RuntimeError("split view selection identity mismatch")
+    for index, row in enumerate(rows):
+        phase = row["phase"]
+        values = {key: metric(row, key) for key in (
+            "views", "action_cpu_ms", "draw_cpu_max_ms", "frames", "missing_observations",
+            "blank_frames", "idle_ticks", "min_visible_rows", "fully_indexed_views",
+            "bytes", "width_px", "height_px", "observed_elapsed_ms",
+        )}
+        views = 1 if index == 0 else 2
+        if (values["views"] != views or values["fully_indexed_views"] != views
+                or values["missing_observations"] or values["blank_frames"]
+                or values["min_visible_rows"] < 1 or values["bytes"] < 8 * 1024 * 1024
+                or not values["width_px"] or not values["height_px"]
+                or row.get("shared_text_verified") != "true"):
+            raise RuntimeError(f"split body / shared text verification failed: {row}")
+        limits = {"draw_cpu_max_ms": 16}
+        if phase == "idle":
+            if (row.get("status") != "idle" or values["frames"] != 0
+                    or values["idle_ticks"] != 30 or any(row.get(key) != "" for key in (
+                        "first_frame_submit_ms", "first_submit_ms", "ready_submit_ms", "all_ready_submit_ms"))):
+                raise RuntimeError(f"invalid split idle observation: {row}")
+        else:
+            for key in ("first_frame_submit_ms", "first_submit_ms", "ready_submit_ms", "all_ready_submit_ms"):
+                values[key] = metric(row, key)
+            if (row.get("status") != "ready" or values["frames"] < 1
+                    or values["frames"] != int(values["frames"]) or values["idle_ticks"] != 0
+                    or not (values["first_frame_submit_ms"] <= values["first_submit_ms"]
+                            <= values["ready_submit_ms"] <= values["all_ready_submit_ms"]
+                            <= values["observed_elapsed_ms"])):
+                raise RuntimeError(f"invalid split submission boundaries: {row}")
+            if phase == "boot":
+                limits.update(first_submit_ms=250, ready_submit_ms=500)
+            elif phase in ("insert", "delete", "newline", "join"):
+                limits.update(action_cpu_ms=2, first_submit_ms=16, ready_submit_ms=300)
+            elif phase in ("burst-insert", "burst-delete"):
+                limits.update(action_cpu_ms=50, first_submit_ms=50, ready_submit_ms=300)
+            elif phase in ("peer-scroll", "scroll"):
+                limits["first_submit_ms"] = 4
+            elif phase == "forced":
+                limits["first_submit_ms"] = 2
+            elif phase in ("resize", "font"):
+                limits.update(first_frame_submit_ms=50, ready_submit_ms=300)
+        check_limits(row, values, limits, software)
+
+
+def read_report(path, software, ime, m1=None, m2=False, split=None, sample=None):
     content = path.read_text()
     if "# completed=true;" not in content:
         raise RuntimeError(f"incomplete report {path}")
@@ -460,6 +523,9 @@ def read_report(path, software, ime, m1=None, m2=False):
     if renderer not in content:
         raise RuntimeError(f"unexpected renderer class in {path}")
     rows = list(csv.DictReader(line for line in content.splitlines() if not line.startswith("#")))
+    if split is not None:
+        validate_split_report(content, rows, software, split, sample)
+        return rows
     if m1 is not None:
         validate_m1_report(content, rows, software, *m1)
         return rows
@@ -497,6 +563,8 @@ def run_probe(args, desktop, sample, run):
         invocation.extend(["--m2-directory", str(stem.with_suffix(".files"))])
     if getattr(args, "m2_open_diagnostic", False):
         invocation.append("--m2-open-diagnostic")
+    if getattr(args, "split", None):
+        invocation.extend(["--split", args.split])
     if args.m1:
         invocation.extend(["--m1", "--duration-seconds", str(args.duration_seconds),
                            "--interval-ms", str(args.interval_ms)])
@@ -536,7 +604,7 @@ def run_probe(args, desktop, sample, run):
                 verify_m2_files(stem.with_suffix(".files"), open_diagnostic=True)
                 return diagnostic_rows
             pacing = (args.duration_seconds, args.interval_ms) if args.m1 else None
-            rows = read_report(report, args.software, args.ime, pacing, getattr(args, "m2", False))
+            rows = read_report(report, args.software, args.ime, pacing, getattr(args, "m2", False), getattr(args, "split", None), sample)
             if getattr(args, "m2", False):
                 verify_m2_files(stem.with_suffix(".files"))
             return rows
@@ -560,6 +628,7 @@ def main():
     parser.add_argument("--consent", action="store_true", help="authorize independent native test windows")
     parser.add_argument("--software", action="store_true", help="diagnostic only, never hardware acceptance")
     mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--split", choices=("right", "below"), help="shared-buffer dual-view CPU/submission measurements; all-view ready is baseline only")
     mode.add_argument("--ime", action="store_true", help="real Wayland/fcitx5 Pinyin; requires Hyprland/wtype")
     mode.add_argument("--m2-open-diagnostic", action="store_true", help="one mixed-file open only; buffered frame / slow-view diagnostic, NOT acceptance")
     mode.add_argument("--m2", action="store_true", help="M2 file / save / switch / completion / lifecycle baseline")
@@ -589,6 +658,8 @@ def main():
             parser.error("M1 requires duration 1..600 seconds and interval 20..1000 ms")
     if args.ime and (not args.hyprland_instance or not os.environ.get("WAYLAND_DISPLAY")):
         parser.error("--ime requires the actual Wayland/Hyprland session environment")
+    if args.split and args.sample is None:
+        args.sample = ["mixed", "single-ascii"]
     args.input = args.input.resolve(strict=True)
     if args.input.stat().st_size < 8 * 1024 * 1024:
         parser.error("R1 mixed fixture must be at least 8 MiB; use scripts/perf_sample.py")
@@ -598,8 +669,11 @@ def main():
     digest = hashlib.sha256(args.input.read_bytes()).hexdigest()
     metadata = {
         "uname": list(os.uname()), "software_diagnostic": args.software,
-        "ime": args.ime, "m1": args.m1, "m2": args.m2,
-        "m2_open_diagnostic": args.m2_open_diagnostic, "acceptance": not args.m2_open_diagnostic,
+        "ime": args.ime, "m1": args.m1, "m2": args.m2, "split": args.split,
+        "all_view_ready_budget": "not-established" if args.split else None,
+        "m2_open_diagnostic": args.m2_open_diagnostic,
+        "acceptance": not (args.m2_open_diagnostic or args.split),
+        "measurement_scope": "selected-view-budgets-and-all-view-baseline" if args.split else None,
         "duration_seconds": args.duration_seconds,
         "interval_ms": args.interval_ms, "runs": args.runs, "samples": args.sample or list(SAMPLES),
         "fixture_sha256": digest,
@@ -636,6 +710,7 @@ def main():
                     for key in (
                         "first_submit_ms", "ready_submit_ms", "draw_cpu_max_ms",
                         "action_cpu_ms", "blank_frames", "first_frame_submit_ms", "schedule_lag_ms",
+                        "all_ready_submit_ms",
                         "save_action_cpu_ms", "save_observed_ms", "result_observed_ms",
                         "rss_kib", "retained_closed_views",
                     ):
@@ -645,6 +720,7 @@ def main():
         metadata["completed"] = True
     except Exception as error:
         metadata["error"] = str(error)
+        (args.output / "STOP.txt").write_text(str(error) + "\n")
         raise
     finally:
         try:

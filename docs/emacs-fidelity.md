@@ -35,7 +35,7 @@
 
 - 用户批准正文与 minibuffer 默认用 `C-t` 执行 `set-mark-command`，不是 Emacs 默认的 `transpose-chars`；保留 `C-@` 备用，取消编辑器的 `C-SPC` 绑定以留给平台 / 输入法切换。mark / region 的命令语义不变；未被平台消费而送入编辑器的 `C-SPC` 仍按普通无绑定键处理，不新增全局按键透传策略。
 - region 激活时仍执行全局 undo；不实现 undo-in-region 或 Emacs undo 环 / undo tree。
-- v1 不提供 split；不承诺同 buffer 多 view。
+- **v1 历史边界**：v1 不提供 split，也不承诺同 buffer 多 view。阶段 C 的现行行为以本文 [阶段 C：buffer 与 view](#阶段-cbuffer-与-view) 为准。
 - 不模拟 Emacs 外观、字体、菜单、工具栏与滚动条。
 - 不实现 elisp、syntax table、text property、narrowing 或 indirect buffer。
 
@@ -191,3 +191,15 @@
 - TAB、行尾和空行使用一个空格宽的方块，不覆盖整段 TAB 空白。
 - 预编辑期间按显示投影定位，保留预编辑标识；视觉光标形状不改变平台输入范围、命中或 IME 候选定位的语义。
 - 保持现有焦点显示策略，本阶段不增加闪烁或失焦空心光标。
+
+## 阶段 C：buffer 与 view
+
+本节是阶段 C 新增并批准的有效行为；不改写 v1 历史边界或既有冻结验收记录。本文其余编辑语义继续适用；冲突处以本节的多 view 归属规则为准。
+
+- **共享 document / buffer 状态**：同一 buffer 的文本、history、modified、文件身份与保存状态、mark / active 在所有 view 间共享。编辑及 undo / redo 由统一历史管理；undo / redo 将发起操作的 view 的 point 按既有历史规则恢复，其他 view 的 point 按编辑 marker 规则调整。
+- **view-local 状态**：point、goal column、scroll、布局及输入会话属于 view。编辑导致其他 view 的 point 依 marker-like 规则调整，但不因此自动滚动。region 高亮只显示在当前选中 view。
+- **split 与焦点**：`C-x 2` 在下方 split，`C-x 3` 在右侧 split；新 view 显示同一 buffer，并复制原 view 的 point 与 scroll，焦点仍留在原 view。允许嵌套 split；空间不足时报告错误。不支持拖动调整大小或多个 OS frame。
+- **window 辨识**：左右并排的分屏之间绘制细竖分隔线；每个 view 的 mode line 按是否选中使用不同的主题配色。minibuffer 会话中保留会话前正文 view 的选中标识，不把 minibuffer 获得输入焦点视为另选正文 view。
+- **view 命令**：`C-x o` 切换到下一个 view；`C-x 0` 关闭当前 view；`C-x 1` 保留当前 view 并关闭其余 view。不能关闭最后一个 view。关闭 view 不杀 buffer、不询问保存。`C-x b` 与 find-file 只影响选中 view。
+- **buffer 生命周期**：kill buffer 沿用既有 dirty 确认；确认后关闭该 buffer 的所有 view，并在原有 split 布局中将它们替换为一个存活 buffer，若无可用 buffer 则替换为 scratch。关闭 view 本身不触发 dirty 确认。
+- **输入与会话**：切换 view 会打断连续输入历史合并与连续 kill 链，并清除旧 view 的 pending 前缀 / 输入会话。既有 IME 命令屏障、目标绑定与迟到回调隔离继续适用；指针失焦沿用既有丢弃 marked 预编辑策略。minibuffer 会话期间禁止切换或关闭正文 view；结束后恢复会话前选中的正文 view，操作仍使用原目标（退出确认的目标可以是非 active buffer）。输入回调绑定 view 与输入会话，异步结果按各自请求的目标 / 快照校验，不随焦点变化改投目标。

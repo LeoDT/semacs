@@ -3,7 +3,7 @@
 use std::io;
 use std::path::{Path, PathBuf};
 
-use crate::buffer::SavePoint;
+use crate::buffer::{BufferId, SavePoint};
 use crate::files::{self, FileFormat, FileStamp};
 use crate::text::Rope;
 
@@ -43,7 +43,7 @@ impl SaveRequest {
 }
 
 pub(crate) struct SaveCompletion {
-    pub view: gpui_kit::Entity<crate::view::BufferView>,
+    pub buffer: BufferId,
     pub request: SaveRequest,
     pub path: PathBuf,
     pub result: io::Result<SaveOutcome>,

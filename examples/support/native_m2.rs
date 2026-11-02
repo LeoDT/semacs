@@ -250,7 +250,7 @@ impl Run {
     fn active_file(&self, cx: &App) -> Option<usize> {
         let view = self.active(cx);
         let path = view.read(cx).buffer().path();
-        (0..3).find(|&index| path == Some(self.path(index).as_path()))
+        (0..3).find(|&index| path.as_deref() == Some(self.path(index).as_path()))
     }
 
     fn minibuffer_ready(&self, cx: &App) -> bool {

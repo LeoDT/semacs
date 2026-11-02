@@ -110,6 +110,11 @@ commands! {
     WriteFile => "write-file", Application, ["ctrl-x ctrl-w" => "C-x C-w"];
     SwitchToBuffer => "switch-to-buffer", Application, ["ctrl-x b" => "C-x b"];
     KillBuffer => "kill-buffer", Application, ["ctrl-x k" => "C-x k"];
+    SplitWindowBelow => "split-window-below", Application, ["ctrl-x 2" => "C-x 2"];
+    SplitWindowRight => "split-window-right", Application, ["ctrl-x 3" => "C-x 3"];
+    OtherWindow => "other-window", Application, ["ctrl-x o" => "C-x o"];
+    DeleteWindow => "delete-window", Application, ["ctrl-x 0" => "C-x 0"];
+    DeleteOtherWindows => "delete-other-windows", Application, ["ctrl-x 1" => "C-x 1"];
     SaveBuffersKillTerminal => "save-buffers-kill-terminal", Application, ["ctrl-x ctrl-c" => "C-x C-c"];
     MinibufferComplete => "minibuffer-complete", ReadSession, ["tab" => "TAB", "ctrl-i" => "C-i"];
     MinibufferCompleteAndExit => "minibuffer-complete-and-exit", ReadSession, ["enter" => "RET", "ctrl-m" => "C-m"];

@@ -12,6 +12,7 @@ pub mod frame;
 pub mod input;
 pub mod keymap;
 pub mod minibuffer;
+pub(crate) mod panes;
 mod platform;
 #[cfg(feature = "native-profiler")]
 pub mod preparation_trace;

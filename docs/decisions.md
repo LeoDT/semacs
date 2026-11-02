@@ -76,7 +76,7 @@ GPUI 只提供窗口、平台输入 / IME、字体 shaping 与绘制，gpui-kit 
 - 已提交正文是权威状态，预编辑是独立临时状态；命令、平台提交、补全和历史回放均经过唯一 Edit 入口。
 - 输入绑定原目标及会话，异步布局绑定目标及快照身份；迟到结果不能按当前焦点重新解释或覆盖新状态。
 - 布局未兼容当前显示文本时，不提供错误的 caret、命中或 IME 坐标；显示投影的边界不替代 Emacs 字符运动语义。
-- view 拥有 viewport、scroll 与布局。单 view 阶段 point / goal column 可归 Buffer；增加 split 前必须另定 window-point 与焦点路由，不把现有分离当作多 view 已完成。
+- buffer 拥有共享 document、history、modified、文件 / 保存身份及 mark / active；view 拥有 point、goal column、scroll、布局与输入会话。编辑调整其他 view 的 point 而不触发自动滚动。阶段 C 的分割、焦点、关闭与输入路由行为见 [buffer 与 view 契约](emacs-fidelity.md#阶段-cbuffer-与-view)。
 - 昂贵全文工作不能阻塞前台；区分临时预览与最终精确布局，不以截断正文、关闭软换行或漏绘换取性能。具体算法与阈值由代码维护。
 
 ## D22 源码复用与许可
