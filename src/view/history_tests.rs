@@ -48,7 +48,7 @@ fn listener_deletion_chain_and_history_need_no_intermediate_paint(cx: &mut TestA
     visual.update(|window, cx| {
         for key in [
             "ctrl-f",
-            "ctrl-space",
+            "ctrl-t",
             "ctrl-f",
             "ctrl-f",
             "ctrl-f",
@@ -153,7 +153,7 @@ fn region_kill_yank_and_history_have_independent_ring_and_saved_boundaries(
     cx: &mut TestAppContext,
 ) {
     let (mut visual, editor) = open("abc\ndef", cx);
-    visual.simulate_keystrokes("ctrl-f ctrl-f ctrl-space ctrl-a ctrl-k ctrl-k ctrl-y ctrl-y");
+    visual.simulate_keystrokes("ctrl-f ctrl-f ctrl-t ctrl-a ctrl-k ctrl-k ctrl-y ctrl-y");
     redraw(&mut visual);
     visual.read(|cx| {
         let view = editor.read(cx);
@@ -195,7 +195,7 @@ fn region_kill_yank_and_history_have_independent_ring_and_saved_boundaries(
 #[gpui::test]
 fn readonly_and_empty_history_errors_do_not_mutate_the_visible_region(cx: &mut TestAppContext) {
     let (mut visual, editor) = open("abc", cx);
-    visual.simulate_keystrokes("ctrl-space ctrl-f ctrl-/");
+    visual.simulate_keystrokes("ctrl-t ctrl-f ctrl-/");
     visual.read(|cx| {
         let view = editor.read(cx);
         assert_eq!(view.message(), Some("No further undo information"));
@@ -203,7 +203,7 @@ fn readonly_and_empty_history_errors_do_not_mutate_the_visible_region(cx: &mut T
     });
     visual.simulate_input("X");
     redraw(&mut visual);
-    visual.simulate_keystrokes("ctrl-space ctrl-f");
+    visual.simulate_keystrokes("ctrl-t ctrl-f");
     editor.update(&mut visual, |view, _| view.target.set_read_only(true));
     let before = visual.read(|cx| editor.read(cx).display_snapshot().id());
     visual.simulate_keystrokes("ctrl-/ ctrl-?");

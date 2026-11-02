@@ -45,7 +45,7 @@ fn reference_table(source: &'static str) -> std::collections::HashMap<&'static s
 }
 
 #[test]
-fn every_default_binding_matches_the_fixed_emacs_reference() {
+fn default_bindings_match_the_emacs_reference_or_the_approved_mark_override() {
     let body_reference = reference_table(include_str!("emacs/m1-bindings.tsv"));
     let session_reference = reference_table(include_str!("emacs/m2-minibuffer-bindings.tsv"));
     let application = Keymap::for_scope(Scope::Application);
@@ -59,7 +59,12 @@ fn every_default_binding_matches_the_fixed_emacs_reference() {
             Scope::ReadSession => (&minibuffer, &session_reference),
         };
         for binding in spec.bindings {
-            assert_eq!(reference.get(binding.reference), Some(&spec.name));
+            // Keep the frozen Emacs observations intact when checking our approved override.
+            let expected = match binding.reference {
+                "C-t" => Some("set-mark-command"),
+                key => reference.get(key).copied(),
+            };
+            assert_eq!(expected, Some(spec.name));
             assert_eq!(
                 lookup(layers, &keys(binding.keys)),
                 Lookup::Command(spec.command),
@@ -87,6 +92,22 @@ fn every_default_binding_matches_the_fixed_emacs_reference() {
         lookup(&minibuffer, &keys("ctrl-g")),
         Lookup::Command(Command::AbortMinibuffers)
     );
+}
+
+#[test]
+fn mark_bindings_reserve_control_space_and_keep_the_control_at_fallback() {
+    let edit = Keymap::for_scope(Scope::Edit);
+    let application = Keymap::for_scope(Scope::Application);
+    let session = Keymap::for_scope(Scope::ReadSession);
+    for layers in [[&application, &edit], [&session, &edit]] {
+        for key in ["ctrl-t", "ctrl-@"] {
+            assert_eq!(
+                lookup(&layers, &keys(key)),
+                Lookup::Command(Command::SetMark)
+            );
+        }
+        assert_eq!(lookup(&layers, &keys("ctrl-space")), Lookup::Unbound);
+    }
 }
 
 #[test]

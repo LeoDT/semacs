@@ -254,11 +254,14 @@ impl Run {
     }
 
     fn minibuffer_ready(&self, cx: &App) -> bool {
-        self.session
-            .shell
-            .read(cx)
+        let shell = self.session.shell.read(cx);
+        shell
             .minibuffer()
             .is_some_and(|mini| mini.read(cx).editor().read(cx).layout_ready())
+            && shell
+                .session()
+                .and_then(|session| session.candidates())
+                .is_none_or(|list| !list.loading)
     }
 
     fn setup(&mut self, window: &mut Window, cx: &mut App) {
@@ -387,10 +390,19 @@ impl Run {
                 let Some(mini) = self.session.shell.read(cx).minibuffer() else {
                     return Err("completion lost its read session".into());
                 };
-                let editor = mini.read(cx).editor().read(cx);
-                if !editor
-                    .message()
-                    .is_some_and(|message| message.ends_with(&format!("({ENTRIES} total)")))
+                if !mini.read(cx).editor().read(cx).layout_ready()
+                    || !self
+                        .session
+                        .shell
+                        .read(cx)
+                        .session()
+                        .and_then(|session| session.candidates())
+                        .is_some_and(|list| {
+                            !list.loading
+                                && list.selected_candidate().is_some_and(|candidate| {
+                                    candidate.value.ends_with("/entry-0000.txt")
+                                })
+                        })
                 {
                     return Ok(false);
                 }
@@ -643,7 +655,7 @@ pub fn start(session: Session, window: &Window, cx: &App) {
         .open(&session.report)
         .expect("new M2 report");
     writeln!(output, "{}", session.header).unwrap();
-    writeln!(output, "# mode=m2; entries={ENTRIES}; cycles={}; steps={}; synthetic GPUI dispatch, NOT OS keyboard / IME", if session.open_diagnostic { 0 } else { CYCLES }, plan(session.open_diagnostic).len()).unwrap();
+    writeln!(output, "# mode=m2; entries={ENTRIES}; completion_action=insert-selected; cycles={}; steps={}; synthetic GPUI dispatch, NOT OS keyboard / IME", if session.open_diagnostic { 0 } else { CYCLES }, plan(session.open_diagnostic).len()).unwrap();
     writeln!(
         output,
         "# open_diagnostic={}; acceptance={}",

@@ -96,27 +96,6 @@ impl AppShell {
         }
     }
 
-    pub(super) fn switch_to_buffer(
-        &mut self,
-        name: &str,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let existing = self
-            .buffers
-            .iter()
-            .position(|slot| slot.view.read(cx).buffer().display_name() == name);
-        let index = match existing {
-            Some(index) => index,
-            None => {
-                let buffer = Buffer::named(name);
-                self.create_buffer(buffer, window, cx)
-            }
-        };
-        let activated = self.activate(index, window, cx);
-        debug_assert!(activated, "a selected buffer should activate");
-    }
-
     /// Activates an existing buffer. Switching only moves rendering and focus;
     /// each buffer keeps its own point, mark, history, scroll and file identity.
     /// Refused while a minibuffer session is open so it cannot be detached from

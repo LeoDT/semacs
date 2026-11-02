@@ -34,6 +34,60 @@ fn hide(visual: &mut VisualTestContext, shell: &Entity<AppShell>) {
 }
 
 #[gpui::test]
+fn mark_override_and_fallback_route_to_body_and_active_minibuffer(cx: &mut TestAppContext) {
+    let (mut visual, body) = open("body", cx);
+    visual.simulate_keystrokes("ctrl-f ctrl-t ctrl-f ctrl-space");
+    visual.read(|cx| {
+        let view = body.read(cx);
+        assert_eq!(view.buffer().point(), ByteOffset(2));
+        assert_eq!(view.buffer().mark(), Some(ByteOffset(1)));
+        assert!(view.buffer().mark_active());
+        assert_eq!(view.message(), Some("C-SPC is undefined"));
+        assert_eq!(view.buffer().text().to_string(), "body");
+    });
+    visual.simulate_keystrokes("ctrl-@");
+    assert_eq!(
+        visual.read(|cx| body.read(cx).buffer().mark()),
+        Some(ByteOffset(2))
+    );
+
+    visual.simulate_keystrokes("alt-x");
+    redraw(&mut visual);
+    let (shell, editor) = visual.update(|window, cx| {
+        let shell = app_shell(window, cx);
+        let editor = shell
+            .read(cx)
+            .minibuffer()
+            .unwrap()
+            .read(cx)
+            .editor()
+            .clone();
+        (shell, editor)
+    });
+    visual.simulate_input("abc");
+    visual.simulate_keystrokes("ctrl-a ctrl-t ctrl-f ctrl-space");
+    visual.read(|cx| {
+        let view = editor.read(cx);
+        assert_eq!(view.buffer().point(), ByteOffset(5));
+        assert_eq!(view.buffer().mark(), Some(ByteOffset(4)));
+        assert!(view.buffer().mark_active());
+        assert_eq!(view.message(), Some("C-SPC is undefined"));
+        assert_eq!(view.buffer().text().to_string(), "M-x abc");
+    });
+    visual.simulate_keystrokes("ctrl-@");
+    assert_eq!(
+        visual.read(|cx| editor.read(cx).buffer().mark()),
+        Some(ByteOffset(5))
+    );
+    visual.simulate_keystrokes("ctrl-g");
+    visual.read(|cx| {
+        assert!(shell.read(cx).session().is_none());
+        assert_eq!(body.read(cx).buffer().mark(), Some(ByteOffset(2)));
+        assert_eq!(body.read(cx).buffer().point(), ByteOffset(2));
+    });
+}
+
+#[gpui::test]
 fn minibuffer_is_a_real_edit_target_with_prompt_in_text_and_field_aware_keys(
     cx: &mut TestAppContext,
 ) {
@@ -86,7 +140,7 @@ fn official_body_minibuffer_kill_yank_and_undo_chain_uses_independent_histories(
     visual.simulate_input("A");
     redraw(&mut visual);
     let (shell, mini, editor) = show(&mut visual, "Input: ", "");
-    visual.simulate_keystrokes("ctrl-y ctrl-a ctrl-space ctrl-f ctrl-f ctrl-w");
+    visual.simulate_keystrokes("ctrl-y ctrl-a ctrl-t ctrl-f ctrl-f ctrl-w");
     redraw(&mut visual);
     visual.read(|cx| {
         assert_eq!(mini.read(cx).contents(cx), "dy");
@@ -255,7 +309,7 @@ fn pointer_can_enter_and_select_prompt_but_forward_delete_cannot_remove_it(
         point(caret.left(), caret.top() + px(8.)),
         Default::default(),
     );
-    visual.simulate_keystrokes("ctrl-space ctrl-f ctrl-f ctrl-f ctrl-f ctrl-f ctrl-f alt-w");
+    visual.simulate_keystrokes("ctrl-t ctrl-f ctrl-f ctrl-f ctrl-f ctrl-f ctrl-f alt-w");
     redraw(&mut visual);
     visual.read(|cx| {
         let view = editor.read(cx);
@@ -265,7 +319,7 @@ fn pointer_can_enter_and_select_prompt_but_forward_delete_cannot_remove_it(
         );
         assert_eq!(view.buffer().point(), ByteOffset(7));
     });
-    visual.simulate_keystrokes("ctrl-a ctrl-b ctrl-space ctrl-f ctrl-f delete");
+    visual.simulate_keystrokes("ctrl-a ctrl-b ctrl-t ctrl-f ctrl-f delete");
     redraw(&mut visual);
     visual.read(|cx| {
         let view = editor.read(cx);
@@ -286,7 +340,7 @@ fn body_and_minibuffer_keep_separate_scroll_font_mark_and_echo(cx: &mut TestAppC
     });
     redraw(&mut visual);
     let (shell, _, editor) = show(&mut visual, "P: ", "one\ntwo\nthree\nfour");
-    visual.simulate_keystrokes("ctrl-space ctrl-b ctrl-x");
+    visual.simulate_keystrokes("ctrl-t ctrl-b ctrl-x");
     visual.update(|window, cx| assert_eq!(shell.read(cx).echo_message(window, cx), "C-x"));
     redraw(&mut visual);
     visual.read(|cx| {
@@ -319,7 +373,7 @@ fn body_and_minibuffer_keep_separate_scroll_font_mark_and_echo(cx: &mut TestAppC
             "C-x C-g is undefined"
         );
     });
-    visual.simulate_keystrokes("ctrl-space ctrl-f");
+    visual.simulate_keystrokes("ctrl-t ctrl-f");
     visual.read(|cx| {
         assert_ne!(
             body.read(cx).buffer().mark(),
@@ -334,7 +388,7 @@ fn refocusing_the_same_minibuffer_preserves_state_but_not_old_callbacks(cx: &mut
     let (mut visual, body) = open("body", cx);
     let (_, mini, editor) = show(&mut visual, "P: ", "abc");
     visual.simulate_input("X");
-    visual.simulate_keystrokes("ctrl-space ctrl-b");
+    visual.simulate_keystrokes("ctrl-t ctrl-b");
     redraw(&mut visual);
     let mut old = handler(&editor, &visual);
     visual.update(|window, cx| {
@@ -452,7 +506,7 @@ fn bare_mount_keeps_plain_edit_bindings_without_read_semantics(cx: &mut TestAppC
     let (mut visual, _) = open("body", cx);
     let (shell, mini, _) = show(&mut visual, "P: ", "");
     visual.simulate_input("abc");
-    visual.simulate_keystrokes("ctrl-space ctrl-b ctrl-g enter");
+    visual.simulate_keystrokes("ctrl-t ctrl-b ctrl-g enter");
     redraw(&mut visual);
     visual.read(|cx| {
         assert_eq!(shell.read(cx).minibuffer(), Some(&mini));

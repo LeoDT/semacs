@@ -1,5 +1,13 @@
 //! Command identities and default bindings shared by keymaps and command lookup.
 
+pub const CANDIDATE_BINDINGS: &[(&str, Command)] = &[
+    ("ctrl-n", Command::CandidateNext),
+    ("down", Command::CandidateNext),
+    ("ctrl-p", Command::CandidatePrevious),
+    ("up", Command::CandidatePrevious),
+    ("alt-enter", Command::CandidateExitInput),
+];
+
 #[derive(Clone, Copy, Debug)]
 pub struct DefaultBinding {
     pub keys: &'static str,
@@ -87,7 +95,7 @@ commands! {
     KillRegion => "kill-region", Edit, ["ctrl-w" => "C-w"];
     KillRingSave => "kill-ring-save", Edit, ["alt-w" => "M-w"];
     Yank => "yank", Edit, ["ctrl-y" => "C-y"];
-    SetMark => "set-mark-command", Edit, ["ctrl-space" => "C-SPC", "ctrl-@" => "C-@"];
+    SetMark => "set-mark-command", Edit, ["ctrl-t" => "C-t", "ctrl-@" => "C-@"];
     KeyboardQuit => "keyboard-quit", Edit, ["ctrl-g" => "C-g"];
     KeyboardEscapeQuit => "keyboard-escape-quit", Edit, ["escape escape escape" => "ESC ESC ESC"];
     Undo => "undo", Edit, ["ctrl-/" => "C-/", "ctrl-_" => "C-_", "ctrl-x u" => "C-x u"];
@@ -106,4 +114,7 @@ commands! {
     MinibufferComplete => "minibuffer-complete", ReadSession, ["tab" => "TAB", "ctrl-i" => "C-i"];
     MinibufferCompleteAndExit => "minibuffer-complete-and-exit", ReadSession, ["enter" => "RET", "ctrl-m" => "C-m"];
     AbortMinibuffers => "abort-minibuffers", ReadSession, ["ctrl-g" => "C-g"];
+    CandidateNext => "semacs-candidate-next", ReadSession, [];
+    CandidatePrevious => "semacs-candidate-previous", ReadSession, [];
+    CandidateExitInput => "semacs-candidate-exit-input", ReadSession, [];
 }

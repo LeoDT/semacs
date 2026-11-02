@@ -1410,6 +1410,8 @@ impl Element for TextCanvas {
 }
 
 #[cfg(test)]
+mod candidate_tests;
+#[cfg(test)]
 mod history_tests;
 #[cfg(test)]
 mod input_tests;

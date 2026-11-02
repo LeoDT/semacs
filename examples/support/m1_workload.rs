@@ -9,7 +9,7 @@ pub const CHAIN: &[(&str, &str, usize)] = &[
     ("alt-b", "abc\n", 0),
     ("alt-f", "abc\n", 3),
     ("ctrl-a", "abc\n", 0),
-    ("ctrl-space", "abc\n", 0),
+    ("ctrl-t", "abc\n", 0),
     ("ctrl-f", "abc\n", 1),
     ("ctrl-f", "abc\n", 2),
     ("alt-w", "abc\n", 2),

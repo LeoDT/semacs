@@ -1,5 +1,6 @@
 use super::{AppShell, MinibufferMount};
 use crate::command::Command;
+use crate::completion::CandidateAction;
 use crate::files;
 use crate::minibuffer::Minibuffer;
 use crate::session::{self, Answer, ReadKind, ReadSession};
@@ -39,6 +40,7 @@ impl AppShell {
             editor.update(cx, |view, cx| view.set_read_only(true, cx));
         }
         self.session = Some(ReadSession::new(id, kind, target.clone()));
+        self.refresh_candidates(window, cx);
         Some(id)
     }
 
@@ -58,11 +60,16 @@ impl AppShell {
             .update(cx, |view, cx| view.end_input(cx));
         self.remove_minibuffer(cx);
         let minibuffer = cx.new(|cx| Minibuffer::new(prompt, initial, window, cx));
-        let subscription = cx.observe(&minibuffer, |_, _, cx| cx.notify());
+        let subscription = cx.observe_in(&minibuffer, window, |shell, _, window, cx| {
+            shell.refresh_candidates(window, cx);
+            cx.notify();
+        });
         window.focus(&minibuffer.focus_handle(cx), cx);
         self.minibuffer = Some(MinibufferMount {
             view: minibuffer.clone(),
             completion: None,
+            candidate_snapshot: None,
+            pending_candidate_action: None,
             _subscription: subscription,
         });
         cx.notify();
@@ -71,36 +78,11 @@ impl AppShell {
 
     fn confirm_command(&mut self, id: u64, window: &mut Window, cx: &mut Context<Self>) {
         let input = self.session_input(cx).unwrap_or_default();
-        // Emacs lets an explicit empty answer leave the minibuffer and reports
-        // the invalid name afterwards.
-        if input.is_empty() {
-            if let Some(target) = self.end_session(id, window, cx) {
-                self.show_message(&target, session::invalid_command_message(""), cx);
-            }
-            return;
-        }
         if let Some(command) = session::session_command(&input) {
             if let Some(target) = self.end_session(id, window, cx) {
                 self.run_command(command, &target, window, cx);
             }
-            return;
-        }
-        let completion = session::complete(session::command_names(), &input);
-        if let [candidate] = completion.candidates.as_slice() {
-            let command = session::session_command(candidate)
-                .expect("command candidates resolve to commands");
-            if let Some(target) = self.end_session(id, window, cx) {
-                self.run_command(command, &target, window, cx);
-            }
-            return;
-        }
-        if let Some(replacement) = &completion.replacement {
-            // Completion made progress but is not unique: Emacs completes the
-            // input and waits for another RET.
-            self.replace_session_input(id, replacement, window, cx);
-            return;
-        }
-        if completion.candidates.is_empty() {
+        } else {
             self.message_minibuffer("No match", cx);
         }
     }
@@ -132,7 +114,27 @@ impl AppShell {
         cx: &mut Context<Self>,
     ) {
         match command {
-            Command::MinibufferComplete => self.complete_session(window, cx),
+            Command::MinibufferComplete
+                if self
+                    .session
+                    .as_ref()
+                    .is_some_and(|session| session.kind().has_candidates()) =>
+            {
+                self.candidate_action(CandidateAction::Insert, window, cx)
+            }
+            Command::MinibufferCompleteAndExit
+                if self
+                    .session
+                    .as_ref()
+                    .is_some_and(|session| session.kind().has_candidates()) =>
+            {
+                self.candidate_action(CandidateAction::Accept, window, cx)
+            }
+            Command::CandidateExitInput => self.candidate_action(CandidateAction::Raw, window, cx),
+            Command::CandidateNext | Command::CandidatePrevious => {
+                self.navigate_candidates(command == Command::CandidateNext, window, cx)
+            }
+            Command::MinibufferComplete => {}
             Command::MinibufferCompleteAndExit => self.confirm_session(window, cx),
             Command::AbortMinibuffers => self.cancel_session(window, cx),
             _ => debug_assert!(false, "{} is not a session command", command.name()),
@@ -161,7 +163,7 @@ impl AppShell {
         Some(target)
     }
 
-    fn session_input(&self, cx: &App) -> Option<String> {
+    pub(super) fn session_input(&self, cx: &App) -> Option<String> {
         Some(self.minibuffer.as_ref()?.view.read(cx).contents(cx))
     }
 
@@ -176,7 +178,7 @@ impl AppShell {
         }
     }
 
-    fn replace_session_input(
+    pub(super) fn replace_session_input(
         &mut self,
         id: u64,
         text: &str,
@@ -214,8 +216,16 @@ impl AppShell {
             self.message_minibuffer("No buffer name", cx);
             return;
         };
+        let index = self
+            .buffers
+            .iter()
+            .position(|slot| slot.view.read(cx).buffer().display_name() == name);
+        let Some(index) = index else {
+            self.message_minibuffer(format!("No buffer named {name}"), cx);
+            return;
+        };
         if self.end_session(id, window, cx).is_some() {
-            self.switch_to_buffer(&name, window, cx);
+            self.activate(index, window, cx);
         }
     }
 
@@ -285,81 +295,7 @@ impl AppShell {
         self.session.as_ref()
     }
 
-    fn complete_session(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(session) = &self.session else { return };
-        let (id, kind, origin) = (
-            session.id(),
-            session.kind().clone(),
-            session.origin().clone(),
-        );
-        let input = self.session_input(cx).unwrap_or_default();
-        if matches!(kind, ReadKind::FindFile | ReadKind::WriteFile) {
-            let directory = self.default_directory_for(&origin, cx);
-            let editor = self
-                .minibuffer
-                .as_ref()
-                .unwrap()
-                .view
-                .read(cx)
-                .editor()
-                .clone();
-            let snapshot = editor.read(cx).display_snapshot().id();
-            let task = cx.spawn_in(window, async move |shell, cx| {
-                let completion = cx
-                    .background_executor()
-                    .spawn(async move {
-                        session::complete(files::complete_path(&input, &directory), &input)
-                    })
-                    .await;
-                shell
-                    .update_in(cx, |shell, window, cx| {
-                        if !shell.session.as_ref().is_some_and(|session| {
-                            session.id() == id && session.origin() == &origin
-                        }) || editor.read(cx).display_snapshot().id() != snapshot
-                        {
-                            return;
-                        }
-                        shell.apply_completion(id, completion, window, cx);
-                    })
-                    .ok();
-            });
-            self.minibuffer.as_mut().unwrap().completion = Some(task);
-            return;
-        }
-        let candidates = match kind {
-            ReadKind::Command => session::command_names(),
-            ReadKind::SwitchToBuffer { .. } | ReadKind::KillBuffer { .. } => {
-                let active = self.active_view();
-                let mut names: Vec<_> = self
-                    .buffers
-                    .iter()
-                    .filter(|slot| {
-                        !matches!(kind, ReadKind::SwitchToBuffer { .. }) || &slot.view != active
-                    })
-                    .map(|slot| slot.view.read(cx).buffer().display_name())
-                    .collect();
-                names.sort_unstable();
-                names
-            }
-            _ => return,
-        };
-        self.apply_completion(id, session::complete(candidates, &input), window, cx);
-    }
-
-    fn apply_completion(
-        &mut self,
-        id: u64,
-        completion: session::Completion,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        if let Some(replacement) = &completion.replacement {
-            self.replace_session_input(id, replacement, window, cx);
-        }
-        self.message_minibuffer(completion.message(), cx);
-    }
-
-    fn confirm_session(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    pub(super) fn confirm_session(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(session) = &self.session else { return };
         let (id, kind) = (session.id(), session.kind().clone());
         match kind {

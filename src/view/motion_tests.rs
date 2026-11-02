@@ -28,7 +28,7 @@ fn remaining_motion_bindings_share_the_formal_command_path(cx: &mut TestAppConte
                 .is_some()
         );
     });
-    visual.simulate_keystrokes("escape < ctrl-space alt-> alt-b ctrl-p");
+    visual.simulate_keystrokes("escape < ctrl-t alt-> alt-b ctrl-p");
     redraw(&mut visual);
     visual.read(|cx| {
         let view = editor.read(cx);
@@ -213,7 +213,7 @@ fn new_motion_commands_preserve_readonly_regions_and_the_composition_barrier(
 ) {
     let (mut visual, editor) = open(&"abcdef\n".repeat(100), cx);
     editor.update(&mut visual, |view, _| view.target.set_read_only(true));
-    visual.simulate_keystrokes("ctrl-space ctrl-v ctrl-l");
+    visual.simulate_keystrokes("ctrl-t ctrl-v ctrl-l");
     redraw(&mut visual);
     let point = visual.read(|cx| {
         let view = editor.read(cx);

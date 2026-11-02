@@ -16,7 +16,7 @@ fn active_region_paints_unicode_tabs_newlines_and_blank_lines_without_reflow(
             view.cache.values().cloned().collect::<Vec<_>>(),
         )
     });
-    visual.simulate_keystrokes("ctrl-f ctrl-space ctrl-n ctrl-n");
+    visual.simulate_keystrokes("ctrl-f ctrl-t ctrl-n ctrl-n");
     redraw(&mut visual);
     visual.read(|cx| {
         let view = editor.read(cx);
@@ -63,7 +63,7 @@ fn reverse_regions_normalize_and_soft_wrap_geometry_is_clipped_to_the_viewport(
     cx: &mut TestAppContext,
 ) {
     let (mut visual, editor) = open(&"中🙂 ".repeat(300), cx);
-    visual.simulate_keystrokes("alt-> ctrl-space alt-<");
+    visual.simulate_keystrokes("alt-> ctrl-t alt-<");
     redraw(&mut visual);
     visual.read(|cx| {
         let view = editor.read(cx);
@@ -99,7 +99,7 @@ fn region_uses_retained_paint_geometry_but_never_survives_an_incompatible_text_e
     cx: &mut TestAppContext,
 ) {
     let (mut visual, editor) = open("a\t中🙂\nxyz", cx);
-    visual.simulate_keystrokes("ctrl-space ctrl-f ctrl-f ctrl-f");
+    visual.simulate_keystrokes("ctrl-t ctrl-f ctrl-f ctrl-f");
     redraw(&mut visual);
     let before = visual.read(|cx| editor.read(cx).region_bounds());
     editor.update(&mut visual, |view, cx| {
@@ -123,7 +123,7 @@ fn region_projection_leaves_a_gap_for_uncommitted_preedit_and_restores_on_discar
     cx: &mut TestAppContext,
 ) {
     let (mut visual, editor) = open("abcd", cx);
-    visual.simulate_keystrokes("ctrl-space ctrl-e");
+    visual.simulate_keystrokes("ctrl-t ctrl-e");
     redraw(&mut visual);
     let original = visual.read(|cx| editor.read(cx).region_bounds());
     let mut input = handler(&editor, &visual);
@@ -159,7 +159,7 @@ fn region_projection_leaves_a_gap_for_uncommitted_preedit_and_restores_on_discar
 #[gpui::test]
 fn formal_copy_kill_and_yank_chain_preserves_ring_text_and_mark_semantics(cx: &mut TestAppContext) {
     let (mut visual, editor) = open("ab\ncd", cx);
-    visual.simulate_keystrokes("ctrl-space ctrl-f ctrl-f alt-w");
+    visual.simulate_keystrokes("ctrl-t ctrl-f ctrl-f alt-w");
     redraw(&mut visual);
     visual.read(|cx| {
         let view = editor.read(cx);
@@ -201,7 +201,7 @@ fn escape_copy_can_extend_a_kill_but_the_following_copy_starts_a_new_entry(
     cx: &mut TestAppContext,
 ) {
     let (mut visual, editor) = open("abc\ndef", cx);
-    visual.simulate_keystrokes("ctrl-space ctrl-f ctrl-f ctrl-k escape w alt-w");
+    visual.simulate_keystrokes("ctrl-t ctrl-f ctrl-f ctrl-k escape w alt-w");
     redraw(&mut visual);
     visual.read(|cx| {
         let view = editor.read(cx);
@@ -224,7 +224,7 @@ fn escape_copy_can_extend_a_kill_but_the_following_copy_starts_a_new_entry(
 #[gpui::test]
 fn readonly_kill_copies_and_clears_region_while_kill_line_moves_the_caret(cx: &mut TestAppContext) {
     let (mut visual, editor) = open("abc\ndef", cx);
-    visual.simulate_keystrokes("ctrl-space ctrl-f ctrl-f");
+    visual.simulate_keystrokes("ctrl-t ctrl-f ctrl-f");
     redraw(&mut visual);
     editor.update(&mut visual, |view, _| view.target.set_read_only(true));
     visual.simulate_keystrokes("ctrl-w");

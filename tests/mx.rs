@@ -80,7 +80,7 @@ fn assert_focused(visual: &mut VisualTestContext, view: &Entity<BufferView>) {
 }
 
 #[gpui::test]
-fn mx_completes_the_common_prefix_and_lists_candidates(cx: &mut TestAppContext) {
+fn mx_lists_candidates_and_tab_inserts_the_selection(cx: &mut TestAppContext) {
     let (mut visual, shell, body) = open("body", cx);
     let editor = mx(&mut visual, &shell);
     visual.read(|cx| {
@@ -100,18 +100,29 @@ fn mx_completes_the_common_prefix_and_lists_candidates(cx: &mut TestAppContext) 
     visual.simulate_input("forw");
     redraw(&mut visual);
     assert_eq!(contents(&mut visual, &shell), "forw");
+    visual.read(|cx| {
+        let candidates = shell.read(cx).session().unwrap().candidates().unwrap();
+        assert!(
+            candidates
+                .items
+                .iter()
+                .any(|item| item.candidate.value == "forward-word")
+        );
+    });
     visual.simulate_keystrokes("tab");
     redraw(&mut visual);
-    assert_eq!(contents(&mut visual, &shell), "forward-");
-    assert!(
-        session_message(&mut visual, &editor)
-            .unwrap()
-            .starts_with("Candidates: forward-char forward-word")
-    );
-    // At the common prefix a repeated TAB re-lists instead of changing the input.
+    assert_eq!(contents(&mut visual, &shell), "forward-char");
+    visual.read(|cx| {
+        let candidates = shell.read(cx).session().unwrap().candidates().unwrap();
+        assert_eq!(
+            candidates.selected_candidate().unwrap().value,
+            "forward-char"
+        );
+    });
+    assert_eq!(session_message(&mut visual, &editor), None);
     visual.simulate_keystrokes("tab");
     redraw(&mut visual);
-    assert_eq!(contents(&mut visual, &shell), "forward-");
+    assert_eq!(contents(&mut visual, &shell), "forward-char");
 
     visual.simulate_keystrokes("ctrl-g");
     redraw(&mut visual);
@@ -144,10 +155,7 @@ fn mx_unique_completion_and_exact_names_run_on_the_origin(cx: &mut TestAppContex
             ByteOffset(16)
         );
     });
-    assert_eq!(
-        session_message(&mut visual, &editor),
-        Some("Sole completion".into())
-    );
+    assert_eq!(session_message(&mut visual, &editor), None);
     visual.simulate_keystrokes("enter");
     redraw(&mut visual);
     visual.read(|cx| {
@@ -191,27 +199,31 @@ fn mx_unique_completion_and_exact_names_run_on_the_origin(cx: &mut TestAppContex
 }
 
 #[gpui::test]
-fn mx_ret_completes_a_non_unique_name_without_exiting(cx: &mut TestAppContext) {
+fn mx_ret_accepts_the_selected_fuzzy_match(cx: &mut TestAppContext) {
     let (mut visual, shell, body) = open("body", cx);
     let _editor = mx(&mut visual, &shell);
-    visual.simulate_input("forw");
+    visual.simulate_input("fwd");
     redraw(&mut visual);
+    visual.read(|cx| {
+        let candidates = shell.read(cx).session().unwrap().candidates().unwrap();
+        assert_eq!(
+            candidates.selected_candidate().unwrap().value,
+            "forward-word"
+        );
+    });
+    visual.simulate_keystrokes("ctrl-n ctrl-p");
+    assert_eq!(contents(&mut visual, &shell), "fwd");
     visual.simulate_keystrokes("enter");
     redraw(&mut visual);
-    visual.read(|cx| assert!(shell.read(cx).session().is_some()));
-    assert_eq!(contents(&mut visual, &shell), "forward-");
-    // Already at the common prefix: RET waits silently for a unique name.
-    visual.simulate_keystrokes("enter");
-    redraw(&mut visual);
-    visual.read(|cx| assert!(shell.read(cx).session().is_some()));
-    assert_eq!(contents(&mut visual, &shell), "forward-");
-    visual.simulate_keystrokes("ctrl-g");
-    redraw(&mut visual);
-    visual.read(|cx| assert_eq!(body.read(cx).buffer().text().to_string(), "body"));
+    visual.read(|cx| {
+        assert!(shell.read(cx).session().is_none());
+        assert_eq!(body.read(cx).buffer().point(), ByteOffset(4));
+        assert_eq!(body.read(cx).buffer().text().to_string(), "body");
+    });
 }
 
 #[gpui::test]
-fn mx_unknown_and_empty_names_follow_the_reference(cx: &mut TestAppContext) {
+fn mx_unknown_names_stay_open_and_empty_input_accepts_the_first_command(cx: &mut TestAppContext) {
     let (mut visual, shell, body) = open("body", cx);
     let editor = mx(&mut visual, &shell);
     visual.simulate_input("nosuch");
@@ -236,10 +248,7 @@ fn mx_unknown_and_empty_names_follow_the_reference(cx: &mut TestAppContext) {
     redraw(&mut visual);
     visual.read(|cx| {
         assert!(shell.read(cx).session().is_none());
-        assert_eq!(
-            body.read(cx).message(),
-            Some("‘’ is not a valid command name")
-        );
+        assert_eq!(body.read(cx).message(), Some("Beginning of buffer"));
         assert_eq!(body.read(cx).buffer().text().to_string(), "body");
     });
     assert_focused(&mut visual, &body);
@@ -249,15 +258,30 @@ fn mx_unknown_and_empty_names_follow_the_reference(cx: &mut TestAppContext) {
 fn mx_candidates_cover_the_body_layers_but_not_session_commands(cx: &mut TestAppContext) {
     let (mut visual, shell, _) = open("body", cx);
     let editor = mx(&mut visual, &shell);
-    visual.simulate_keystrokes("tab");
-    redraw(&mut visual);
     let count = COMMANDS
         .iter()
         .filter(|spec| spec.scope != Scope::ReadSession)
         .count();
-    let message = session_message(&mut visual, &editor).unwrap();
-    assert!(message.starts_with("Candidates: "));
-    assert!(message.ends_with(&format!("({count} total)")));
+    visual.read(|cx| {
+        let candidates = shell.read(cx).session().unwrap().candidates().unwrap();
+        assert_eq!(candidates.items.len(), count);
+        assert!(
+            candidates
+                .items
+                .iter()
+                .all(|item| !item.candidate.annotation.contains("Candidates:"))
+        );
+        assert!(
+            candidates
+                .items
+                .iter()
+                .find(|item| item.candidate.value == "forward-char")
+                .unwrap()
+                .candidate
+                .annotation
+                .contains("C-f")
+        );
+    });
 
     // Session commands are not addressable through M-x either.
     visual.simulate_input("minibuffer-complete");
@@ -276,7 +300,7 @@ fn mx_candidates_cover_the_body_layers_but_not_session_commands(cx: &mut TestApp
 #[gpui::test]
 fn mx_does_not_nest_and_cancel_restores_origin_state(cx: &mut TestAppContext) {
     let (mut visual, shell, body) = open("alpha\nbeta\ngamma\ndelta\nepsilon\nzeta\n", cx);
-    visual.simulate_keystrokes("ctrl-e ctrl-space ctrl-n ctrl-n");
+    visual.simulate_keystrokes("ctrl-e ctrl-t ctrl-n ctrl-n");
     body.update(&mut visual, |view, cx| {
         view.scroll_by(point(px(0.), px(36.)), cx);
     });

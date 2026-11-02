@@ -15,7 +15,7 @@ semacs 将 Emacs 的操作模型带到现代 GPU UI：语义按 Emacs，外观�
 
 - Linux 优先，Wayland 为主要验收环境；X11 的启动和基础输入是兼容目标，不表示已验证。
 - v1 一个 OS 窗口、一个正文 view，允许切换多个 buffer；不提供 split 或同 buffer 多 view。
-- 纯 Emacs 键位，不并存 CUA 编辑模型；仅保留窗口管理层面的系统键。
+- Emacs 键位及已批准的[保真度差异](emacs-fidelity.md#2-保真度分级)，不并存 CUA 编辑模型；窗口管理与输入法切换的保留键由平台处理。
 - 中文 / IME 属于基本输入能力，不是后续增强。
 
 ## v1 范围

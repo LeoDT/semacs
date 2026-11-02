@@ -17,6 +17,7 @@ use crate::view::{BufferView, KeyLayers, KeyRoute};
 
 mod appearance;
 mod buffer_commands;
+mod candidates;
 mod closing;
 mod documents;
 mod reads;
@@ -29,7 +30,9 @@ pub fn init(cx: &mut App) {
 
 struct MinibufferMount {
     view: Entity<Minibuffer>,
-    completion: Option<Task<()>>,
+    completion: Option<candidates::CompletionWork>,
+    candidate_snapshot: Option<crate::input::DisplayId>,
+    pending_candidate_action: Option<crate::completion::CandidateAction>,
     _subscription: Subscription,
 }
 
@@ -114,6 +117,9 @@ impl AppShell {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
+        if let Some(mount) = &mut self.minibuffer {
+            mount.pending_candidate_action = None;
+        }
         // A read session owns the keyboard even if focus drifted back to a
         // body view. Re-focusing here keeps platform text input on the
         // minibuffer and makes RET reach the session layer.

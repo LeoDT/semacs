@@ -3,6 +3,7 @@ pub mod appearance;
 pub mod buffer;
 mod buffers;
 pub mod command;
+pub mod completion;
 pub mod display;
 pub mod editing;
 mod exit;

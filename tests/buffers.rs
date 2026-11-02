@@ -93,7 +93,7 @@ fn activating_buffers_only_moves_rendering_and_focus(cx: &mut TestAppContext) {
     );
     visual.simulate_keystrokes("ctrl-e");
     visual.simulate_input("X");
-    visual.simulate_keystrokes("ctrl-space ctrl-n ctrl-n");
+    visual.simulate_keystrokes("ctrl-t ctrl-n ctrl-n");
     first.update(&mut visual, |view, cx| {
         view.scroll_by(point(px(0.), px(36.)), cx);
     });

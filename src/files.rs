@@ -256,55 +256,80 @@ fn file_stamp(metadata: &fs::Metadata) -> FileStamp {
     }
 }
 
-/// Basic prefix completion for a path typed in a minibuffer. The input is
-/// expanded like [`expand`] for lookup, while candidates preserve the typed
-/// directory prefix. Directories keep a trailing separator.
-pub fn complete_path(input: &str, default_directory: &Path) -> Vec<String> {
-    if input == "~" && std::env::var_os("HOME").is_some() {
-        return vec!["~/".to_owned()];
-    }
-    let Ok(expanded) = expand(Path::new(input), default_directory) else {
-        return Vec::new();
-    };
-    complete_expanded_path(input, expanded)
+pub struct PathCandidates {
+    pub candidates: Vec<crate::completion::Candidate>,
+    pub query: String,
+    pub directory_input: bool,
+    pub raw_directory: bool,
 }
 
-fn complete_expanded_path(input: &str, expanded: PathBuf) -> Vec<String> {
+/// Enumerates only the directory denoted by the typed prefix. Filtering is
+/// separate so fuzzy matching never changes a directory component.
+pub fn path_candidates(
+    input: &str,
+    default_directory: &Path,
+    cancelled: &std::sync::atomic::AtomicBool,
+) -> PathCandidates {
+    if input == "~" && std::env::var_os("HOME").is_some() {
+        return PathCandidates {
+            candidates: vec![crate::completion::Candidate {
+                value: "~/".into(),
+                label: "~/".into(),
+                annotation: "directory".into(),
+                directory: true,
+            }],
+            query: "~".into(),
+            directory_input: false,
+            raw_directory: true,
+        };
+    }
     let typed_directory = input
         .rfind(std::path::MAIN_SEPARATOR)
         .map_or("", |index| &input[..=index]);
-    let (directory, prefix) = if input.is_empty() || input.ends_with(std::path::MAIN_SEPARATOR) {
-        (expanded, String::new())
+    let query = input[typed_directory.len()..].to_owned();
+    let mut result = PathCandidates {
+        candidates: Vec::new(),
+        query,
+        directory_input: false,
+        raw_directory: false,
+    };
+    let Ok(expanded) = expand(Path::new(input), default_directory) else {
+        return result;
+    };
+    result.raw_directory = expanded.is_dir();
+    let directory = if input.is_empty() || input.ends_with(std::path::MAIN_SEPARATOR) {
+        expanded
     } else {
-        let prefix = expanded
-            .file_name()
-            .map(|name| name.to_string_lossy().into_owned())
-            .unwrap_or_default();
-        (
-            expanded
-                .parent()
-                .map(Path::to_path_buf)
-                .unwrap_or_else(|| PathBuf::from(std::path::MAIN_SEPARATOR_STR)),
-            prefix,
-        )
+        expanded
+            .parent()
+            .unwrap_or(Path::new(std::path::MAIN_SEPARATOR_STR))
+            .to_path_buf()
     };
-    let Ok(entries) = fs::read_dir(&directory) else {
-        return Vec::new();
+    let Ok(entries) = fs::read_dir(directory) else {
+        return result;
     };
-    let mut candidates = Vec::new();
+    result.directory_input = input.is_empty() || input.ends_with(std::path::MAIN_SEPARATOR);
     for entry in entries.flatten() {
-        let name = entry.file_name().to_string_lossy().into_owned();
-        if !name.starts_with(&prefix) {
+        if cancelled.load(std::sync::atomic::Ordering::Relaxed) {
+            break;
+        }
+        let Ok(name) = entry.file_name().into_string() else {
             continue;
-        }
-        let mut candidate = format!("{typed_directory}{name}");
-        if entry.path().is_dir() {
-            candidate.push(std::path::MAIN_SEPARATOR);
-        }
-        candidates.push(candidate);
+        };
+        let directory = entry.path().is_dir();
+        let label = if directory { format!("{name}/") } else { name };
+        result.candidates.push(crate::completion::Candidate {
+            value: format!("{typed_directory}{label}"),
+            label,
+            annotation: if directory {
+                "directory".into()
+            } else {
+                "file".into()
+            },
+            directory,
+        });
     }
-    candidates.sort_unstable();
-    candidates
+    result
 }
 
 pub fn read(path: &Path) -> Result<DecodedFile, ReadError> {
@@ -693,27 +718,30 @@ mod tests {
         fs::write(dir.join("alpine.txt"), b"").unwrap();
         fs::write(dir.join("beta.txt"), b"").unwrap();
 
-        let mut candidates = complete_path("al", &dir);
-        let mut expected = vec!["alpha.txt".to_owned(), "alpine.txt".to_owned()];
-        expected.sort_unstable();
-        candidates.sort_unstable();
-        assert_eq!(candidates, expected);
+        let cancelled = std::sync::atomic::AtomicBool::new(false);
+        let listing = path_candidates("al", &dir, &cancelled);
+        let candidates = crate::completion::filter(listing.candidates, &listing.query, &cancelled);
+        let mut names: Vec<_> = candidates
+            .iter()
+            .map(|item| item.candidate.value.as_str())
+            .collect();
+        names.sort_unstable();
+        assert_eq!(names, vec!["alpha.txt", "alpine.txt"]);
 
-        for prefix in ["./", "~/"] {
-            let input = format!("{prefix}al");
-            let completion =
-                crate::session::complete(complete_expanded_path(&input, dir.join("al")), &input);
-            assert_eq!(completion.replacement, Some(format!("{prefix}alp")));
-            assert!(
-                completion
-                    .candidates
-                    .iter()
-                    .all(|name| name.starts_with(prefix))
-            );
+        for prefix in ["./".to_owned(), format!("{}/", dir.display())] {
+            let input = format!("{prefix}aa");
+            let listing = path_candidates(&input, &dir, &cancelled);
+            let matches = crate::completion::filter(listing.candidates, &listing.query, &cancelled);
+            assert_eq!(matches.len(), 1);
+            assert_eq!(matches[0].candidate.value, format!("{prefix}alpha.txt"));
         }
-
-        let sub = complete_path("su", &dir);
-        assert_eq!(sub, vec!["sub/".to_owned()]);
+        let listing = path_candidates("su", &dir, &cancelled);
+        let sub = crate::completion::filter(listing.candidates, &listing.query, &cancelled);
+        assert_eq!(sub[0].candidate.value, "sub/");
+        assert!(sub[0].candidate.directory);
+        let listing = path_candidates("sub/", &dir, &cancelled);
+        assert!(listing.directory_input);
+        assert!(listing.raw_directory);
         fs::remove_dir_all(dir).unwrap();
     }
 }

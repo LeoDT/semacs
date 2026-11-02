@@ -114,7 +114,7 @@ fn resizing_preserves_document_state_and_history_and_reveals_point(cx: &mut Test
     let (mut visual, _, body) = open(Buffer::new(None, decoded(&"line 中🙂\n".repeat(1000))), cx);
     visual.simulate_keystrokes("alt->");
     visual.simulate_input("edited");
-    visual.simulate_keystrokes("ctrl-space ctrl-b");
+    visual.simulate_keystrokes("ctrl-t ctrl-b");
     redraw(&mut visual);
     let before = visual.read(|cx| {
         let buffer = body.read(cx).buffer();

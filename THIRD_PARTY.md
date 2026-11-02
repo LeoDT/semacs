@@ -1,5 +1,16 @@
 # Third-party source
 
+## Completion behavior reference and matching dependency
+
+- Vertico (`https://github.com/minad/vertico`, local snapshot `c60d802`) and
+  `extensions/vertico-directory.el` were read as behavior references for candidate
+  insertion, acceptance, raw input and directory navigation. No Emacs Lisp
+  implementation was copied or translated.
+- `nucleo-matcher` 0.3.1 is a registry dependency under MPL-2.0. Its manifest and
+  license were reviewed; no source is vendored or patched. Include its license
+  and covered-source availability in the dependency audit before distributing
+  binaries. semacs uses the matcher, not nucleo's picker runtime or query syntax.
+
 ## Zed text components
 
 - Repository: <https://github.com/zed-industries/zed>

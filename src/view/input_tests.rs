@@ -613,7 +613,7 @@ fn preview_and_final_geometry_refresh_once_each_and_not_on_stable_frames(cx: &mu
 #[gpui::test]
 fn keyboard_commands_preserve_prefix_quit_and_scalar_editing_semantics(cx: &mut TestAppContext) {
     let (mut visual, editor) = open("中e\u{301}🙂", cx);
-    visual.simulate_keystrokes("ctrl-f ctrl-space ctrl-f ctrl-x ctrl-g");
+    visual.simulate_keystrokes("ctrl-f ctrl-t ctrl-f ctrl-x ctrl-g");
     redraw(&mut visual);
     visual.read(|cx| {
         let view = editor.read(cx);
@@ -807,7 +807,7 @@ fn printable_binding_runs_the_registered_command_instead_of_self_insert(cx: &mut
 #[gpui::test]
 fn gui_delete_uses_emacs_region_semantics_and_backspace_remains_scalar(cx: &mut TestAppContext) {
     let (mut visual, editor) = open("abcdef", cx);
-    visual.simulate_keystrokes("ctrl-f ctrl-space ctrl-f ctrl-f ctrl-f delete");
+    visual.simulate_keystrokes("ctrl-f ctrl-t ctrl-f ctrl-f ctrl-f delete");
     redraw(&mut visual);
     visual.read(|cx| {
         let view = editor.read(cx);
@@ -825,7 +825,7 @@ fn typing_does_not_replace_an_active_region_and_indent_aliases_use_commands(
     cx: &mut TestAppContext,
 ) {
     let (mut visual, editor) = open("abcdef", cx);
-    visual.simulate_keystrokes("ctrl-f ctrl-space ctrl-f ctrl-f");
+    visual.simulate_keystrokes("ctrl-f ctrl-t ctrl-f ctrl-f");
     visual.simulate_input("X");
     redraw(&mut visual);
     visual.read(|cx| {

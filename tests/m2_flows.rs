@@ -592,9 +592,15 @@ fn path_completion_ignores_changed_text_and_replaced_sessions(cx: &mut TestAppCo
     fs::write(dir.path().join("alpha.txt"), b"alpha").unwrap();
     let (mut visual, shell, _) = open(buffer_at(&source, "source"), cx);
     visual.simulate_keystrokes("ctrl-x ctrl-f");
-    visual.simulate_input("al");
-    dispatch_keys(&mut visual, &["tab"]);
-    dispatch_text(&mut visual, "z");
+    visual.update(|window, cx| {
+        for key in ["a", "l", "tab", "z"] {
+            let mut stroke = gpui_kit::Keystroke::parse(key).unwrap();
+            if key != "tab" {
+                stroke.key_char = Some(key.to_owned());
+            }
+            window.dispatch_keystroke(stroke, cx);
+        }
+    });
     redraw(&mut visual);
     assert_eq!(contents(&mut visual, &shell), "alz");
 
