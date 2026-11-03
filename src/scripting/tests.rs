@@ -89,6 +89,79 @@ fn overrides_and_unbinding_do_not_change_other_bindings() {
 }
 
 #[test]
+fn theme_configuration_is_copied_validated_and_resolved_after_all_declarations() {
+    use crate::theme::{StyleRole, ThemeSettings};
+    let (_, config) = load(
+        r##"
+        semacs.loadTheme("night");
+        const styles = { default: {foreground: "#112233"} };
+        semacs.defineTheme("night", {appearance: "dark", styles});
+        styles.default.foreground = "#aabbcc";
+        const cursor = {foreground: "#445566"};
+        semacs.setStyle("cursor", cursor);
+        cursor.foreground = "#aabbcc";
+        semacs.setStyle("cursor", {background: "#778899"});
+    "##,
+    )
+    .unwrap();
+    assert_eq!(config.theme.active(), "night");
+    assert_eq!(
+        config.theme.style(StyleRole::Default).foreground,
+        gpui_kit::rgb(0x112233).into()
+    );
+    let cursor = config.theme.style(StyleRole::Cursor);
+    assert_eq!(cursor.foreground, gpui_kit::rgb(0x445566).into());
+    assert_eq!(cursor.background, gpui_kit::rgb(0x778899).into());
+    assert_eq!(load("").unwrap().1.theme, ThemeSettings::default());
+}
+
+#[test]
+fn invalid_themes_reject_the_entire_configuration() {
+    for source in [
+        r##"semacs.loadTheme("missing")"##,
+        r##"semacs.defineTheme("dark", {appearance:"dark",styles:{}})"##,
+        r##"semacs.defineTheme("a", {appearance:"dark",styles:{}}); semacs.defineTheme("a", {appearance:"dark",styles:{}})"##,
+        r##"semacs.defineTheme("Bad", {appearance:"dark",styles:{}})"##,
+        r##"semacs.defineTheme("a", {appearance:"auto",styles:{}})"##,
+        r##"semacs.defineTheme("a", {appearance:"dark",styles:{},extra:true})"##,
+        r##"semacs.defineTheme("a", {appearance:"dark",styles:[]})"##,
+        r##"semacs.setStyle("default", {foreground:"#fff"})"##,
+        r##"semacs.setStyle("default", {foreground:17})"##,
+        r##"semacs.setStyle("default", {background:null})"##,
+        r##"semacs.setStyle("default", {foreground:undefined})"##,
+        r##"semacs.setStyle("default", {weight:"bold"})"##,
+        r##"semacs.setStyle("default", [])"##,
+        r##"semacs.setStyle("region", {foreground:"#112233"})"##,
+        r##"semacs.setStyle("minibuffer-prompt", {background:"#112233"})"##,
+        r##"semacs.setStyle("syntax.keyword", {foreground:"#112233"})"##,
+        r##"for(let i=0;i<33;i++)semacs.defineTheme("t-"+i,{appearance:"dark",styles:{}})"##,
+        r##"for(let i=0;i<129;i++)semacs.setStyle("default", {})"##,
+    ] {
+        assert!(load(source).is_err(), "{source}");
+    }
+}
+
+#[test]
+fn theme_apis_cannot_be_called_from_commands() {
+    for call in [
+        r##"semacs.loadTheme("dark")"##,
+        r##"semacs.defineTheme("x", {appearance:"dark",styles:{}})"##,
+        r##"semacs.setStyle("default", {foreground:"#112233"})"##,
+    ] {
+        let (mut engine, config) = load(&format!(
+            "semacs.registerCommand('bad', text => {{ {call}; return text; }})"
+        ))
+        .unwrap();
+        assert!(
+            engine
+                .transform(script(&config, "bad"), "abc")
+                .unwrap_err()
+                .contains("only available")
+        );
+    }
+}
+
+#[test]
 fn invalid_configuration_is_rejected_as_a_whole() {
     for source in [
         "semacs.registerCommand('forward-char', text => text)",

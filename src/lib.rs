@@ -22,4 +22,5 @@ mod saves;
 pub mod scripting;
 pub mod session;
 pub mod text;
+pub mod theme;
 pub mod view;

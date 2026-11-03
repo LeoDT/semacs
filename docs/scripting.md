@@ -16,6 +16,44 @@
 
 声明启动和重载时的字体基准。可多次调用，后一次提供的字段覆盖前一次字段；未声明的字段沿用默认值。字体族按既有规则去除首尾空白、拒绝空白和控制字符，平台仍可能回退；字号为 8–72 逻辑像素，作为 `reset-font-size` 的基准。
 
+### 主题与命名样式
+
+`semacs.defineTheme(name, { appearance, styles })` 定义一个主题；`appearance` 为 `"light"` 或 `"dark"`，未指定的颜色从该模式的内置主题补齐，不从上次主题继承。名称为 1–64 个小写 ASCII 字母、数字或连字符，不能重复或覆盖内置 `light` / `dark`。不加载 elisp 主题，不使用 Emacs font-lock / face 接口。
+
+`semacs.loadTheme(name)` 声明初始主题，默认 `light`；多次调用最后一次生效，可在定义前引用，最终必须存在。`M-x load-theme` 提供当前定义的主题候选，切换只影响本次运行，不写回文件。
+
+`semacs.setStyle(name, colors)` 声明独立于当前主题的用户覆盖；同一样式可多次调用，按属性覆盖。切换主题保留这些显式覆盖；成功重载整体替换主题定义、选择和覆盖，删除声明即恢复默认，失败保持旧配置。所有主题 API 仅配置阶段可用。
+
+颜色仅支持不透明 `#RRGGBB`（十六进制大小写均可）。样式与可用属性：
+
+| 样式名 | 属性 / 用途 |
+|---|---|
+| `default` | `foreground` / `background`，正文及输入 |
+| `cursor` | `foreground` 为覆盖文字颜色，`background` 为方块填色 |
+| `region` | 仅 `background`，保留正文文字颜色 |
+| `mode-line` / `mode-line-inactive` | `foreground` / `background` |
+| `minibuffer-prompt` | 仅 `foreground` |
+| `echo-area` | `foreground` / `background`；读入末尾临时注记只使用其前景色 |
+| `completion` / `completion-selected` | `foreground` / `background` |
+| `completion-match` | 仅 `foreground`，优先于候选行文字颜色 |
+| `completion-annotation` | 仅 `foreground`，候选注释及计数 |
+| `separator` | 仅 `foreground`，分屏分隔线 |
+
+未知样式、未支持的属性及非法颜色均拒绝整份配置。这里只定义颜色，不支持任意继承、多个启用主题叠加或自动跟随系统；语法样式待 tree-sitter 阶段增加。
+
+```js
+semacs.defineTheme("night", {
+    appearance: "dark",
+    styles: {
+        default: { foreground: "#e6e6e6", background: "#202124" },
+        "mode-line": { foreground: "#ffffff", background: "#304060" },
+        "minibuffer-prompt": { foreground: "#a8c7fa" },
+    },
+});
+semacs.loadTheme("night");
+semacs.setStyle("cursor", { foreground: "#202124", background: "#ffcc66" });
+```
+
 ### `semacs.registerCommand(name, transform)`
 
 注册 `(text: string) => string` 文本变换命令。名称为 1–128 个小写 ASCII 字母、数字或连字符，不能与任何原生命令或另一条脚本命令重名。函数可以闭包引用本次配置的局部变量；重载后不保留旧运行时状态。
@@ -67,6 +105,7 @@ rquickjs 只执行 JavaScript。不内置 TypeScript 转译器或类型检查器
 | QuickJS 内存 / 栈 | 每个运行时 32 MiB / 256 KiB，不等于整个进程 RSS 上限 |
 | region 输入 / 返回文本 | 各最多 256 KiB UTF-8 字节 |
 | 脚本命令 / 自定义键位 | 每份配置最多 256 / 1024 条 |
+| 自定义主题 / 样式覆盖调用 | 每份配置最多 32 个 / 128 次；每个主题最多 12 个界面样式 |
 | 正文请求 | 每个窗口最多一个未完成的脚本命令及一个配置重载；重复请求立即报告忙，不累计 |
 | worker 请求队列 | 容量 1，发送不等待空位 |
 

@@ -34,7 +34,7 @@ keymap、`M-x` 与后续帮助共用唯一的命令注册来源，避免命令�
 
 ## D12 外观
 
-不模拟 Emacs 外观；外围交互与主题交给 gpui-kit，正文编辑视图不交给通用输入控件。
+不模拟 Emacs 外观；外围组件由 gpui-kit 绘制，semacs 的命名样式与主题设置统一解析并映射到 gpui-kit 颜色，正文编辑视图不交给通用输入控件。主题借鉴可理解的界面名称和切换操作，不引入 Emacs font-lock / 完整 face 机制或 elisp 兼容。
 产品可观察的 mode line / echo 要求见 [保真度分级](emacs-fidelity.md#2-保真度分级)。
 
 ## D13 键位配置

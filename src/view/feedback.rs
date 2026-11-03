@@ -94,7 +94,9 @@ impl BufferView {
             scroll: layout.scroll,
             viewport_height: window.viewport_size().height,
             message: self.message.clone().unwrap(),
-            color: cx.theme().muted_foreground,
+            color: crate::theme::ThemeSettings::global(cx)
+                .style(crate::theme::StyleRole::EchoArea)
+                .foreground,
         };
         if let Some(cached) = self.annotation_cache.borrow().as_ref()
             && cached.key == key
@@ -111,7 +113,9 @@ impl BufferView {
                 &[TextRun {
                     len: text.len(),
                     font: self.settings.font.clone(),
-                    color: cx.theme().muted_foreground,
+                    color: crate::theme::ThemeSettings::global(cx)
+                        .style(crate::theme::StyleRole::EchoArea)
+                        .foreground,
                     background_color: None,
                     underline: None,
                     strikethrough: None,

@@ -103,6 +103,7 @@ commands! {
     ExecuteExtendedCommand => "execute-extended-command", Application, ["alt-x" => "M-x"];
     ViewEchoAreaMessages => "view-echo-area-messages", Application, ["ctrl-h e" => "C-h e"];
     ReloadConfiguration => "reload-configuration", Application, [];
+    LoadTheme => "load-theme", Application, [];
     SetFontFamily => "set-font-family", Application, [];
     IncreaseFontSize => "increase-font-size", Application, [];
     DecreaseFontSize => "decrease-font-size", Application, [];

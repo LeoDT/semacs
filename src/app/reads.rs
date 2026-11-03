@@ -310,6 +310,10 @@ impl AppShell {
         let (id, kind) = (session.id(), session.kind().clone());
         match kind {
             ReadKind::Command => self.confirm_command(id, window, cx),
+            ReadKind::Theme => {
+                let input = self.session_input(cx).unwrap_or_default();
+                self.confirm_theme(id, &input, window, cx);
+            }
             ReadKind::FontFamily => {
                 let input = self.session_input(cx).unwrap_or_default();
                 self.confirm_font_family(id, &input, window, cx);

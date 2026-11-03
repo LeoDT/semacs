@@ -6,8 +6,7 @@ use crate::text::ByteOffset;
 use crate::view::{BufferView, PREVIEW_BYTES};
 use gpui_kit as gpui;
 use gpui_kit::{
-    AppContext, Bounds, Entity, Pixels, TestAppContext, WindowHandle, black, font, point, px, size,
-    white,
+    AppContext, Bounds, Entity, Pixels, TestAppContext, WindowHandle, font, point, px, size,
 };
 use std::sync::{Arc, atomic::Ordering};
 
@@ -44,7 +43,7 @@ fn request(
     bounds: Bounds<Pixels>,
 ) -> (InitialViewport, InitialPreparation) {
     cx.update_window(window.into(), |_, window, cx| {
-        let viewport = view.read(cx).initial_viewport(bounds, black(), window);
+        let viewport = view.read(cx).initial_viewport(bounds, window);
         let work = view.read(cx).prepare_initial(viewport.clone(), cx);
         (viewport, work)
     })
@@ -71,7 +70,7 @@ async fn first_prepaint_reuses_background_rows_and_completes_the_remaining_index
             let capture = crate::preparation_trace::Capture::default();
             #[cfg(feature = "native-profiler")]
             let recording = capture.enter();
-            view.prepare(bounds, black(), window, cx);
+            view.prepare(bounds, window, cx);
             #[cfg(feature = "native-profiler")]
             {
                 drop(recording);
@@ -102,10 +101,10 @@ async fn first_prepaint_reuses_background_rows_and_completes_the_remaining_index
 }
 
 #[gpui::test]
-async fn stale_text_session_font_width_height_and_color_results_are_not_installed(
+async fn stale_text_session_font_width_and_height_results_are_not_installed(
     cx: &mut TestAppContext,
 ) {
-    for change in ["text", "session", "font", "width", "height", "color"] {
+    for change in ["text", "session", "font", "width", "height"] {
         let (window, view, bounds) = setup(cx, "abc中🙂\tlast");
         let (mut viewport, work) = request(cx, window, &view, bounds);
         let prepared = work.ready().await.unwrap();
@@ -123,7 +122,6 @@ async fn stale_text_session_font_width_height_and_color_results_are_not_installe
                     viewport.settings.wrap_width = viewport.size.width;
                 }
                 "height" => viewport.size.height += px(24.),
-                "color" => viewport.color = white(),
                 _ => unreachable!(),
             }
             assert!(
@@ -153,6 +151,35 @@ async fn empty_and_oversized_grapheme_preparations_always_have_a_real_first_row(
         assert_eq!(prepared.index.indexed_bytes(), text.len());
         assert!(prepared.rows.contains_key(&0));
     }
+}
+
+#[gpui::test]
+async fn initial_preparation_is_reusable_after_a_theme_change(cx: &mut TestAppContext) {
+    let (window, view, bounds) = setup(cx, "abc中🙂\tlast");
+    let (viewport, work) = request(cx, window, &view, bounds);
+    let prepared = work.ready().await.unwrap();
+    let rows = prepared.rows.clone();
+    cx.update(|cx| {
+        let mut settings = crate::theme::ThemeSettings::default();
+        settings.select("dark").unwrap();
+        settings.install(cx);
+    });
+    cx.update_window(window.into(), |_, window, cx| {
+        assert!(viewport.matches_window(window));
+        view.update(cx, |view, cx| {
+            assert!(view.install_initial(prepared, &viewport, cx));
+            view.restore_input(window, cx);
+            view.prepare(bounds, window, cx);
+            assert!(
+                view.viewport_layout()
+                    .unwrap()
+                    .rows
+                    .iter()
+                    .all(|row| Arc::ptr_eq(row, &rows[&row.source.index]))
+            );
+        });
+    })
+    .unwrap();
 }
 
 #[gpui::test]

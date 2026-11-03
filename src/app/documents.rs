@@ -4,7 +4,6 @@ use crate::files::{self, ReadError};
 use crate::saves::{SaveCompletion, SaveIntent, SaveOutcome, SaveRequest};
 use crate::session::ReadKind;
 use crate::view::{BufferView, InitialViewport};
-use gpui_kit::component::ActiveTheme;
 use gpui_kit::{App, AppContext, Bounds, Context, Entity, Pixels, Window};
 use std::io;
 use std::path::PathBuf;
@@ -37,9 +36,7 @@ impl AppShell {
             return;
         }
         let view = opening.view.clone();
-        let viewport = view
-            .read(cx)
-            .initial_viewport(bounds, cx.theme().foreground, window);
+        let viewport = view.read(cx).initial_viewport(bounds, window);
         if opening.viewport.as_ref() == Some(&viewport) {
             return;
         }
@@ -66,7 +63,7 @@ impl AppShell {
                         shell.cancel_file_open();
                         return;
                     }
-                    if !viewport.matches_window(window, cx.theme().foreground) {
+                    if !viewport.matches_window(window) {
                         shell.opening.as_mut().unwrap().viewport = None;
                         cx.notify();
                         return;

@@ -1,6 +1,7 @@
 //! Window furniture for the app shell: file metadata and echo area.
 
-use gpui_kit::component::{ActiveTheme, h_flex, v_flex};
+use crate::theme::{StyleRole, ThemeSettings};
+use gpui_kit::component::{h_flex, v_flex};
 use gpui_kit::*;
 
 pub fn mode_line(
@@ -14,11 +15,11 @@ pub fn mode_line(
     let format = format.as_str();
     let name = format!("{} {name}", if modified { "**" } else { "--" });
     let position = format!("L{} C{}", position.0, position.1);
-    let (background, foreground) = if selected {
-        (cx.theme().accent, cx.theme().accent_foreground)
+    let colors = ThemeSettings::global(cx).style(if selected {
+        StyleRole::ModeLine
     } else {
-        (cx.theme().tab_bar, cx.theme().muted_foreground)
-    };
+        StyleRole::ModeLineInactive
+    });
 
     h_flex()
         .id("mode-line")
@@ -29,8 +30,8 @@ pub fn mode_line(
         .px_3()
         .gap_3()
         .items_center()
-        .bg(background)
-        .text_color(foreground)
+        .bg(colors.background)
+        .text_color(colors.foreground)
         .text_sm()
         .child(name)
         .child(format)
@@ -48,8 +49,14 @@ pub fn echo_area(message: &str, max_height: Pixels, cx: &App) -> impl IntoElemen
         .w_full()
         .px_3()
         .justify_start()
-        .bg(cx.theme().background)
-        .text_color(cx.theme().muted_foreground)
+        .bg(ThemeSettings::global(cx)
+            .style(StyleRole::EchoArea)
+            .background)
+        .text_color(
+            ThemeSettings::global(cx)
+                .style(StyleRole::EchoArea)
+                .foreground,
+        )
         .text_sm()
         .child(message.to_owned())
 }
@@ -58,16 +65,20 @@ pub fn echo_area(message: &str, max_height: Pixels, cx: &App) -> impl IntoElemen
 mod tests {
     use super::mode_line;
     use crate::files::FileFormat;
+    use crate::theme::{StyleRole, ThemeSettings};
     use gpui_kit as gpui;
-    use gpui_kit::component::{ActiveTheme, Theme, ThemeMode};
     use gpui_kit::{Styled, TestAppContext};
 
     #[gpui::test]
     fn mode_line_distinguishes_selection_in_light_and_dark_themes(cx: &mut TestAppContext) {
         cx.update(crate::app::init);
-        for mode in [ThemeMode::Light, ThemeMode::Dark] {
+        for name in ["light", "dark"] {
             cx.update(|cx| {
-                Theme::change(mode, None, cx);
+                let mut settings = ThemeSettings::default();
+                settings.select(name).unwrap();
+                settings.install(cx);
+                let selected_colors = ThemeSettings::global(cx).style(StyleRole::ModeLine);
+                let other_colors = ThemeSettings::global(cx).style(StyleRole::ModeLineInactive);
                 let mut selected = mode_line(
                     "buffer".into(),
                     FileFormat::default(),
@@ -84,13 +95,19 @@ mod tests {
                     false,
                     cx,
                 );
-                assert_eq!(selected.style().background, Some(cx.theme().accent.into()));
+                assert_eq!(
+                    selected.style().background,
+                    Some(selected_colors.background.into())
+                );
                 assert_eq!(
                     selected.style().text.color,
-                    Some(cx.theme().accent_foreground)
+                    Some(selected_colors.foreground)
                 );
-                assert_eq!(other.style().background, Some(cx.theme().tab_bar.into()));
-                assert_eq!(other.style().text.color, Some(cx.theme().muted_foreground));
+                assert_eq!(
+                    other.style().background,
+                    Some(other_colors.background.into())
+                );
+                assert_eq!(other.style().text.color, Some(other_colors.foreground));
                 assert_ne!(selected.style().background, other.style().background);
                 assert_ne!(selected.style().text.color, other.style().text.color);
             });

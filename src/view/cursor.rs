@@ -1,6 +1,6 @@
 use super::{RowPart, ShapedRow, ViewportLayout};
 use crate::text::ByteOffset;
-use gpui_kit::component::ActiveTheme;
+use crate::theme::{StyleRole, ThemeSettings};
 use gpui_kit::{
     App, Bounds, DecorationRun, Hsla, LineLayout, Pixels, Point, ShapedLine, TextAlign, Window,
     point, size,
@@ -91,6 +91,7 @@ impl RowPart {
         origin: Point<Pixels>,
         line_height: Pixels,
         cursor: Option<&Cursor>,
+        prompt_end: ByteOffset,
         window: &mut Window,
         cx: &mut App,
     ) {
@@ -100,53 +101,71 @@ impl RowPart {
             let end = cursor.range.end.min(self.range.end);
             (start < end).then(|| start.0 - self.range.start.0..end.0 - self.range.start.0)
         });
-        if let Some(range) = range {
-            let runs = cursor_decorations(
-                line.len(),
-                range,
-                cx.theme().foreground,
-                cx.theme().background,
-            );
-            LineLayout::paint(
-                line,
-                origin,
-                line_height,
-                TextAlign::Left,
-                None,
-                &runs,
-                window,
-                cx,
-            )
-            .unwrap();
-        } else {
-            line.paint(origin, line_height, TextAlign::Left, None, window, cx)
-                .unwrap();
-        }
+        let prompt_len = prompt_end
+            .0
+            .saturating_sub(self.range.start.0)
+            .min(line.len());
+        let theme = ThemeSettings::global(cx);
+        let runs = text_decorations(
+            line.len(),
+            range,
+            theme.style(StyleRole::Default).foreground,
+            theme.style(StyleRole::Cursor).foreground,
+            prompt_len,
+            theme.style(StyleRole::MinibufferPrompt).foreground,
+        );
+        LineLayout::paint(
+            line,
+            origin,
+            line_height,
+            TextAlign::Left,
+            None,
+            &runs,
+            window,
+            cx,
+        )
+        .unwrap();
     }
 }
 
-fn cursor_decorations(
+fn text_decorations(
     len: usize,
-    range: Range<usize>,
+    cursor: Option<Range<usize>>,
     foreground: Hsla,
-    background: Hsla,
-) -> heapless::Vec<DecorationRun, 3> {
+    cursor_text: Hsla,
+    prompt_len: usize,
+    prompt_color: Hsla,
+) -> heapless::Vec<DecorationRun, 4> {
+    let mut boundaries = [
+        0,
+        prompt_len,
+        cursor.as_ref().map_or(0, |range| range.start),
+        cursor.as_ref().map_or(0, |range| range.end),
+        len,
+    ];
+    boundaries.sort_unstable();
     let mut runs = heapless::Vec::new();
-    for (range, color) in [
-        (0..range.start, foreground),
-        (range.clone(), background),
-        (range.end..len, foreground),
-    ] {
-        if !range.is_empty() {
-            runs.push(DecorationRun {
-                len: range.len() as u32,
-                color,
-                background_color: None,
-                underline: None,
-                strikethrough: None,
-            })
-            .unwrap();
+    for pair in boundaries.windows(2) {
+        let start = pair[0];
+        let end = pair[1];
+        if start == end {
+            continue;
         }
+        let color = if cursor.as_ref().is_some_and(|range| range.contains(&start)) {
+            cursor_text
+        } else if start < prompt_len {
+            prompt_color
+        } else {
+            foreground
+        };
+        runs.push(DecorationRun {
+            len: (end - start) as u32,
+            color,
+            background_color: None,
+            underline: None,
+            strikethrough: None,
+        })
+        .unwrap();
     }
     runs
 }

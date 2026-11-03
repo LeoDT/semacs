@@ -24,6 +24,7 @@ use crate::input::{DisplayChange, DisplaySnapshot, SessionToken};
 use crate::keymap::Keymap;
 use crate::platform::{BufferInputHandler, InputOperation};
 use crate::text::ByteOffset;
+use crate::theme::{StyleRole, ThemeSettings};
 
 mod cursor;
 mod feedback;
@@ -96,7 +97,6 @@ impl ShapedRow {
         index: &WrapIndex,
         metrics: &mut FontMeasure,
         system: &WindowTextSystem,
-        color: Hsla,
     ) -> Self {
         #[cfg(feature = "native-profiler")]
         let _trace = crate::preparation_trace::Span::detail("shape-row", row.row.content_len);
@@ -116,8 +116,7 @@ impl ShapedRow {
             let has_tab = fragment.ends_with('\t');
             let content = fragment.trim_end_matches('\t');
             if !content.is_empty() {
-                let mut run = metrics.run(content.len());
-                run.color = color;
+                let run = metrics.run(content.len());
                 let line = {
                     #[cfg(feature = "native-profiler")]
                     let _trace =
@@ -353,7 +352,6 @@ pub struct BufferView {
     shape_work: Option<BackgroundWork>,
     shape_range: Option<(LayoutKey, Range<usize>)>,
     cache: HashMap<usize, Arc<ShapedRow>>,
-    color: Option<Hsla>,
     geometry: Option<ViewportLayout>,
     content_bounds: Option<Bounds<Pixels>>,
     retained_paint_layout: Option<ViewportLayout>,
@@ -413,7 +411,6 @@ impl BufferView {
             shape_work: None,
             shape_range: None,
             cache: HashMap::new(),
-            color: None,
             geometry: None,
             content_bounds: None,
             retained_paint_layout: None,
@@ -905,13 +902,7 @@ impl BufferView {
         });
     }
 
-    fn prepare(
-        &mut self,
-        bounds: Bounds<Pixels>,
-        color: Hsla,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
+    fn prepare(&mut self, bounds: Bounds<Pixels>, window: &mut Window, cx: &mut Context<Self>) {
         #[cfg(feature = "native-profiler")]
         let _trace =
             crate::preparation_trace::Span::new("prepare", self.display_snapshot().text().len());
@@ -951,12 +942,6 @@ impl BufferView {
             let last_row = self.settings.line_height * index.row_count().saturating_sub(1) as f32;
             self.scroll.y = self.scroll.y.min(last_row);
         }
-        if self.color != Some(color) {
-            self.cache.clear();
-            self.color = Some(color);
-            self.shape_work = None;
-            self.shape_range = None;
-        }
         let first =
             (f32::from(self.scroll.y) / f32::from(self.settings.line_height)).floor() as usize;
         let count = visible_row_count(bounds.size.height, self.settings.line_height);
@@ -978,7 +963,6 @@ impl BufferView {
                     index,
                     self.metrics.as_mut().unwrap(),
                     window.text_system(),
-                    color,
                 );
                 self.cache.insert(row.index, Arc::new(shaped));
             }
@@ -1018,7 +1002,6 @@ impl BufferView {
                             &index,
                             &mut metrics,
                             &shaper,
-                            color,
                         )));
                     }
                     Some(result)
@@ -1028,9 +1011,7 @@ impl BufferView {
                 let task = cx.spawn(async move |view, cx| {
                     if let Some(rows) = worker.await {
                         view.update(cx, |view, cx| {
-                            if view.shape_range.as_ref() == Some(&expected)
-                                && view.color == Some(color)
-                            {
+                            if view.shape_range.as_ref() == Some(&expected) {
                                 for row in rows {
                                     view.cache.insert(row.source.index, row);
                                 }
@@ -1408,9 +1389,8 @@ impl Element for TextCanvas {
         window: &mut Window,
         cx: &mut App,
     ) {
-        let color = cx.theme().foreground;
         self.view
-            .update(cx, |view, cx| view.prepare(bounds, color, window, cx));
+            .update(cx, |view, cx| view.prepare(bounds, window, cx));
     }
 
     fn paint(
@@ -1431,7 +1411,7 @@ impl Element for TextCanvas {
             }
         });
         let annotation = self.view.read(cx).annotation_lines(window, cx);
-        let (layout, cursor, marked, region) = {
+        let (layout, cursor, marked, region, prompt_end) = {
             let view = self.view.read(cx);
             let Some(layout) = view.paint_layout().cloned() else {
                 return;
@@ -1448,18 +1428,29 @@ impl Element for TextCanvas {
                 } else {
                     Vec::new()
                 },
+                if view.annotate_message {
+                    view.buffer().read_only_prefix()
+                } else {
+                    ByteOffset(0)
+                },
             )
         };
+        let cursor_colors = ThemeSettings::global(cx).style(StyleRole::Cursor);
         window.with_content_mask(
             Some(ContentMask {
                 bounds: layout.bounds,
             }),
             |window| {
                 for bounds in region {
-                    window.paint_quad(fill(bounds, cx.theme().selection));
+                    window.paint_quad(fill(
+                        bounds,
+                        ThemeSettings::global(cx)
+                            .style(StyleRole::Region)
+                            .background,
+                    ));
                 }
                 if let Some(cursor) = &cursor {
-                    window.paint_quad(fill(cursor.bounds, cx.theme().foreground));
+                    window.paint_quad(fill(cursor.bounds, cursor_colors.background));
                 }
                 for row in &layout.rows {
                     let origin = layout.origin(row);
@@ -1471,6 +1462,7 @@ impl Element for TextCanvas {
                             point(origin.x + part.x, origin.y),
                             layout.key.settings.line_height,
                             cursor,
+                            prompt_end,
                             window,
                             cx,
                         );
@@ -1509,7 +1501,7 @@ impl Element for TextCanvas {
                             if let Some(cursor) = &cursor {
                                 let overlap = underline.intersect(&cursor.bounds);
                                 if overlap.size.width > px(0.) && overlap.size.height > px(0.) {
-                                    window.paint_quad(fill(overlap, cx.theme().background));
+                                    window.paint_quad(fill(overlap, cursor_colors.foreground));
                                 }
                             }
                         }
@@ -1538,6 +1530,8 @@ mod region_tests;
 mod routing_tests;
 #[cfg(test)]
 mod split_tests;
+#[cfg(test)]
+mod theme_tests;
 
 #[cfg(test)]
 mod tests {

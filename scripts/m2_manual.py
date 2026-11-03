@@ -96,10 +96,72 @@ D1 定向目视验证（只操作本批窗口，英文/ASCII 输入；任一异�
 
 不会截图、自动注键或改变输入法；本批不测原生性能、真实 IME 或 GPU。
 """
+THEMES_CONFIG = b"""semacs.setFont({family: "monospace", size: 20});
+semacs.defineTheme("e0-night", {
+    appearance: "dark",
+    styles: {"mode-line": {foreground: "#ffffff", background: "#304060"}}
+});
+semacs.defineTheme("e0-paper", {
+    appearance: "light",
+    styles: {
+        default: {foreground: "#302819", background: "#fff8e7"},
+        region: {background: "#e6d4a8"},
+        "mode-line": {foreground: "#fff8e7", background: "#685237"},
+        "mode-line-inactive": {foreground: "#685237", background: "#e8dcc5"},
+        "minibuffer-prompt": {foreground: "#7b3f00"},
+        "echo-area": {foreground: "#685237", background: "#f3e8d0"},
+        completion: {foreground: "#302819", background: "#fff8e7"},
+        "completion-selected": {foreground: "#302819", background: "#e6d4a8"},
+        "completion-match": {foreground: "#7b3f00"},
+        "completion-annotation": {foreground: "#79694f"},
+        separator: {foreground: "#ad926c"}
+    }
+});
+semacs.loadTheme("e0-night");
+semacs.setStyle("cursor", {foreground: "#202124", background: "#ffcc66"});
+"""
+THEMES_SEEDS = {
+    "body.txt": "alpha beta\nsecond line: 中文 🙂 e\u0301\n".encode(),
+    "control.txt": b"untouched\n",
+    "config/semacs/init.js": THEMES_CONFIG,
+}
+THEMES_EXPECTED = {**THEMES_SEEDS, "body.txt": b"X" + THEMES_SEEDS["body.txt"]}
+THEMES_OBSERVATIONS = (
+    "theme-start-split", "theme-switch", "theme-cancel-unknown",
+    "theme-minibuffer-messages", "theme-editing",
+)
+THEMES_INSTRUCTIONS = """
+E0 配色效果验证（仅本批窗口，英文输入；异常立即停止步骤，关闭窗口后答 no，不修复或重试）：
+
+1. 启动 / 分屏（theme-start-split）
+   应以深色 e0-night 启动，20px 正文，黄色方块光标且覆盖文字可读。
+   C-x 3 左右分屏，观察分隔线、选中与非选中 mode line；C-x o 来回切换，两侧配色一致。
+   在正文 M-< C-t M-f，观察 region 背景与文字仍清楚；C-g 停用。
+2. 主题切换（theme-switch）
+   M-x load-theme RET：应列出 dark、e0-night、e0-paper、light，当前项注释 current。
+   输入 light RET，整个窗口切成浅色；黄色光标保留，这是用户显式覆盖，不是旧主题残留。
+   再 M-x load-theme RET，输入 e0-paper RET，应出现纸色正文、棕色 mode line / prompt / 候选命中。
+   在 paper 中重新 M-< C-t M-f 检查 region，再 C-g；两侧及非选中 mode line 都应更新。
+   再切 dark、light，确认纸色背景不残留，字号、文字、位置不因配色而改变。
+3. 取消 / 不存在名称（theme-cancel-unknown）
+   在 light 下再次读入主题，输入 e0-paper 后 C-g，应仍是浅色并回原正文。
+   再读入主题，输入 zz-e0-missing RET，应显示 No match，保留输入，不切主题；C-g 恢复正文。
+4. minibuffer / 消息（theme-minibuffer-messages）
+   切 e0-paper，M-x 输入 fwd，检查 prompt、命中、注释与候选选中行可辨；C-n / C-p 移动后 C-g。
+   M-x 输入 zz-e0-unknown RET，检查输入末尾 [No match]，C-g；底部不覆盖 mode line。
+   C-h e 查看历史：纸色仍一致、原正文保持焦点。可缩窄测试窗口检查裁切，再恢复大小。
+5. 编辑恢复（theme-editing）
+   保持原正文焦点，C-x 1 只保留当前正文。M-<，输入 X，C-/ 撤销，确认原文恢复；
+   再输入 X，C-x C-s 保存等待 clean，C-x C-c 正常关闭。不要改配置或 control.txt。
+   回终端回答五组观察并记录大致窗口尺寸。
+
+不会截图、注键、改变输入法或读取日常配置；不测原生性能、真实 IME 或 GPU。
+"""
 PROFILES = {
     "m2": (SEEDS, EXPECTED, OBSERVATIONS),
     "candidates": (CANDIDATE_SEEDS, CANDIDATE_EXPECTED, CANDIDATE_OBSERVATIONS),
     "messages": (MESSAGES_SEEDS, MESSAGES_EXPECTED, MESSAGES_OBSERVATIONS),
+    "themes": (THEMES_SEEDS, THEMES_EXPECTED, THEMES_OBSERVATIONS),
 }
 
 
@@ -146,7 +208,7 @@ def verify(directory, profile="m2"):
         "errors": errors, "evidence": "user-observed real desktop plus independent disk bytes",
         "performance": "unmeasured",
     }
-    if profile == "messages":
+    if profile in ("messages", "themes"):
         result.update(ime="unmeasured", gpu="unmeasured", screenshots=False)
     (directory / "result.json").write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n")
     if errors:
@@ -166,6 +228,8 @@ def main():
         print(directory)
         if args.profile == "messages":
             print(MESSAGES_INSTRUCTIONS, flush=True)
+        elif args.profile == "themes":
+            print(THEMES_INSTRUCTIONS, flush=True)
     else:
         verify(directory, args.profile)
         print(f"manual observations and disk bytes verified: {directory / 'result.json'}")

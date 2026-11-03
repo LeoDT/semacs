@@ -119,6 +119,32 @@ class ManualFixtureTests(unittest.TestCase):
             m2_manual.verify(self.directory, "messages")
         self.assertEqual(outside.read_bytes(), m2_manual.MESSAGES_EXPECTED["body.txt"])
 
+    def test_theme_fixture_is_isolated_and_only_final_body_edit_is_expected(self):
+        m2_manual.prepare(self.directory, "themes")
+        self.assertEqual(
+            (self.directory / "config/semacs/init.js").read_bytes(), m2_manual.THEMES_CONFIG
+        )
+        self.assertIn(b'semacs.loadTheme("e0-night")', m2_manual.THEMES_CONFIG)
+        self.assertIn("中文 🙂 e\u0301".encode(), (self.directory / "body.txt").read_bytes())
+        self.assertEqual(
+            m2_manual.THEMES_EXPECTED["body.txt"], b"X" + m2_manual.THEMES_SEEDS["body.txt"]
+        )
+
+    def test_theme_missing_observation_or_changed_config_fails_and_keeps_evidence(self):
+        self.completed_fixture("themes")
+        (self.directory / "observations.tsv").write_text("theme-switch\tno\n")
+        config = self.directory / "config/semacs/init.js"
+        config.write_bytes(b"changed configuration")
+        with self.assertRaisesRegex(RuntimeError, "disk-byte mismatch"):
+            m2_manual.verify(self.directory, "themes")
+        result = json.loads((self.directory / "result.json").read_text())
+        self.assertFalse(result["completed"])
+        self.assertEqual(result["observations"]["theme-switch"], "no")
+        self.assertEqual(result["ime"], "unmeasured")
+        self.assertEqual(result["gpu"], "unmeasured")
+        self.assertFalse(result["screenshots"])
+        self.assertEqual(config.read_bytes(), b"changed configuration")
+
     def test_wrong_profile_cannot_pass(self):
         self.completed_fixture("m2")
         with self.assertRaisesRegex(RuntimeError, "fixture profile does not match"):

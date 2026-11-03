@@ -4,8 +4,8 @@ use crate::buffer::Buffer;
 use crate::completion::CandidateList;
 use crate::editing::{EditTarget, KillRing};
 use crate::text::ByteOffset;
+use crate::theme::{StyleRole, ThemeSettings};
 use crate::view::BufferView;
-use gpui_kit::component::ActiveTheme;
 use gpui_kit::prelude::FluentBuilder;
 
 pub struct Minibuffer {
@@ -69,6 +69,11 @@ impl Focusable for Minibuffer {
 
 impl Render for Minibuffer {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let theme = ThemeSettings::global(cx);
+        let completion = theme.style(StyleRole::Completion);
+        let selected = theme.style(StyleRole::CompletionSelected);
+        let annotation = theme.style(StyleRole::CompletionAnnotation);
+        let matched = theme.style(StyleRole::CompletionMatch);
         let line_height = self.editor.read(cx).line_height();
         let input_height = self.editor.read(cx).minibuffer_height(window, cx);
         let fonts = cx.global::<crate::appearance::FontSettings>();
@@ -79,7 +84,9 @@ impl Render for Minibuffer {
             .overflow_hidden()
             .font_family(fonts.family().to_owned())
             .text_size(fonts.size())
-            .line_height(line_height);
+            .line_height(line_height)
+            .bg(completion.background)
+            .text_color(completion.foreground);
         if let Some(list) = &self.candidates {
             let count = if list.loading && list.items.is_empty() {
                 "Updating candidates…".to_owned()
@@ -98,13 +105,13 @@ impl Render for Minibuffer {
                     .h(px(24.))
                     .px_3()
                     .text_sm()
-                    .text_color(cx.theme().muted_foreground)
+                    .text_color(annotation.foreground)
                     .child(count),
             );
             for index in list.visible_range(rows.min(8)) {
                 let item = &list.items[index];
                 let highlight = HighlightStyle {
-                    color: Some(cx.theme().primary),
+                    color: Some(matched.foreground),
                     font_weight: Some(FontWeight::BOLD),
                     ..Default::default()
                 };
@@ -117,7 +124,7 @@ impl Render for Minibuffer {
                         .gap_3()
                         .px_3()
                         .when(list.selected == Some(index), |row| {
-                            row.bg(cx.theme().accent)
+                            row.bg(selected.background).text_color(selected.foreground)
                         })
                         .child(
                             div()
@@ -141,7 +148,7 @@ impl Render for Minibuffer {
                                 .overflow_hidden()
                                 .text_ellipsis()
                                 .whitespace_nowrap()
-                                .text_color(cx.theme().muted_foreground)
+                                .text_color(annotation.foreground)
                                 .child(item.candidate.annotation.clone()),
                         ),
                 );
@@ -165,7 +172,7 @@ impl Render for Minibuffer {
                         self.candidates
                             .as_ref()
                             .is_some_and(|list| list.selected.is_none()),
-                        |input| input.border_color(cx.theme().primary),
+                        |input| input.border_color(matched.foreground),
                     )
                     .child(self.editor.clone()),
             )

@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use gpui_kit::component::{ActiveTheme, h_flex, v_flex};
+use gpui_kit::component::{h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 
@@ -276,11 +276,11 @@ impl AppShell {
                     .child(first)
                     .when(*axis == Axis::Horizontal, |layout| {
                         layout.child(
-                            div()
-                                .w(px(1.))
-                                .h_full()
-                                .flex_shrink_0()
-                                .bg(cx.theme().border),
+                            div().w(px(1.)).h_full().flex_shrink_0().bg(
+                                crate::theme::ThemeSettings::global(cx)
+                                    .style(crate::theme::StyleRole::Separator)
+                                    .foreground,
+                            ),
                         )
                     })
                     .child(second)

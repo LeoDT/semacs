@@ -113,6 +113,19 @@ impl AppShell {
             });
         } else {
             let candidates = match &kind {
+                ReadKind::Theme => crate::theme::ThemeSettings::global(cx)
+                    .names()
+                    .map(|name| {
+                        Candidate::named(
+                            name.into(),
+                            if name == crate::theme::ThemeSettings::global(cx).active() {
+                                "current".into()
+                            } else {
+                                String::new()
+                            },
+                        )
+                    })
+                    .collect(),
                 ReadKind::Command => self
                     .commands
                     .commands()

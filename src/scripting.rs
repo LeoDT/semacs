@@ -26,6 +26,7 @@ pub struct Configuration {
     pub commands: CommandRegistry,
     pub body_keymap: Keymap,
     pub font: FontSettings,
+    pub theme: crate::theme::ThemeSettings,
 }
 
 impl Default for Configuration {
@@ -35,6 +36,7 @@ impl Default for Configuration {
             commands: CommandRegistry::default(),
             body_keymap: Keymap::for_body(),
             font: FontSettings::default(),
+            theme: crate::theme::ThemeSettings::default(),
         }
     }
 }

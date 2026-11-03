@@ -6,6 +6,24 @@ use crate::command::Command;
 use crate::view::BufferView;
 
 impl AppShell {
+    pub(super) fn confirm_theme(
+        &mut self,
+        id: u64,
+        name: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let mut settings = crate::theme::ThemeSettings::global(cx).clone();
+        if let Err(error) = settings.select(name) {
+            self.message_minibuffer(error, cx);
+            return;
+        }
+        if let Some(origin) = self.end_session(id, window, cx) {
+            settings.install(cx);
+            self.show_message(&origin, format!("Theme: {name}"), cx);
+        }
+    }
+
     pub(super) fn change_font_size(
         &mut self,
         command: Command,

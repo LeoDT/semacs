@@ -17,6 +17,7 @@ impl AppShell {
     ) -> Self {
         if let Ok(loaded) = &result {
             cx.set_global(loaded.configuration.font.clone());
+            loaded.configuration.theme.clone().install(cx);
         }
         let mut shell = Self::new(buffer, window, cx);
         shell.config_path = path;
@@ -44,6 +45,7 @@ impl AppShell {
         self.body_keymap = loaded.configuration.body_keymap;
         self.script_host = Some(loaded.host);
         cx.set_global(loaded.configuration.font);
+        loaded.configuration.theme.install(cx);
         for view in self.all_views() {
             view.update(cx, |view, cx| view.clear_pending(cx));
         }
@@ -54,6 +56,9 @@ impl AppShell {
                 .editor()
                 .clone()
                 .update(cx, |view, cx| view.clear_pending(cx));
+        }
+        if let Some(mount) = &mut self.minibuffer {
+            mount.candidate_snapshot = None;
         }
         self.refresh_candidates(window, cx);
         cx.notify();

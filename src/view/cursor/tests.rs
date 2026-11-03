@@ -236,9 +236,36 @@ fn shaping_clusters_without_a_separate_glyph_are_not_split_by_cursor_stops(
 }
 
 #[test]
+fn prompt_and_cursor_decoration_ranges_preserve_body_and_cursor_priority() {
+    use gpui_kit::rgb;
+    let prompt = rgb(0xff0000).into();
+    let cursor = rgb(0x00ff00).into();
+    for range in [None, Some(0..1), Some(2..5), Some(4..7)] {
+        let runs = text_decorations(8, range.clone(), white(), cursor, 4, prompt);
+        let mut offset = 0;
+        for run in runs {
+            for byte in offset..offset + run.len as usize {
+                assert_eq!(
+                    run.color,
+                    if range.as_ref().is_some_and(|range| range.contains(&byte)) {
+                        cursor
+                    } else if byte < 4 {
+                        prompt
+                    } else {
+                        white()
+                    }
+                );
+            }
+            offset += run.len as usize;
+        }
+        assert_eq!(offset, 8);
+    }
+}
+
+#[test]
 fn cursor_decorations_invert_only_the_selected_cluster_without_reshaping() {
     for range in [0..1, 1..4, 4..5, 0..5] {
-        let runs = cursor_decorations(5, range.clone(), white(), black());
+        let runs = text_decorations(5, Some(range.clone()), white(), black(), 0, white());
         let mut offset = 0;
         for run in runs {
             let end = offset + run.len as usize;

@@ -4,13 +4,12 @@ use super::*;
 pub(crate) struct InitialViewport {
     settings: LayoutSettings,
     size: Size<Pixels>,
-    color: Hsla,
     window_size: Size<Pixels>,
 }
 
 impl InitialViewport {
-    pub(crate) fn matches_window(&self, window: &Window, color: Hsla) -> bool {
-        self.window_size == window.viewport_size() && self.color == color
+    pub(crate) fn matches_window(&self, window: &Window) -> bool {
+        self.window_size == window.viewport_size()
     }
 }
 
@@ -43,7 +42,6 @@ impl BufferView {
     pub(crate) fn initial_viewport(
         &self,
         bounds: Bounds<Pixels>,
-        color: Hsla,
         window: &Window,
     ) -> InitialViewport {
         let size = text_bounds(bounds).size;
@@ -52,7 +50,6 @@ impl BufferView {
         InitialViewport {
             settings,
             size,
-            color,
             window_size: window.viewport_size(),
         }
     }
@@ -92,13 +89,7 @@ impl BufferView {
                 }
                 rows.insert(
                     row.index,
-                    Arc::new(ShapedRow::shape(
-                        row,
-                        &index,
-                        &mut metrics,
-                        &shaper,
-                        viewport.color,
-                    )),
+                    Arc::new(ShapedRow::shape(row, &index, &mut metrics, &shaper)),
                 );
             }
             if worker_cancel.load(Ordering::Relaxed) {
@@ -139,7 +130,6 @@ impl BufferView {
         self.metrics = Some(prepared.metrics);
         self.index = Some(prepared.index);
         self.cache = prepared.rows;
-        self.color = Some(viewport.color);
         if let Some(job) = prepared.remaining {
             self.finish_index(job, cx);
         }

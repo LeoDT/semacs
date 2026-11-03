@@ -32,6 +32,7 @@ impl Global for KillRing {}
 
 pub fn init(cx: &mut App) {
     gpui_kit::init(cx);
+    crate::theme::ThemeSettings::default().install(cx);
 }
 
 struct MinibufferMount {
@@ -234,6 +235,9 @@ impl AppShell {
             }
             Command::ViewEchoAreaMessages => self.view_messages(window, cx),
             Command::ReloadConfiguration => self.reload_configuration(origin, window, cx),
+            Command::LoadTheme => {
+                self.begin_read(ReadKind::Theme, origin, "", window, cx);
+            }
             Command::SetFontFamily => {
                 self.begin_read(ReadKind::FontFamily, origin, "", window, cx);
             }

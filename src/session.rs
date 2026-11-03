@@ -18,6 +18,7 @@ pub enum ReadKind {
     /// `M-x`: read a command name and run it on the origin.
     Command,
     FontFamily,
+    Theme,
     /// `C-x C-f`: read a path and visit it from the origin.
     FindFile,
     /// `C-x C-w`: read a path and write the buffer there.
@@ -79,6 +80,7 @@ impl ReadKind {
         matches!(
             self,
             Self::Command
+                | Self::Theme
                 | Self::FindFile
                 | Self::WriteFile
                 | Self::SwitchToBuffer { .. }
@@ -113,6 +115,7 @@ impl ReadKind {
         match self {
             ReadKind::Command => "M-x ".to_owned(),
             ReadKind::FontFamily => "Font family: ".to_owned(),
+            ReadKind::Theme => "Load theme: ".to_owned(),
             ReadKind::FindFile => "Find file: ".to_owned(),
             ReadKind::WriteFile => "Write file: ".to_owned(),
             ReadKind::SwitchToBuffer { default } => match default {

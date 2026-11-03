@@ -344,9 +344,8 @@ fn scrolled_reflow_retains_paint_but_never_reuses_old_input_geometry(cx: &mut Te
         visual.update(|window, cx| {
             editor.update(cx, |view, cx| {
                 let bounds = view.viewport_layout().unwrap().bounds().inset(px(-8.));
-                let color = view.color.unwrap();
                 view.scroll_by(point(px(0.), px(3600.)), cx);
-                view.prepare(bounds, color, window, cx);
+                view.prepare(bounds, window, cx);
                 let old = view.paint_layout().unwrap().clone();
                 assert!(!old.rows.is_empty());
                 let mut new_bounds = bounds;
@@ -355,7 +354,7 @@ fn scrolled_reflow_retains_paint_but_never_reuses_old_input_geometry(cx: &mut Te
                 } else {
                     new_bounds.size.width = px(250.);
                 }
-                view.prepare(new_bounds, color, window, cx);
+                view.prepare(new_bounds, window, cx);
                 assert!(!view.layout_ready());
                 assert!(view.viewport_layout().unwrap().rows.is_empty());
                 let retained = view.paint_layout().unwrap();

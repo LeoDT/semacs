@@ -15,6 +15,7 @@ use super::{
 use crate::appearance::FontSettings;
 use crate::command_registry::{CommandRegistry, ScriptCommand};
 use crate::keymap::Keymap;
+use crate::theme::{StyleOverride, StyleRole, ThemeSettings};
 
 pub(super) fn read_source(path: &Path) -> Result<String, String> {
     let file = match File::open(path) {
@@ -143,12 +144,72 @@ impl Engine {
             .collect::<rquickjs::Result<Vec<_>>>()
             .map_err(|error| js_error(ctx, error))?;
         let body_keymap = Keymap::configured_body(&mut registry, bindings)?;
+        let theme = Self::theme(ctx, &manifest)?;
         Ok(Configuration {
             generation,
             commands: registry,
             body_keymap,
             font,
+            theme,
         })
+    }
+
+    fn theme(ctx: &Ctx<'_>, manifest: &Object<'_>) -> Result<ThemeSettings, String> {
+        let mut settings = ThemeSettings::default();
+        let definitions: Array = manifest
+            .get("themes")
+            .map_err(|error| js_error(ctx, error))?;
+        for definition in definitions.iter::<Object>() {
+            let definition = definition.map_err(|error| js_error(ctx, error))?;
+            let name: String = definition
+                .get("name")
+                .map_err(|error| js_error(ctx, error))?;
+            let appearance: String = definition
+                .get("appearance")
+                .map_err(|error| js_error(ctx, error))?;
+            let styles = Self::styles(
+                ctx,
+                definition
+                    .get("styles")
+                    .map_err(|error| js_error(ctx, error))?,
+            )?;
+            settings.define(&name, &appearance, styles)?;
+        }
+        let overrides = Self::styles(
+            ctx,
+            manifest
+                .get("styles")
+                .map_err(|error| js_error(ctx, error))?,
+        )?;
+        for (role, colors) in overrides {
+            settings.set_style(role, colors);
+        }
+        let active: String = manifest
+            .get("theme")
+            .map_err(|error| js_error(ctx, error))?;
+        settings.select(&active)?;
+        Ok(settings)
+    }
+
+    fn styles(ctx: &Ctx<'_>, styles: Array<'_>) -> Result<Vec<(StyleRole, StyleOverride)>, String> {
+        styles
+            .iter::<Object>()
+            .map(|style| {
+                let style = style.map_err(|error| js_error(ctx, error))?;
+                let name: String = style.get("name").map_err(|error| js_error(ctx, error))?;
+                let role = StyleRole::parse(&name)?;
+                let foreground: Option<String> = style
+                    .get("foreground")
+                    .map_err(|error| js_error(ctx, error))?;
+                let background: Option<String> = style
+                    .get("background")
+                    .map_err(|error| js_error(ctx, error))?;
+                Ok((
+                    role,
+                    StyleOverride::new(role, foreground.as_deref(), background.as_deref())?,
+                ))
+            })
+            .collect()
     }
 
     pub(super) fn transform(

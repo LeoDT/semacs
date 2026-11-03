@@ -102,6 +102,89 @@ fn text(visual: &mut VisualTestContext, view: &Entity<BufferView>) -> String {
     visual.read(|cx| view.read(cx).buffer().text().to_string())
 }
 
+#[gpui::test]
+fn themes_apply_at_startup_and_reload_atomically(cx: &mut TestAppContext) {
+    use crate::theme::{StyleRole, ThemeSettings};
+    let fixture = Fixture::new(
+        r##"
+        semacs.defineTheme("night", {appearance:"dark",styles:{
+            default:{foreground:"#112233",background:"#223344"}
+        }});
+        semacs.loadTheme("night");
+        semacs.setStyle("cursor",{background:"#ffcc66"});
+    "##,
+    );
+    let (mut visual, shell, view) = open(&fixture, cx);
+    let original = visual.read(|cx| {
+        let settings = ThemeSettings::global(cx);
+        assert_eq!(settings.active(), "night");
+        assert_eq!(
+            settings.style(StyleRole::Default).foreground,
+            gpui::rgb(0x112233).into()
+        );
+        settings.clone()
+    });
+    fixture
+        .write(r##"semacs.loadTheme("light"); semacs.setStyle("cursor",{background:"invalid"})"##);
+    visual.update(|window, cx| {
+        shell.update(cx, |shell, cx| {
+            shell.reload_configuration(&view, window, cx)
+        })
+    });
+    wait(&mut visual, &shell);
+    visual.read(|cx| assert_eq!(ThemeSettings::global(cx), &original));
+
+    visual.simulate_keystrokes("alt-x");
+    visual.simulate_input("load-theme");
+    visual.simulate_keystrokes("enter");
+    visual.read(|cx| {
+        assert!(
+            shell
+                .read(cx)
+                .session()
+                .unwrap()
+                .candidates()
+                .unwrap()
+                .items
+                .iter()
+                .any(|item| item.candidate.value == "night")
+        );
+    });
+    fixture.write("");
+    visual.update(|window, cx| {
+        shell.update(cx, |shell, cx| {
+            shell.reload_configuration(&view, window, cx)
+        })
+    });
+    wait(&mut visual, &shell);
+    visual.read(|cx| {
+        assert_eq!(ThemeSettings::global(cx), &ThemeSettings::default());
+        assert!(
+            !shell
+                .read(cx)
+                .session()
+                .unwrap()
+                .candidates()
+                .unwrap()
+                .items
+                .iter()
+                .any(|item| item.candidate.value == "night")
+        );
+    });
+    visual.simulate_keystrokes("ctrl-g");
+}
+
+#[gpui::test]
+fn invalid_startup_theme_does_not_partially_apply_font_or_colors(cx: &mut TestAppContext) {
+    use crate::theme::ThemeSettings;
+    let fixture = Fixture::new("semacs.setFont({size:28}); semacs.loadTheme('missing')");
+    let (visual, _, _) = open(&fixture, cx);
+    visual.read(|cx| {
+        assert_eq!(ThemeSettings::global(cx), &ThemeSettings::default());
+        assert_eq!(cx.global::<FontSettings>().size(), px(16.));
+    });
+}
+
 const UPPER: &str = r#"
     semacs.setFont({size: 20});
     semacs.registerCommand("uppercase-region", text => text.toUpperCase());

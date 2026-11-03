@@ -35,6 +35,20 @@ target/release/examples/perf_candidates .pi/tmp/NEW-candidate-fixture
 
 `perf_view` 测视图布局 / 绘制与基础输入；`perf_m1` 测有界命令链与未等待布局的输入段，ready 只代表末键恢复，不是原生长时间持续输入。文件层入口为 `examples/perf_load.rs` / `scripts/perf_baseline.sh`。具体参数、样本和断言以工具为准；headless 结果不替代原生字体、GPU 或真实 IME 证据。
 
+## 阶段 E0：主题与命名样式
+
+本地回归走 `cargo test --all-targets`：配置复制 / 校验 / 限额及事务、主题候选 / 切换 / 取消 / 无效输入、分屏 / 隐藏 view、prompt / 光标装饰优先级，以及换色不改变正文 / 历史 / scroll / 换行身份。覆盖超长字形行在不等待后台任务的换色首帧仍有正文和输入坐标，以及后台首屏结果跨换色复用。颜色仅参与重绘、不重做 shaping，不新增高亮就绪时间预算；受影响的 headless 绘制 / 输入仍按既定预算检查。
+
+取得本轮宿主验证同意后，在正常 fish / Wayland 宿主终端运行（输出目录必须不存在）：
+
+```fish
+fish scripts/acceptance.fish themes .pi/tmp/e0-themes-host-01 --consent
+```
+
+只构建正式 release `semacs`，仅对测试子进程设置独立 `XDG_CONFIG_HOME`，不改用户配置。入口打印五组步骤：深色启动 / 分屏与光标；内置及自定义主题切换、覆盖保留且旧配色不残留；取消 / 不存在名称；minibuffer 候选 / 消息及窄窗口；正文编辑 / 撤销 / 保存恢复。fixture 提供 `e0-night` / `e0-paper` 和黄色光标用户覆盖，最后正文仅在开头增加 `X`，control 与配置必须不变。
+
+不截图、不注键、不改变输入法；请自行使用英文输入。正常关闭后记录五项人工观察和大致尺寸，独立核对磁盘 / 配置字节，保留源码 / 二进制身份、环境、stdout / stderr、`files/result.json`。任何失败或未观察项立即停止，关闭测试窗口并答 no，保留全部产物，不修复 fixture 或重试。此入口不证明原生性能、真实 IME 或 GPU 通过；这里也不授权真实桌面测试。
+
 ## 阶段 D1：消息显示与历史
 
 本地回归走 `cargo test --all-targets`：覆盖多行 / 无空格长消息的布局边界、读入注记不修改文本和输入快照、提示超时与新消息隔离、前缀 / 补全提示不入日志、重复折叠 / 1000 行裁剪、只读历史 / MRU / 分屏焦点，以及关闭 / 另存后的日志重建。Emacs 独立参照见 [消息参照入口](../tests/emacs/README.md#d1-消息参照)，不能当作产品通过证据。
