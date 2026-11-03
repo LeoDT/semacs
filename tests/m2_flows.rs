@@ -106,12 +106,12 @@ fn save_buffer_prompts_for_a_name_for_an_unvisited_buffer(cx: &mut TestAppContex
     });
     assert_eq!(fs::read(&target).unwrap(), b"dirty");
 
-    // The saved identity is reused instead of opening a second buffer.
+    // The saved identity is reused; only the document and *Messages* exist.
     visual.simulate_keystrokes("ctrl-x ctrl-f");
     type_path(&mut visual, &target);
     visual.simulate_keystrokes("enter");
     redraw(&mut visual);
-    visual.read(|cx| assert_eq!(shell.read(cx).buffer_count(), 1));
+    visual.read(|cx| assert_eq!(shell.read(cx).buffer_count(), 2));
 
     // A second save of a clean buffer does not open another read session.
     visual.simulate_keystrokes("ctrl-x ctrl-s");
@@ -350,7 +350,7 @@ fn exit_external_change_answered_no_continues_to_the_modified_prompt(cx: &mut Te
     visual.read(|cx| {
         assert!(shell.read(cx).session().is_none());
         assert!(view.read(cx).buffer().is_modified());
-        assert_eq!(shell.read(cx).buffer_count(), 1);
+        assert_eq!(shell.read(cx).buffer_count(), 2);
     });
     assert_eq!(visual.windows().len(), 1);
     assert_eq!(fs::read(&path).unwrap(), b"outside");
@@ -660,7 +660,7 @@ fn a_late_file_load_cannot_replace_a_new_read_session(cx: &mut TestAppContext) {
     redraw(&mut visual);
     visual.read(|cx| {
         assert!(shell.read(cx).session().is_none());
-        assert_eq!(shell.read(cx).buffer_count(), 2);
+        assert_eq!(shell.read(cx).buffer_count(), 3);
         assert_eq!(
             shell
                 .read(cx)

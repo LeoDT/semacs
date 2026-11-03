@@ -45,13 +45,18 @@ impl BufferSnapshot {
     }
 }
 
-/// A stable save boundary captured when a save starts. It refers to a history
-/// state, not to a text snapshot, so an asynchronous result can be applied even
-/// after later edits.
+/// Editable documents track saves through undo states; generated buffers,
+/// which have no undo history, track the committed text version instead.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct SavePoint {
     buffer: BufferId,
-    state: HistoryState,
+    state: SaveBoundary,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum SaveBoundary {
+    History(HistoryState),
+    Generated(TextVersion),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -94,6 +99,7 @@ struct Document {
     points: Vec<Weak<TrackedPoint>>,
     mark: TrackedMark,
     read_only: bool,
+    message_log: bool,
     read_only_prefix: ByteOffset,
     path: Option<PathBuf>,
     identity: Option<FileIdentity>,
@@ -171,6 +177,7 @@ impl Buffer {
             points,
             mark: TrackedMark::default(),
             read_only: false,
+            message_log: false,
             read_only_prefix: ByteOffset(0),
             path,
             identity: None,
@@ -225,6 +232,44 @@ impl Buffer {
             doc.display_name = name.to_owned();
         }
         buffer
+    }
+
+    pub(crate) fn messages() -> Self {
+        let buffer = Self::named("*Messages*");
+        {
+            let mut doc = buffer.document.borrow_mut();
+            doc.message_log = true;
+            doc.read_only = true;
+        }
+        buffer
+    }
+
+    pub(crate) fn is_message_log(&self) -> bool {
+        self.document.borrow().message_log
+    }
+
+    pub(crate) fn detach_message_log(&mut self) {
+        let mut doc = self.document.borrow_mut();
+        doc.message_log = false;
+        doc.touch();
+    }
+
+    pub(crate) fn update_message_log(&mut self, range: Range<ByteOffset>, text: &str) {
+        assert!(self.is_message_log());
+        self.validate_range(&range)
+            .expect("valid message log range");
+        let active = self.mark_active();
+        self.apply_validated_edit(Edit {
+            snapshot: self.snapshot_id(),
+            range,
+            text,
+            source: EditSource::Command,
+        });
+        let mut doc = self.document.borrow_mut();
+        doc.modified = false;
+        doc.history = history::History::default();
+        let mark = doc.mark.position();
+        doc.mark.set(mark, active);
     }
 
     pub fn minibuffer(prompt: &str, initial: &str) -> Self {
@@ -422,6 +467,10 @@ impl Buffer {
         if edit.range.is_empty() && edit.text.is_empty() {
             return Ok(None);
         }
+        Ok(Some(self.apply_validated_edit(edit)))
+    }
+
+    fn apply_validated_edit(&mut self, edit: Edit<'_>) -> AppliedEdit {
         let mut doc = self.document.borrow_mut();
         let before = doc.snapshot.id;
         let old_end = edit.range.end.0;
@@ -476,7 +525,7 @@ impl Buffer {
         };
         doc.last_edit = Some(applied.clone());
         doc.touch();
-        Ok(Some(applied))
+        applied
     }
 }
 

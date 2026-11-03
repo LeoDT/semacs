@@ -16,7 +16,7 @@
     "C-w" "M-w" "C-y" "M-y"
     "C-@" "C-SPC" "C-x C-x" "C-g"
     "C-/" "C-_" "C-x u" "C-?" "C-M-_"
-    "M-x"
+    "M-x" "C-h e"
     "C-x C-f" "C-x C-s" "C-x C-w" "C-x b" "C-x k" "C-x C-c"
     "C-s" "C-r" "C-u"
     "C-x 1" "C-x 2" "C-x 3" "C-x o" "C-x a"

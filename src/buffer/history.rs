@@ -177,9 +177,14 @@ impl Buffer {
 
     /// The current history state, captured when a save starts.
     pub(crate) fn save_point(&self) -> SavePoint {
+        let doc = self.document.borrow();
         SavePoint {
-            buffer: self.snapshot_id().buffer,
-            state: self.document.borrow().history.current_state(),
+            buffer: doc.snapshot.id.buffer,
+            state: if doc.message_log {
+                super::SaveBoundary::Generated(doc.snapshot.id.version)
+            } else {
+                super::SaveBoundary::History(doc.history.current_state())
+            },
         }
     }
 
@@ -191,17 +196,25 @@ impl Buffer {
     }
 
     /// Applies an asynchronous save result to the state it captured. A result
-    /// whose history state is no longer reachable cannot clear dirty.
+    /// whose history state is no longer reachable cannot clear dirty. Generated
+    /// buffers instead compare versions because their updates have no undo state.
     pub fn mark_saved_at(&mut self, point: SavePoint) -> Result<(), EditError> {
         if point.buffer != self.snapshot_id().buffer {
             return Err(EditError::WrongTarget);
         }
-        if !self.document.borrow_mut().history.mark_saved(point.state) {
-            return Err(EditError::StaleSnapshot);
-        }
-        self.break_history_group();
         let mut doc = self.document.borrow_mut();
-        doc.modified = doc.history.current_state() != point.state;
+        match point.state {
+            super::SaveBoundary::History(state) => {
+                if !doc.history.mark_saved(state) {
+                    return Err(EditError::StaleSnapshot);
+                }
+                doc.modified = doc.history.current_state() != state;
+            }
+            super::SaveBoundary::Generated(version) => {
+                doc.modified = doc.snapshot.id.version != version;
+            }
+        }
+        doc.history.merging = false;
         doc.touch();
         Ok(())
     }

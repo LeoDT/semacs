@@ -48,6 +48,7 @@ fn reference_table(source: &'static str) -> std::collections::HashMap<&'static s
 fn default_bindings_match_the_emacs_reference_or_approved_contracts() {
     let body_reference = reference_table(include_str!("emacs/m1-bindings.tsv"));
     let session_reference = reference_table(include_str!("emacs/m2-minibuffer-bindings.tsv"));
+    let messages_reference = reference_table(include_str!("emacs/d1-bindings.tsv"));
     let application = Keymap::for_scope(Scope::Application);
     let edit = Keymap::for_scope(Scope::Edit);
     let session = Keymap::for_scope(Scope::ReadSession);
@@ -63,6 +64,7 @@ fn default_bindings_match_the_emacs_reference_or_approved_contracts() {
             let expected = match binding.reference {
                 "C-t" => Some("set-mark-command"),
                 "C-x 0" => Some("delete-window"),
+                "C-h e" => messages_reference.get("C-h e").copied(),
                 key => reference.get(key).copied(),
             };
             assert_eq!(expected, Some(spec.name));

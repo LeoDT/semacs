@@ -23,7 +23,10 @@ impl Minibuffer {
         .with_field_boundary(ByteOffset(prompt.len()))
         .expect("valid prompt field boundary");
         let editor = cx.new(|cx| BufferView::with_target(target, cx));
-        editor.update(cx, |view, cx| view.install_input_lifecycle(window, cx));
+        editor.update(cx, |view, cx| {
+            view.enable_message_annotation();
+            view.install_input_lifecycle(window, cx);
+        });
         let subscription = cx.observe(&editor, |_, _, cx| cx.notify());
         Self {
             editor,
@@ -67,7 +70,7 @@ impl Focusable for Minibuffer {
 impl Render for Minibuffer {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let line_height = self.editor.read(cx).line_height();
-        let input_height = line_height + px(16.);
+        let input_height = self.editor.read(cx).minibuffer_height(window, cx);
         let fonts = cx.global::<crate::appearance::FontSettings>();
         let available = window.viewport_size().height - input_height - px(72.) - line_height;
         let rows = (f32::from(available.max(px(0.))) / f32::from(line_height)).floor() as usize;
@@ -146,6 +149,7 @@ impl Render for Minibuffer {
         }
         div()
             .id("minibuffer")
+            .debug_selector(|| "minibuffer".into())
             .w_full()
             .flex()
             .flex_col()

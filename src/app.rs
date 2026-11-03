@@ -21,6 +21,7 @@ mod buffer_commands;
 mod candidates;
 mod closing;
 mod documents;
+mod messages;
 mod reads;
 mod scripting;
 #[cfg(test)]
@@ -39,12 +40,15 @@ struct MinibufferMount {
     candidate_snapshot: Option<crate::input::DisplayId>,
     pending_candidate_action: Option<crate::completion::CandidateAction>,
     _subscription: Subscription,
+    _feedback_subscription: Subscription,
 }
 
 /// Window-level ownership, command routing and UI composition. Session targets
 /// may name inactive buffers; focus always returns to the active body view.
 pub struct AppShell {
     buffers: BufferSet,
+    messages: crate::messages::Messages,
+    echo: Option<(EntityId, SharedString)>,
     panes: crate::panes::Panes<u64>,
     body_panes: HashMap<u64, windows::BodyPane>,
     next_pane: u64,
@@ -71,7 +75,8 @@ impl AppShell {
         let buffer_id = buffer.snapshot_id().buffer;
         let view = Self::create_view(buffer, window, cx);
         let subscription = cx.observe(&view, Self::view_changed);
-        let pane = windows::BodyPane::new(buffer_id, view.clone(), subscription);
+        let feedback = cx.subscribe(&view, Self::feedback);
+        let pane = windows::BodyPane::new(buffer_id, view.clone(), subscription, feedback);
         let owner = window.window_handle();
         let shell = cx.weak_entity();
         let keys_shell = shell.clone();
@@ -101,6 +106,8 @@ impl AppShell {
         view.update(cx, |view, cx| view.restore_input(window, cx));
         Self {
             buffers: BufferSet::new(BufferSlot::new(registry_buffer)),
+            messages: crate::messages::Messages::default(),
+            echo: None,
             panes: crate::panes::Panes::new(0),
             body_panes: HashMap::from([(0, pane)]),
             next_pane: 1,
@@ -225,6 +232,7 @@ impl AppShell {
             Command::ExecuteExtendedCommand => {
                 self.begin_read(ReadKind::Command, origin, "", window, cx);
             }
+            Command::ViewEchoAreaMessages => self.view_messages(window, cx),
             Command::ReloadConfiguration => self.reload_configuration(origin, window, cx),
             Command::SetFontFamily => {
                 self.begin_read(ReadKind::FontFamily, origin, "", window, cx);
@@ -290,28 +298,32 @@ impl AppShell {
         }
     }
 
-    /// Shows a message in the echo area. Messages from non-active targets are
-    /// written to the active view so they stay visible.
+    /// Async results remain visible without changing the selected view or read session.
     fn show_message(
         &mut self,
         target: &Entity<BufferView>,
         message: impl Into<String>,
         cx: &mut Context<Self>,
     ) {
-        let view = if target == self.active_view() {
-            target.clone()
-        } else {
-            self.active_view().clone()
-        };
+        let view = self
+            .minibuffer
+            .as_ref()
+            .map(|mount| mount.view.read(cx).editor().clone())
+            .unwrap_or_else(|| {
+                if target == self.active_view() {
+                    target.clone()
+                } else {
+                    self.active_view().clone()
+                }
+            });
         view.update(cx, |view, cx| view.set_message(message, cx));
     }
 
-    pub(crate) fn echo_message(&self, window: &Window, cx: &App) -> String {
-        self.focused_editor(window, cx)
-            .read(cx)
-            .message()
+    pub(crate) fn echo_message(&self, _window: &Window, _cx: &App) -> String {
+        self.echo
+            .as_ref()
+            .map(|(_, text)| text.to_string())
             .unwrap_or_default()
-            .to_owned()
     }
 }
 
@@ -319,7 +331,7 @@ impl Render for AppShell {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let body = self.render_panes(self.panes.root(), cx);
         let message = self.echo_message(window, cx);
-        let echo_area = frame::echo_area(&message, cx);
+        let echo_area = frame::echo_area(&message, window.viewport_size().height * 0.25, cx);
         let minibuffer = self
             .minibuffer
             .as_ref()
@@ -330,7 +342,10 @@ impl Render for AppShell {
             .bg(cx.theme().background)
             .text_color(cx.theme().foreground)
             .child(body)
-            .children(minibuffer)
-            .child(echo_area)
+            .overflow_hidden()
+            .child(match minibuffer {
+                Some(minibuffer) => minibuffer.into_any_element(),
+                None => echo_area.into_any_element(),
+            })
     }
 }

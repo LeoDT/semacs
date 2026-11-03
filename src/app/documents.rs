@@ -352,9 +352,13 @@ impl AppShell {
                     }
                     buffer.set_disk_stamp(Some(stamp));
                     let _ = buffer.mark_saved_at(request.save_point);
+                    if update_path && buffer.is_message_log() {
+                        buffer.detach_message_log();
+                    }
                 }
                 self.refresh_buffer(self.buffers[index].id(), cx);
                 if update_path {
+                    self.reset_message_log(buffer);
                     self.rename_buffer(index, cx);
                 }
                 if let Some(pending) = self.buffers[index].save.take_pending() {

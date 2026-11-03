@@ -63,6 +63,9 @@ impl AppShell {
             .update(cx, |view, cx| view.end_input(cx));
         self.remove_minibuffer(cx);
         let minibuffer = cx.new(|cx| Minibuffer::new(prompt, initial, window, cx));
+        let editor = minibuffer.read(cx).editor().clone();
+        let feedback = cx.subscribe(&editor, Self::feedback);
+        self.echo = None;
         let subscription = cx.observe_in(&minibuffer, window, |shell, _, window, cx| {
             shell.refresh_candidates(window, cx);
             cx.notify();
@@ -74,6 +77,7 @@ impl AppShell {
             candidate_snapshot: None,
             pending_candidate_action: None,
             _subscription: subscription,
+            _feedback_subscription: feedback,
         });
         cx.notify();
         Some(minibuffer)
@@ -178,7 +182,7 @@ impl AppShell {
     ) {
         if let Some(minibuffer) = &self.minibuffer {
             let view = minibuffer.view.read(cx).editor().clone();
-            view.update(cx, |view, cx| view.set_message(message, cx));
+            view.update(cx, |view, cx| view.set_hint(message, cx));
         }
     }
 
@@ -276,6 +280,7 @@ impl AppShell {
     }
 
     fn remove_minibuffer(&mut self, cx: &mut Context<Self>) {
+        self.echo = None;
         if let Some(minibuffer) = self.minibuffer.take() {
             let view = minibuffer.view.read(cx).editor().clone();
             view.update(cx, |view, cx| view.suspend_input(cx));

@@ -1,0 +1,3 @@
+# emacs-version: 31.1
+# driving: emacs -Q --batch, key-binding lookup (not a command loop)
+C-h e	view-echo-area-messages

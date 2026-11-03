@@ -35,6 +35,25 @@ target/release/examples/perf_candidates .pi/tmp/NEW-candidate-fixture
 
 `perf_view` 测视图布局 / 绘制与基础输入；`perf_m1` 测有界命令链与未等待布局的输入段，ready 只代表末键恢复，不是原生长时间持续输入。文件层入口为 `examples/perf_load.rs` / `scripts/perf_baseline.sh`。具体参数、样本和断言以工具为准；headless 结果不替代原生字体、GPU 或真实 IME 证据。
 
+## 阶段 D1：消息显示与历史
+
+本地回归走 `cargo test --all-targets`：覆盖多行 / 无空格长消息的布局边界、读入注记不修改文本和输入快照、提示超时与新消息隔离、前缀 / 补全提示不入日志、重复折叠 / 1000 行裁剪、只读历史 / MRU / 分屏焦点，以及关闭 / 另存后的日志重建。Emacs 独立参照见 [消息参照入口](../tests/emacs/README.md#d1-消息参照)，不能当作产品通过证据。
+
+取得本轮宿主验证同意后，在正常 fish / Wayland 宿主终端运行（输出目录必须尚不存在）：
+
+```fish
+fish scripts/acceptance.fish messages .pi/tmp/d1-messages-host-01 --consent
+```
+
+该入口只构建正式 release `semacs`，新建 `body.txt`、`control.txt` 和独立配置；只给测试子进程设置本批 `XDG_CONFIG_HOME`，不修改用户配置或终端环境。详细五组步骤会打印在终端，先读完再操作；窗口正常关闭后回答观察。核对范围为：
+1. 触发长单行及多行脚本错误，观察折行、上限与 mode line，不把完整堆栈塞进正文；用 `C-h e` 查看完整日志，确认不主动选择新 pane。
+2. 打开 `M-x` 或文件读入，制造无匹配提示，确认附注不修改 prompt / 输入、下一次按键正常继续；显式提示两秒后清除，取消仍回到原正文。
+3. 在窄窗口及放大字号下复核布局和焦点，历史可正常滚动、复制、切回正文。只报告实际观察范围，不外推为原生性能、完整 IME 或 GPU 通过。
+
+配置提供故意抛出长 / 多行错误的脚本命令；错误不应改写 region。驱动核对最终正文为 `Xalpha beta\nsecond line\n`、control 与配置不变，保存源码差异、二进制身份、环境、stdout / stderr、五项人工回答及 `files/result.json`。任一异常或未观察立即停止步骤，关闭测试窗口并答 no；失败、EOF、异常退出或磁盘字节不符保留 STOP 和全部产物，不修复 fixture 或自动重试。回传整个输出目录，未成功也保留。
+
+不截图、不注键、不改变输入法；本轮请自行使用英文输入。这里不授权真实桌面测试，不默认复跑 D 的整套配置冒烟或历史性能矩阵。
+
 ## 阶段 D：配置与脚本本地回归
 
 `cargo test --all-targets` 覆盖配置入口缺失 / 错误 / 超限、事务重载、键位覆盖与取消、脚本异常、region 及迟到结果隔离；配置 fixture 只在 `.pi/tmp/` 创建，不读取用户真实配置、不启动桌面。专用 worker 的集成测试显式允许测试调度器等待外部线程；输入路由与编辑状态仍由 TestPlatform 验证。
@@ -87,10 +106,11 @@ fish scripts/acceptance.fish MODE NEW_OUTPUT_DIRECTORY --consent
 | `ime` | mixed / single-ascii 各三轮真实正文 IME；需要 Hyprland、wtype、fcitx5-remote，grim 可选。完整 minibuffer IME 仍需人工观察。 |
 | `manual` | 两个正式窗口的键盘文件 / IME / OS 关闭流程，按下文操作，脚本核对观察回答与磁盘字节。 |
 | `candidates` | 一个正式窗口的候选 / 路径 / buffer、字体布局及正文 / minibuffer IME 人工检查；不自动注键、不运行性能矩阵。 |
+| `messages` | D1 一个正式窗口，隔离配置 / 临时文件的长与多行错误、读入提示、历史回看 / 复制、窄窗口 / 字号及正文恢复；不截图、不注键、不改变 IME，不运行性能矩阵。 |
 | `scripting` | 两个正式窗口，隔离配置的首次显示、脚本命令 / undo、成功 / 失败重载及失败启动回退；用户按终端步骤操作，驱动核对磁盘字节。不截图、不全局注键、不改变 IME，不运行性能矩阵。 |
 | `open-diagnostic` | 一次 mixed 文件打开的定向诊断，不继续其他样本或编辑矩阵，不作为验收。 |
 
-自动性能模式打开测试窗口，内部使用合成 GPUI 输入；不要输入、移动 / 调整或关闭测试窗口。只有 `ime` 注入真实 OS 按键：期间不要操作键鼠，驱动注键前检查目标焦点并恢复原焦点 / 输入法。`split-ime` 不注键；仅按窗口顶部提示输入，不做其他编辑。`manual` / `candidates` / `scripting` 不自动注键，按提示操作，不可将未观察到的项目答 yes。
+自动性能模式打开测试窗口，内部使用合成 GPUI 输入；不要输入、移动 / 调整或关闭测试窗口。只有 `ime` 注入真实 OS 按键：期间不要操作键鼠，驱动注键前检查目标焦点并恢复原焦点 / 输入法。`split-ime` 不注键；仅按窗口顶部提示输入，不做其他编辑。`manual` / `candidates` / `scripting` / `messages` 不自动注键，按提示操作，不可将未观察到的项目答 yes。
 
 原生性能验收要求硬件渲染；软件诊断不能套用硬件验收结论。fish 入口不提供软件降级；底层驱动的 `--software` 仅供另行授权的诊断。普通原生 / IME 模式在每份窗口报告完成后判定，M1 / M2 / split-perf 还会在测量过程中检查既有预算；失败停止后续运行。模式与参数含义见 [驱动](../scripts/perf_native.py)，不以本页重述完整动作矩阵。
 

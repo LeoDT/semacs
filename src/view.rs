@@ -26,6 +26,8 @@ use crate::platform::{BufferInputHandler, InputOperation};
 use crate::text::ByteOffset;
 
 mod cursor;
+mod feedback;
+pub(crate) use feedback::Feedback;
 mod initial;
 mod motion;
 
@@ -364,6 +366,9 @@ pub struct BufferView {
     pending_recenter: Option<RecenterPosition>,
     input_geometry: Option<InputGeometry>,
     message: Option<SharedString>,
+    message_task: Option<Task<()>>,
+    annotate_message: bool,
+    annotation_cache: std::cell::RefCell<Option<feedback::AnnotationLayout>>,
     _input_subscriptions: Vec<Subscription>,
     _font_subscription: Subscription,
     #[cfg(test)]
@@ -421,6 +426,9 @@ impl BufferView {
             pending_recenter: None,
             input_geometry: None,
             message: None,
+            message_task: None,
+            annotate_message: false,
+            annotation_cache: std::cell::RefCell::new(None),
             _input_subscriptions: Vec::new(),
             _font_subscription: font_subscription,
             #[cfg(test)]
@@ -571,8 +579,7 @@ impl BufferView {
     }
 
     pub(crate) fn set_message(&mut self, message: impl Into<String>, cx: &mut Context<Self>) {
-        self.message = Some(SharedString::from(message.into()));
-        cx.notify();
+        self.publish_feedback(Feedback::Message(message.into().into()), cx);
     }
 
     /// Owns the platform input session lifetime. Keyboard routing itself lives
@@ -631,7 +638,7 @@ impl BufferView {
             return;
         }
         if self.target.is_pending() {
-            self.message = None;
+            self.clear_message(cx);
         }
         let change = self.target.end_input();
         self.queue_change(change, cx);
@@ -709,15 +716,14 @@ impl BufferView {
         let update = match result {
             Ok(update) => update,
             Err(error) => {
-                self.message = Some(error.to_string().into());
-                cx.notify();
+                self.set_message(error.to_string(), cx);
                 return None;
             }
         };
         if let Some(update) = update {
             self.queue_change(update.change, cx);
             self.reveal_caret = true;
-            self.message = None;
+            self.clear_message(cx);
             window.notify_text_input_changed(&self.focus);
         }
         Some(self.target.token())
@@ -1067,8 +1073,7 @@ impl BufferView {
             return;
         }
         if self.target.input().is_composing() {
-            self.message = Some("Input method composition is active; finish it first".into());
-            cx.notify();
+            self.set_message("Input method composition is active; finish it first", cx);
             return;
         }
         let Some(offset) = self
@@ -1082,13 +1087,12 @@ impl BufferView {
             .target
             .set_point_from_pointer(self.target.token(), offset)
         {
-            self.message = Some(error.to_string().into());
-            cx.notify();
+            self.set_message(error.to_string(), cx);
             return;
         }
         self.invalidate_input_registration();
         self.pending_recenter = None;
-        self.message = None;
+        self.clear_message(cx);
         window.focus(&self.focus, cx);
         window.notify_text_selection_changed(&self.focus);
         cx.notify();
@@ -1118,8 +1122,13 @@ impl BufferView {
             }
             None => self.reveal_caret |= outcome.reveal_point,
         }
-        self.message = outcome.message.map(Into::into);
-        cx.notify();
+        match outcome.message {
+            Some(text) if self.target.is_pending() => {
+                self.publish_feedback(Feedback::Prefix(text.into()), cx)
+            }
+            Some(text) => self.set_message(text, cx),
+            None => self.clear_message(cx),
+        }
     }
 
     #[cfg(test)]
@@ -1188,7 +1197,10 @@ impl BufferView {
         };
         match result {
             Ok(route) => match route.disposition {
-                InputDisposition::TextInput => return KeyRoute::Unhandled,
+                InputDisposition::TextInput => {
+                    self.clear_message(cx);
+                    return KeyRoute::Unhandled;
+                }
                 InputDisposition::Handled => {
                     self.invalidate_input_registration();
                     self.finish_command(route.outcome, window, cx);
@@ -1196,8 +1208,7 @@ impl BufferView {
                 InputDisposition::Requested(command) => {
                     // The owner revokes input when it changes the target. An
                     // asynchronous request alone must not drop ongoing typing.
-                    self.message = None;
-                    cx.notify();
+                    self.clear_message(cx);
                     return KeyRoute::Requested(command);
                 }
                 InputDisposition::Ignored => return KeyRoute::Unhandled,
@@ -1241,9 +1252,16 @@ impl BufferView {
         }
     }
 
+    pub(crate) fn show_end(&mut self, cx: &mut Context<Self>) {
+        let end = ByteOffset(self.buffer().text().len());
+        self.target.show_point(end);
+        self.reveal_caret = true;
+        cx.notify();
+    }
+
     pub(crate) fn clear_pending(&mut self, cx: &mut Context<Self>) {
         self.target.clear_pending();
-        self.message = None;
+        self.clear_message(cx);
         self.invalidate_input_registration();
         cx.notify();
     }
@@ -1315,8 +1333,7 @@ impl BufferView {
             self.reveal_caret = true;
             window.notify_text_selection_changed(&self.focus);
         }
-        self.message = Some(error.to_string().into());
-        cx.notify();
+        self.set_message(error.to_string(), cx);
     }
 
     fn scroll_wheel(&mut self, event: &ScrollEvent, _: &mut Window, cx: &mut Context<Self>) {
@@ -1413,6 +1430,7 @@ impl Element for TextCanvas {
                 view.refresh_input_geometry(window);
             }
         });
+        let annotation = self.view.read(cx).annotation_lines(window, cx);
         let (layout, cursor, marked, region) = {
             let view = self.view.read(cx);
             let Some(layout) = view.paint_layout().cloned() else {
@@ -1458,6 +1476,17 @@ impl Element for TextCanvas {
                         );
                     }
                 }
+                for (origin, line) in annotation.iter() {
+                    line.paint(
+                        *origin,
+                        layout.key.settings.line_height,
+                        TextAlign::Left,
+                        None,
+                        window,
+                        cx,
+                    )
+                    .ok();
+                }
                 if let Some(marked) = marked {
                     for row in &layout.rows {
                         let start = marked.start.max(row.source.start);
@@ -1493,6 +1522,8 @@ impl Element for TextCanvas {
 
 #[cfg(test)]
 mod candidate_tests;
+#[cfg(test)]
+mod feedback_tests;
 #[cfg(test)]
 mod history_tests;
 #[cfg(test)]

@@ -133,6 +133,7 @@ impl AppShell {
         if index >= self.buffers.len() || self.minibuffer.is_some() {
             return false;
         }
+        self.echo = None;
         self.cancel_file_open();
         let old = self.active_view().clone();
         old.update(cx, |view, cx| view.suspend_input(cx));
@@ -163,6 +164,7 @@ impl AppShell {
         if matches!(&self.closing, Some(Closing::Kill(target)) if *target == id) {
             self.closing = None;
         }
+        self.reset_message_log(id);
         self.buffers.remove(id);
         if self.buffers.is_empty() {
             self.create_buffer(Buffer::scratch(), window, cx);

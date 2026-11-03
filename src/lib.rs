@@ -12,6 +12,7 @@ pub mod files;
 pub mod frame;
 pub mod input;
 pub mod keymap;
+mod messages;
 pub mod minibuffer;
 pub(crate) mod panes;
 mod platform;

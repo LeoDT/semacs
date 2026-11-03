@@ -650,6 +650,10 @@ impl EditTarget {
         })
     }
 
+    pub(crate) fn show_point(&mut self, point: ByteOffset) {
+        self.buffer.set_point(point).expect("valid display point");
+    }
+
     pub fn set_point_from_pointer(
         &mut self,
         token: SessionToken,

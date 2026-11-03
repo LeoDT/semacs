@@ -467,7 +467,7 @@ fn kill_buffer_replaces_the_last_buffer_and_confirms_dirty_buffers(cx: &mut Test
     visual.simulate_keystrokes("n");
     redraw(&mut visual);
     visual.read(|cx| {
-        assert_eq!(shell.read(cx).buffer_count(), 2);
+        assert_eq!(shell.read(cx).buffer_count(), 3);
         assert!(first.read(cx).buffer().is_modified());
     });
 
@@ -476,7 +476,7 @@ fn kill_buffer_replaces_the_last_buffer_and_confirms_dirty_buffers(cx: &mut Test
     visual.simulate_keystrokes("y");
     redraw(&mut visual);
     visual.read(|cx| {
-        assert_eq!(shell.read(cx).buffer_count(), 1);
+        assert_eq!(shell.read(cx).buffer_count(), 2);
         assert_eq!(shell.read(cx).active_index(), 0);
         assert_eq!(
             shell
@@ -682,7 +682,7 @@ fn terminal_exit_asks_each_dirty_buffer_and_cancel_keeps_unsaved_state(cx: &mut 
     visual.read(|cx| {
         let shell = shell.read(cx);
         assert!(shell.session().is_none());
-        assert_eq!(shell.buffer_count(), 2);
+        assert_eq!(shell.buffer_count(), 3);
         assert!(!alpha_view.read(cx).buffer().is_modified());
         assert!(beta_view.read(cx).buffer().is_modified());
     });

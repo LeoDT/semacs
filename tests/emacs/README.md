@@ -33,6 +33,12 @@ emacs -Q --batch -l tests/emacs/m1-indent.el -l tests/emacs/m1-editing.el -l tes
 
 三个 `m1-minibuffer-*` pty 用例通过参照专用的 C-c t 打开 `read-from-minibuffer`；`baseline.el` 的 `prompt_end` 是 Emacs 1-based 字符位置，原始 `text` 包含 prompt，驱动额外展示输入后缀。正文与 minibuffer 的 point / mark 比较须分别换算 UTF-8 字节位置。参照使用真实读入会话的 C-g 结束；产品 M1 只挂载 / 卸载编辑组件，不据此宣称已实现读入确认 / 取消或完整 minibuffer-local-map。
 
+## D1 消息参照
+
+`emacs -Q --batch -l tests/emacs/d1-messages.el -f ert-run-tests-batch-and-exit` 核对 Emacs 31.1 的默认限额 / 超时、`C-h e`、单行重复折叠、多行完整日志及显示历史不主动选择窗口；键位固定于 `d1-bindings.tsv`。ERT 会动态改变 `message-log-max`，默认值在运行测试前采集。
+
+读入注记及清除策略另按本机 31.1 的 `minibuffer.el` 中 `minibuffer-message`、`set-minibuffer-message`、`clear-minibuffer-message` 和 `minibuffer-message--message` 核对：显式提示默认两秒，普通 message 默认等下一输入，均以 overlay 保持原输入不变。这是源码参照，不证明活跃 minibuffer 的真实 command loop、GUI 像素布局或 IME 表现。
+
 ## 比较陷阱
 
 - Emacs point 是 1-based 字符位置，与 UTF-8 字节位置比较须显式转换，非 ASCII 不只做减一。

@@ -209,7 +209,7 @@ fn killing_a_shared_buffer_replaces_all_panes_without_destroying_layout(cx: &mut
     visual.simulate_keystrokes("ctrl-g");
     redraw(&mut visual);
     visual.read(|cx| {
-        assert_eq!(shell.read(cx).buffer_count(), 2);
+        assert_eq!(shell.read(cx).buffer_count(), 3);
         assert_eq!(second.read(cx).buffer().text().to_string(), "Xalpha");
     });
     visual.simulate_keystrokes("ctrl-x k enter y");
@@ -218,7 +218,7 @@ fn killing_a_shared_buffer_replaces_all_panes_without_destroying_layout(cx: &mut
     let left = other(&mut visual, &shell);
     visual.read(|cx| {
         assert_ne!(left, right);
-        assert_eq!(shell.read(cx).buffer_count(), 1);
+        assert_eq!(shell.read(cx).buffer_count(), 2);
         assert_eq!(left.read(cx).buffer().text().to_string(), "beta");
         assert_eq!(
             left.read(cx).buffer().snapshot_id(),
@@ -310,7 +310,7 @@ fn a_save_started_in_a_closed_pane_finishes_on_the_shared_buffer(cx: &mut TestAp
     redraw(&mut visual);
     visual.read(|cx| {
         assert_eq!(shell.read(cx).active_view(), &first);
-        assert_eq!(shell.read(cx).buffer_count(), 1);
+        assert_eq!(shell.read(cx).buffer_count(), 2);
         assert!(!first.read(cx).buffer().is_modified());
         assert!(!second.read(cx).buffer().is_modified());
     });

@@ -18,6 +18,7 @@ mod tests;
 pub(super) struct EditorMount {
     pub view: Entity<BufferView>,
     _subscription: Subscription,
+    _feedback_subscription: Subscription,
 }
 
 pub(super) struct BodyPane {
@@ -26,7 +27,12 @@ pub(super) struct BodyPane {
 }
 
 impl BodyPane {
-    pub fn new(current: BufferId, view: Entity<BufferView>, subscription: Subscription) -> Self {
+    pub fn new(
+        current: BufferId,
+        view: Entity<BufferView>,
+        subscription: Subscription,
+        feedback: Subscription,
+    ) -> Self {
         Self {
             current,
             editors: HashMap::from([(
@@ -34,6 +40,7 @@ impl BodyPane {
                 EditorMount {
                     view,
                     _subscription: subscription,
+                    _feedback_subscription: feedback,
                 },
             )]),
         }
@@ -53,11 +60,13 @@ impl AppShell {
         cx: &mut Context<Self>,
     ) {
         let subscription = cx.observe(&view, Self::view_changed);
+        let feedback = cx.subscribe(&view, Self::feedback);
         self.body_panes.get_mut(&pane).unwrap().editors.insert(
             buffer,
             EditorMount {
                 view,
                 _subscription: subscription,
+                _feedback_subscription: feedback,
             },
         );
     }
@@ -108,6 +117,7 @@ impl AppShell {
         if !self.panes.select(&pane) {
             return;
         }
+        self.echo = None;
         self.cancel_file_open();
         self.buffers.touch(self.active_buffer_id());
         self.update_selected_views(cx);
@@ -148,8 +158,9 @@ impl AppShell {
                     .checked_add(1)
                     .expect("pane identity exhausted");
                 let subscription = cx.observe(&view, Self::view_changed);
+                let feedback = cx.subscribe(&view, Self::feedback);
                 self.body_panes
-                    .insert(pane, BodyPane::new(id, view, subscription));
+                    .insert(pane, BodyPane::new(id, view, subscription, feedback));
                 self.panes.split(pane, axis);
                 source.update(cx, |view, _| view.invalidate_split_geometry());
                 self.update_selected_views(cx);

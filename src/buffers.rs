@@ -55,6 +55,12 @@ impl BufferSet {
         self.slots.len() - 1
     }
 
+    pub fn insert_background(&mut self, slot: BufferSlot) -> usize {
+        self.mru.push(slot.id());
+        self.slots.push(slot);
+        self.slots.len() - 1
+    }
+
     pub fn remove(&mut self, id: BufferId) -> Option<BufferSlot> {
         let index = self.index_of(id)?;
         self.mru.retain(|existing| *existing != id);

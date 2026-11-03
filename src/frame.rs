@@ -23,6 +23,8 @@ pub fn mode_line(
     h_flex()
         .id("mode-line")
         .h(px(24.0))
+        .flex_shrink_0()
+        .overflow_hidden()
         .w_full()
         .px_3()
         .gap_3()
@@ -35,13 +37,17 @@ pub fn mode_line(
         .child(position)
 }
 
-pub fn echo_area(message: &str, cx: &App) -> impl IntoElement {
+pub fn echo_area(message: &str, max_height: Pixels, cx: &App) -> impl IntoElement {
     v_flex()
         .id("echo-area")
-        .h(px(24.0))
+        .debug_selector(|| "echo-area".into())
+        .min_h(px(24.0))
+        .max_h(max_height.max(px(24.)))
+        .flex_shrink_0()
+        .overflow_hidden()
         .w_full()
         .px_3()
-        .justify_center()
+        .justify_start()
         .bg(cx.theme().background)
         .text_color(cx.theme().muted_foreground)
         .text_sm()
