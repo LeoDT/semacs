@@ -1,7 +1,11 @@
-"""Offline self-checks for fixture/report tools; these do not launch semacs."""
+"""Offline fixture/report checks; no real semacs or desktop access."""
 
 import json
+import os
 from pathlib import Path
+import shlex
+import shutil
+import subprocess
 import tempfile
 import unittest
 
@@ -34,6 +38,85 @@ class ManualFixtureTests(unittest.TestCase):
                 self.assertTrue(result["completed"])
                 self.assertEqual(result["performance"], "unmeasured")
                 self.assertEqual(result["profile"], profile)
+
+    def test_default_profiles_seed_and_verify_empty_configuration(self):
+        for profile in ("m2", "candidates"):
+            with self.subTest(profile=profile):
+                self.directory = Path(self.temporary.name) / profile
+                self.completed_fixture(profile)
+                config = self.directory / "config/semacs/init.js"
+                self.assertEqual(config.read_bytes(), b"")
+                manifest = json.loads((self.directory / "fixture.json").read_text())
+                self.assertIn("config/semacs/init.js", manifest["seed_sha256"])
+                result = m2_manual.verify(self.directory, profile)
+                self.assertTrue(result["disk_bytes"]["config/semacs/init.js"])
+                self.assertNotEqual(result.get("ime"), "unmeasured")
+
+    def test_default_profile_missing_modified_or_linked_config_is_preserved_and_rejected(self):
+        outside = Path(self.temporary.name) / "daily-init.js"
+        outside.write_bytes(b"daily configuration must not change")
+        for profile in ("m2", "candidates"):
+            for change in ("missing", "modified", "symlink"):
+                with self.subTest(profile=profile, change=change):
+                    self.directory = Path(self.temporary.name) / f"{profile}-{change}"
+                    self.completed_fixture(profile)
+                    config = self.directory / "config/semacs/init.js"
+                    config.unlink()
+                    if change == "modified":
+                        config.write_bytes(b"changed fixture configuration")
+                    elif change == "symlink":
+                        config.symlink_to(outside)
+                    with self.assertRaisesRegex(RuntimeError, "disk-byte mismatch: config/semacs/init.js"):
+                        m2_manual.verify(self.directory, profile)
+                    self.assertEqual(outside.read_bytes(), b"daily configuration must not change")
+                    if change == "modified":
+                        self.assertEqual(config.read_bytes(), b"changed fixture configuration")
+
+    @unittest.skipUnless(shutil.which("fish"), "fish is required to exercise child launch commands")
+    def test_manual_and_candidate_launch_commands_isolate_only_the_child_environment(self):
+        root = Path(self.temporary.name) / "mock-root"
+        binary = root / "target/release/semacs"
+        binary.parent.mkdir(parents=True)
+        binary.write_text("""#!/usr/bin/env python3
+import json, os, sys
+from pathlib import Path
+config = Path(os.environ["XDG_CONFIG_HOME"]) / "semacs/init.js"
+Path(os.environ["CAPTURE"]).write_text(json.dumps({
+    "config": str(config), "bytes": config.read_text(), "file": sys.argv[1],
+}))
+""")
+        binary.chmod(0o755)
+        daily = Path(self.temporary.name) / "daily-config"
+        (daily / "semacs").mkdir(parents=True)
+        (daily / "semacs/init.js").write_bytes(b"daily configuration must not be loaded")
+        source = (Path(__file__).parent / "acceptance.fish").read_text().splitlines()
+        original = os.environ.get("XDG_CONFIG_HOME")
+        for profile, filename in (("m2", "alpha.txt"), ("m2", "close.txt"), ("candidates", "source.txt")):
+            with self.subTest(profile=profile, filename=filename):
+                output = Path(self.temporary.name) / filename
+                m2_manual.prepare(output / "files", profile)
+                commands = [line for line in source if f'"$output/files/{filename}" >' in line]
+                self.assertEqual(len(commands), 1)
+                capture = output / "capture.json"
+                environment = {
+                    **os.environ, "XDG_CONFIG_HOME": str(daily),
+                    "CAPTURE": str(capture), "PYTHONDONTWRITEBYTECODE": "1",
+                }
+                script = (
+                    f"set -l root {shlex.quote(str(root))}\n"
+                    f"set -l output {shlex.quote(str(output))}\n"
+                    f"{commands[0]}\nor exit $status\n"
+                    'printf "%s" "$XDG_CONFIG_HOME" > "$output/parent-env.txt"\n'
+                )
+                subprocess.run(["fish", "--no-config", "-c", script], env=environment,
+                               check=True, capture_output=True, timeout=10)
+                result = json.loads(capture.read_text())
+                self.assertEqual(result["config"], str(output / "files/config/semacs/init.js"))
+                self.assertEqual(result["bytes"], "")
+                self.assertEqual(result["file"], str(output / "files" / filename))
+                self.assertEqual((output / "parent-env.txt").read_text(), str(daily))
+                self.assertEqual((daily / "semacs/init.js").read_bytes(), b"daily configuration must not be loaded")
+                self.assertEqual(os.environ.get("XDG_CONFIG_HOME"), original)
 
     def test_existing_fixture_is_never_overwritten(self):
         m2_manual.prepare(self.directory, "candidates")

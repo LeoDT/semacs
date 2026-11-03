@@ -14,7 +14,7 @@
 - `native_split_ime` 二进制 SHA-256：`0f9e32d89024a200453e9a458c3e11c84cfc8a67f2f3fde98c708b19fa4dddf9`。仅完成编译，未启动真实窗口。
 - mixed 种子 8,388,648 字节，SHA-256：`1bbb39412c50be06cda0898f541587c1bda65d801c223d6f4d1a9269a6e5c235`。
 
-本记录补充而不改写[先前本地证据](c-split-local.md)。有效行为见[契约](../emacs-fidelity.md#阶段-cbuffer-与-view)，执行入口见[验收流程](../acceptance.md#阶段-c自动功能回归与多-view-基线)。
+本记录补充而不改写[先前本地证据](c-split-local.md)。有效行为见[契约](../emacs-fidelity.md#阶段-cbuffer-与-view)，执行入口见[验收流程](../acceptance.md#本地检查与-headless-入口)。
 
 ## 自动检查
 

@@ -5,7 +5,7 @@
 - 本地环境：Linux x86_64，kernel `7.2.11-arch1-1`，Rust `1.99.1`；GPUI TestPlatform / TestTextSystem，不访问桌面。
 - 源码基线：`c92cc320825050c102730aec62b21dfad2149f95` 加本轮 E1 未提交差异。`Cargo.toml` / `Cargo.lock` / `THIRD_PARTY.md` 及 `src/`、`scripts/`、`examples/`、`tests/`、`types/` 下 Git 跟踪与非忽略新增文件共 164 项，按路径排序的 SHA-256 清单摘要为 `193df7906f52514de59b852125d3c84a408d4f51c7c254f8b878dd120937bacd`；本地清单 `.pi/tmp/e1-source.sha256`。文档与临时产物不参与该源码清单，避免证据正文自引用。
 - release 默认特性构建，无 `RUSTFLAGS`、`CARGO_ENCODED_RUSTFLAGS` 或交叉构建 target 覆盖；依赖按 Cargo.lock 固定。
-- 用户批准范围见 [E1 行为契约](../emacs-fidelity.md#阶段-e1rust-tree-sitter)，执行入口见 [验收流程](../acceptance.md#阶段-e1rust-语法)。没有增加语言平台、缩进、LSP 或 JS 语言接口。
+- 用户批准范围见 [E1 行为契约](../emacs-fidelity.md#阶段-e1rust-tree-sitter)，执行入口见 [验收流程](../acceptance.md#宿主-fish-入口)。没有增加语言平台、缩进、LSP 或 JS 语言接口。
 
 | release 产物 | SHA-256 |
 |---|---|

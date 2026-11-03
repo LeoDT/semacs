@@ -1,202 +1,121 @@
 # 验收流程
 
-本文维护可执行流程，不记录历史批次的通过状态或诊断经过。预算与指标含义见 [性能预算](performance.md)，行为以 [保真度契约](emacs-fidelity.md) 为准，历史证据按需从 [文档导航](README.md#按需参考与冻结记录) 查阅。
+本文维护验证范围的选择、本地 / 宿主分工、可执行入口与安全规则。行为见 [保真度契约](emacs-fidelity.md)，预算与指标见 [性能预算](performance.md)，阶段进度及历史证据从 [计划](plan.md) 和 [文档导航](README.md#按需参考与冻结记录) 查阅，不在本文逐阶段累积覆盖清单或批次结论。
+
+## 宿主验证的适用条件
+
+宿主验证是在实际目标运行环境中确认行为或指标；本项目通常指真实 Wayland、平台字体 / 输入法及硬件渲染。它不等于性能测试，也不把使用临时磁盘文件或普通子进程的自动测试都算作宿主验证。
+
+**只有本次受影响的行为或指标依赖真实环境，且现有自动化 / headless 证据不能可靠覆盖时，才提出最小必要的宿主验证。** 不按阶段、文件名或“改到了 UI 代码”机械触发。
+
+| 改动 / 待确认内容 | 默认选择 |
+|---|---|
+| 编辑语义、history、解析 / 版本隔离、配置校验、文件字节往返、工具断言 | 本地自动测试；有 CPU / 布局影响时补 headless 回归，不因此自动安排宿主测试 |
+| 真实字体 / fallback、颜色与光标可读性、窗口布局、焦点、平台键盘 / 关闭行为、IME 组合及候选位置 | 对现有测试无法覆盖的受影响部分，提出定向宿主功能验证 |
+| 实际平台的原生输入 / CPU 提交性能、硬件渲染或实际呈现 | 先核对测量能力和预算，再选对应宿主入口；当前 CPU 提交工具不提供 GPU 执行 / 屏幕呈现证明 |
+| 其他只有实际系统才能复现的集成问题 | 先说明隔离测试的缺口、目标与最小操作，再征求同意，不泛化成完整矩阵 |
+
+提出宿主测试时说明“本次改动 → 尚缺的证据 → 所选模式 / 最小范围”。已有可靠覆盖且本次不影响平台行为时不追加宿主测试；已接受的未测边界或历史非阻塞观察不自动变成补测任务。需要的证据尚未取得时如实保留未测，不写成通过。
 
 ## 分工与执行顺序
 
-1. 助手完成受影响的代码 / 工具自检与 headless 回归，提出必要的宿主复测范围；按影响选择路径，不默认重跑完整历史矩阵。
-2. 每次真实环境测试先征求用户同意。助手准备或检查 fish 入口，用户在仓库根目录的正常 fish / Wayland 宿主终端运行；隔离环境没有 `/dev/dri` 时不尝试绕过或用软件渲染冒充通过。
-3. 脚本要求尚不存在的新输出目录，保留构建日志、版本 / 源码差异、环境、fixture、报告及停止原因。用户回传目录，即使失败也保留产物，不只报告退出码。
-4. 助手离线核对源码 / 二进制 / 驱动 / fixture 身份、覆盖范围、硬件 / 字体 / 实际尺寸、原始数据及预算；自动结果与用户观察共同形成结论，未测项明确保留。
+1. 助手先完成受影响的本地检查与 headless 回归；按上节判断是否需要宿主验证，不默认重跑完整历史矩阵。
+2. 每批真实环境测试都须先获得用户对具体范围的同意，提前说明窗口、OS 注键、输入法状态变动及截图范围。历史授权不延续到下一批，脚本的 `--consent` 参数不能代替实际同意。
+3. 助手准备或检查入口，用户在仓库根目录的正常 fish / Wayland 宿主终端运行。没有 `/dev/dri` 时不绕过检查或用软件渲染冒充硬件通过。
+4. 使用尚不存在的新输出目录和可丢弃 fixture，不操作日常工作文件。人工模式只给测试子进程设置独立 `XDG_CONFIG_HOME`，不读写日常配置；`manual` / `candidates` 的空配置也参与字节核对。
+5. 任一超限、断言失败、异常或未观察项立即停止后续测试，保留日志和产物，不修复 fixture、自动重试、调宽阈值或自行调优重测；先回报。人工模式按提示结束测试窗口，对失败 / 未观察项答 no，不把正常退出当成通过。
+6. 用户回传整个目录，失败也保留。助手离线核对源码 / 二进制 / 驱动 / fixture 身份、覆盖范围、环境 / 字体 / 实际尺寸、原始数据和适用预算；只对实际覆盖内容下结论，人工观察不冒充助手独立复现。
 
-历史授权不延伸到下一次测试。不要覆盖旧目录、自动重试、调宽阈值或出现超限后自行调优重测；先回报现象和产物。诊断及代表性复测不外推为完整验收；按预算判定前核对适用条件，环境不同先说明可比性。
+输出保留构建日志、版本 / 源码差异、环境、fixture、报告及停止原因，不覆盖旧目录。结论按需进入 `docs/records/`，完成状态只在计划维护；未测项明确保留，代表性复测不外推为完整验收。环境、样本或构建不同，先说明可比性再判预算。
 
 ## 本地检查与 headless 入口
 
-实现阶段收尾执行 `cargo test --all-targets`、`cargo clippy --all-targets -- -D warnings`、`cargo fmt --check` 和差异检查；若改动 profiler / 驱动，还检查相应 feature 和工具（`cargo test --all-targets --features native-profiler`、对应 Clippy 及 `python3 -B -m unittest discover -s tests -p 'test_*.py'`）。日常小改动按影响检查，纯文档整理不机械重跑产品测试。修改 split IME 驱动时，另运行 `python3 -B -m unittest discover -s scripts -p 'test_split_ime.py' -v`（不访问桌面）。修改人工 fixture / 验证工具时，另运行 `python3 -B -m unittest discover -s scripts -p 'test_m2_manual.py' -v`；脚本接入冒烟驱动另运行 `python3 -B -m unittest discover -s scripts -p 'test_scripting_manual.py' -v`；fish 入口用 `fish --no-execute scripts/acceptance.fish` 检查语法，以上检查均不启动桌面窗口。
+日常小改动按影响检查，纯文档不机械重跑产品测试。实现阶段收尾的基本检查为 `cargo test --all-targets`、`cargo clippy --all-targets -- -D warnings`、`cargo fmt --check` 和 `git diff --check`。额外检查按改动选择：
 
-M2 原生工具的生命周期报告分别核对 scratch、fixture 文件和真实消息历史，CSV 保留总数并提供 `scratch_buffers` / `file_buffers` / `message_buffers`；首次保存后预期保留一份只读消息历史，不把它当成文件泄漏。分类缺失、未知 buffer 或关闭 view 未释放仍拒绝通过；旧报告按其冻结版本解释，不因新工具字段变化自动重跑历史批次。
+| 影响范围 | 离线检查 |
+|---|---|
+| profiler / 性能驱动 | `cargo test --all-targets --features native-profiler`、对应 feature 的 Clippy，以及 `python3 -B -m unittest discover -s tests -p 'test_*.py'` |
+| 人工 fixture / 字节核对工具 | `python3 -B -m unittest discover -s scripts -p 'test_m2_manual.py' -v` |
+| 脚本配置冒烟驱动 | `python3 -B -m unittest discover -s scripts -p 'test_scripting_manual.py' -v` |
+| split IME 驱动 | `python3 -B -m unittest discover -s scripts -p 'test_split_ime.py' -v`，不访问桌面 |
+| fish 入口 | `fish --no-execute scripts/acceptance.fish` |
+| JS 示例 / 类型声明 | 本地已有 tsc 时运行 `tsc --allowJs --checkJs --noEmit --strict --target es2020 --lib es2020 examples/init.js types/semacs.d.ts`；它不是运行依赖 |
 
-有输入 / 布局性能影响时，可在不访问桌面的 TestPlatform / TestTextSystem 上运行：
+输入 / 布局 CPU 回归可使用 TestPlatform / TestTextSystem，不启动桌面：
 
 ```sh
-python3 scripts/perf_sample.py .pi/tmp/perf-sample.txt
+python3 -B scripts/perf_sample.py .pi/tmp/NEW-sample.txt
 cargo build --release --example perf_view --example perf_m1
-RUNS=3 target/release/examples/perf_view .pi/tmp/perf-sample.txt
-RUNS=3 target/release/examples/perf_m1 .pi/tmp/perf-sample.txt
+RUNS=3 target/release/examples/perf_view .pi/tmp/NEW-sample.txt
+RUNS=3 target/release/examples/perf_m1 .pi/tmp/NEW-sample.txt
 ```
 
-候选更新 / 导航可另运行无新增门限的 headless 基线，fixture 目录必须尚不存在：
+其他入口按影响选择，先用 `cargo build --release --example NAME` 构建对应 example；不是要求每轮全跑：
 
-```sh
-cargo build --release --example perf_candidates
-target/release/examples/perf_candidates .pi/tmp/NEW-candidate-fixture
-```
+| 入口 | 范围与解释 |
+|---|---|
+| `perf_view` / `perf_m1` | 基础布局 / 绘制与命令输入；M1 未等待输入段的 ready 只是末键恢复，不是逐键 ready 或原生持续输入 |
+| `RUNS=3 target/release/examples/perf_split .pi/tmp/NEW-sample.txt` | 共享 buffer 双 view；聚合 ready 与选中 view 分开记录，不给聚合擅加旧单 view 门限 |
+| `target/release/examples/perf_candidates .pi/tmp/NEW-candidate-fixture` | 候选过滤 / 导航基线，无新增门限，fixture 目录必须不存在 |
+| `RUNS=3 target/release/examples/perf_syntax` | 自建 Rust / 长 raw string 样本；`syntax_and_layout_ready_ms` 包含解析 / 查询，不能套用旧纯布局 ready 门限 |
+| [perf_load](../examples/perf_load.rs) / [perf_baseline.sh](../scripts/perf_baseline.sh) | 文件层基线；参数、样本和断言以工具为准 |
 
-该入口在 960×640 的 TestPlatform / TestTextSystem 上各测三轮命令过滤、文件过滤和候选导航；文件 fixture 为 2000 个目录项，保留产物。它不是原生候选呈现或平台 IME 验收。
-
-`perf_view` 测视图布局 / 绘制与基础输入；`perf_m1` 测有界命令链与未等待布局的输入段，ready 只代表末键恢复，不是原生长时间持续输入。文件层入口为 `examples/perf_load.rs` / `scripts/perf_baseline.sh`。具体参数、样本和断言以工具为准；headless 结果不替代原生字体、GPU 或真实 IME 证据。
-
-## 阶段 E1：Rust 语法
-
-本地 `cargo test --all-targets` 覆盖增量 / 合并编辑与 fresh parse 对照、Unicode 字节坐标、undo / redo、未完成语法、迟到结果 / 语言代次隔离、共享 buffer / view 生命周期，以及预编辑投影、装饰优先级和正式另存路径。高亮到达与换色不重做 shaping、不失效输入坐标；文件 / 文本修改仍走既有入口。
-
-除受影响的 `perf_view` / `perf_m1` 回归外，可运行新的无新增就绪门限的语法基线：
-
-```sh
-cargo build --release --example perf_syntax
-RUNS=3 target/release/examples/perf_syntax
-```
-
-入口在 TestPlatform / TestTextSystem、960×640、默认字体和软换行下，生成约 8 MiB 的多行 Rust 与单行长 raw string，各三轮。冷启动从窗口创建前计时，不含 buffer 模型构造；输入分别记录同步分发、首次 draw 和语法加布局全部就绪，包含 insert、undo / redo、同回调 32 键、换色和稳定强制重绘。`syntax_and_layout_ready_ms` 包含后台解析 / 查询，不能拿它冒充旧的纯布局指标或套用原 ready 门限；它不是原生呈现 / 持续输入验收。小样本 workload 自检随 all-targets 执行，按正式 redo 的编辑起点恢复语义断言，失败不输出整份大正文。
-
-取得本轮宿主验证同意后，在正常 fish / Wayland 终端运行（目录必须不存在）：
-
-```fish
-fish scripts/acceptance.fish syntax .pi/tmp/e1-syntax-host-01 --consent
-```
-
-只构建正式 release `semacs`，沿用既有人工 fixture / 独立字节校验工具，只对子进程设置独立 `XDG_CONFIG_HOME`。终端打印五组步骤：Rust 分类 / region / 方块光标及分屏；light / dark / 自定义字符串配色与关键字用户覆盖；未闭合块注释及 undo / redo；相同内容的普通文本与 `.rs → .txt → .rs` 另存；窄窗口 / 字号、minibuffer 和正文保存。最终 `body.rs`、`plain.txt` 与配置不变，新增 `language.txt` 为原文，`restored.rs` 仅在开头增加 `// done` 和换行。
-
-不截图、不注键、不改变输入法，本轮使用英文输入；不测原生性能、真实 IME 或 GPU。记录源码 / 二进制身份、环境、stdout / stderr、五项人工观察、大致尺寸及独立磁盘 / 配置字节。遇到异常或未观察项立即停止步骤，关闭测试窗口并答 no；保留失败目录，不修复 fixture 或自动重试。本页不授权实际桌面测试。
-
-## 阶段 E0：主题与命名样式
-
-本地回归走 `cargo test --all-targets`：配置复制 / 校验 / 限额及事务、主题候选 / 切换 / 取消 / 无效输入、分屏 / 隐藏 view、prompt / 光标装饰优先级，以及换色不改变正文 / 历史 / scroll / 换行身份。覆盖超长字形行在不等待后台任务的换色首帧仍有正文和输入坐标，以及后台首屏结果跨换色复用。颜色仅参与重绘、不重做 shaping，不新增高亮就绪时间预算；受影响的 headless 绘制 / 输入仍按既定预算检查。
-
-取得本轮宿主验证同意后，在正常 fish / Wayland 宿主终端运行（输出目录必须不存在）：
-
-```fish
-fish scripts/acceptance.fish themes .pi/tmp/e0-themes-host-01 --consent
-```
-
-只构建正式 release `semacs`，仅对测试子进程设置独立 `XDG_CONFIG_HOME`，不改用户配置。入口打印五组步骤：深色启动 / 分屏与光标；内置及自定义主题切换、覆盖保留且旧配色不残留；取消 / 不存在名称；minibuffer 候选 / 消息及窄窗口；正文编辑 / 撤销 / 保存恢复。fixture 提供 `e0-night` / `e0-paper` 和黄色光标用户覆盖，最后正文仅在开头增加 `X`，control 与配置必须不变。
-
-不截图、不注键、不改变输入法；请自行使用英文输入。正常关闭后记录五项人工观察和大致尺寸，独立核对磁盘 / 配置字节，保留源码 / 二进制身份、环境、stdout / stderr、`files/result.json`。任何失败或未观察项立即停止，关闭测试窗口并答 no，保留全部产物，不修复 fixture 或重试。此入口不证明原生性能、真实 IME 或 GPU 通过；这里也不授权真实桌面测试。
-
-## 阶段 D1：消息显示与历史
-
-本地回归走 `cargo test --all-targets`：覆盖多行 / 无空格长消息的布局边界、读入注记不修改文本和输入快照、提示超时与新消息隔离、前缀 / 补全提示不入日志、重复折叠 / 1000 行裁剪、只读历史 / MRU / 分屏焦点，以及关闭 / 另存后的日志重建。Emacs 独立参照见 [消息参照入口](../tests/emacs/README.md#d1-消息参照)，不能当作产品通过证据。
-
-取得本轮宿主验证同意后，在正常 fish / Wayland 宿主终端运行（输出目录必须尚不存在）：
-
-```fish
-fish scripts/acceptance.fish messages .pi/tmp/d1-messages-host-01 --consent
-```
-
-该入口只构建正式 release `semacs`，新建 `body.txt`、`control.txt` 和独立配置；只给测试子进程设置本批 `XDG_CONFIG_HOME`，不修改用户配置或终端环境。详细五组步骤会打印在终端，先读完再操作；窗口正常关闭后回答观察。核对范围为：
-1. 触发长单行及多行脚本错误，观察折行、上限与 mode line，不把完整堆栈塞进正文；用 `C-h e` 查看完整日志，确认不主动选择新 pane。
-2. 打开 `M-x` 或文件读入，制造无匹配提示，确认附注不修改 prompt / 输入、下一次按键正常继续；显式提示两秒后清除，取消仍回到原正文。
-3. 在窄窗口及放大字号下复核布局和焦点，历史可正常滚动、复制、切回正文。只报告实际观察范围，不外推为原生性能、完整 IME 或 GPU 通过。
-
-配置提供故意抛出长 / 多行错误的脚本命令；错误不应改写 region。驱动核对最终正文为 `Xalpha beta\nsecond line\n`、control 与配置不变，保存源码差异、二进制身份、环境、stdout / stderr、五项人工回答及 `files/result.json`。任一异常或未观察立即停止步骤，关闭测试窗口并答 no；失败、EOF、异常退出或磁盘字节不符保留 STOP 和全部产物，不修复 fixture 或自动重试。回传整个输出目录，未成功也保留。
-
-不截图、不注键、不改变输入法；本轮请自行使用英文输入。这里不授权真实桌面测试，不默认复跑 D 的整套配置冒烟或历史性能矩阵。
-
-## 阶段 D：配置与脚本本地回归
-
-`cargo test --all-targets` 覆盖配置入口缺失 / 错误 / 超限、事务重载、键位覆盖与取消、脚本异常、region 及迟到结果隔离；配置 fixture 只在 `.pi/tmp/` 创建，不读取用户真实配置、不启动桌面。专用 worker 的集成测试显式允许测试调度器等待外部线程；输入路由与编辑状态仍由 TestPlatform 验证。
-
-若本地已有 TypeScript 编译器，可额外校验示例与类型声明；它不是 semacs 的运行依赖：
-
-```sh
-tsc --allowJs --checkJs --noEmit --strict --target es2020 --lib es2020 examples/init.js types/semacs.d.ts
-```
-
-headless 不能证明原生启动无字体闪变或真实 IME 行为。取得本轮同意后，最小宿主冒烟使用下文 `scripting` 模式，隔离 `XDG_CONFIG_HOME` 并只操作可丢弃配置 / 文本；不覆盖用户已有 `init.js`，也不把历史阶段的宿主结果当作本阶段通过。新的批次仍须另行取得同意。
-
-## 阶段 C：自动功能回归与多 view 基线
-
-分屏 / 关闭 / buffer 替换、共享 history / 保存队列、point / scroll 隔离、minibuffer 恢复及模拟 IME 生命周期优先由 Rust 自动回归验证，不再让用户重复整套功能清单。
-
-多 view 大文件基线可在 headless 环境运行：
-
-```sh
-cargo build --release --example perf_split
-RUNS=3 target/release/examples/perf_split .pi/tmp/perf-sample.txt
-```
-
-输入种子沿用上节生成入口。左右 / 上下两种双 view 布局、六类约 8 MiB 样本各三轮；自动断言共享文本、独立 point / scroll、跨 view undo / redo、可见正文及最终兼容布局。输出 action / front 与两个 view 全部就绪的耗时，并测改宽、字体和稳定绘制。双 view 聚合就绪是新基线，不把旧单 view 固定尺寸门限直接套到新聚合指标，也不据此改动原预算。它不是原生性能或真实 IME 验收。
-
-## 阶段 C：定向原生性能
-
-`split-perf` 是独立的自动性能批次，不重复功能 / IME 清单，也不运行旧六类全矩阵。左右 / 上下两种共享 buffer 双 view，mixed / single-ascii 各三轮，共 12 个原生窗口；每窗自动完成冷打开、split / 选择、独立 point / scroll 准备、共享编辑、滚动、改宽、字体、强制重绘与稳定观察。请求 960×640，报告记录实际正文尺寸；改宽与字体沿用 view 层测量入口，不冒充正式配置命令的端到端时延。
-
-报告分别保存选中 view 首次目标提交、选中 view ready 和同一份场景中全部 view ready；适用门限及聚合基线边界见[性能预算](performance.md)。源码 / 二进制与 fixture 身份、原始 CSV、每轮结果与跨轮 min / max 均保留；驱动核对样本、方向、release、完整动作序列及正文断言。测量过程中遇到超限、空白、缺失观察或超时即保留部分报告并停批，不重试、不跳过失败方向。整体 `acceptance=false`，不将选中 view 预算通过与全部 view 聚合基线合并为整体验收结论。
-
-本模式无需人工编辑，不注入 OS 按键、不改变 IME、不截图；运行期间不要操作测试窗口。真实环境执行仍须本轮单独同意，按下节 fish 入口运行。
+headless 仅作 CPU / 功能回归，不代表原生字体、平台 IME、GPU 或实际呈现；软件诊断与宿主硬件验收分开。
 
 ## 宿主 fish 入口
 
-仅在对应测试已获同意后，将 `MODE` 和 `NEW_OUTPUT_DIRECTORY` 替换为选定模式及新目录：
+仅在对应批次获准后，将模式和新目录代入：
 
 ```fish
 fish scripts/acceptance.fish MODE NEW_OUTPUT_DIRECTORY --consent
 ```
 
-脚本自动构建并准备可丢弃样本，不操作用户工作文件。当前模式以 [脚本](../scripts/acceptance.fish) 为准：
+下表是可选入口索引，不是当前阶段待办。模式及参数以 [acceptance.fish](../scripts/acceptance.fish) 和对应驱动为准：
 
-| 模式 | 适用范围 |
+| 模式 | 用途 / 操作来源 |
 |---|---|
-| `split-perf` | 阶段 C 共享 buffer 双 view 定向性能：两种布局、mixed / single-ascii 各三轮；选中 view 沿用对应预算，全部 view ready 单独作基线；无需人工编辑、不截图。 |
-| `display-perf` | mixed / single-ascii 各三轮的原生基础性能代表性复测，包含字体变化与绘制；不跑 M1 持续输入或 M2 文件矩阵。 |
-| `perf` | 文件 / buffer M2 六类矩阵、普通原生六类矩阵及 M1 两类代表性持续输入；开销较大，不作为每次改动的默认检查。 |
-| `split-ime` | 阶段 C 自动断言的真实 IME 集成：用户仅按屏幕提示输入三组拼音取消 / 提交；其余操作与检查自动完成。需 Hyprland、grim，不全局注键、不代改输入法，截取测试所在整块显示器供离线审查，不运行性能矩阵。 |
-| `ime` | mixed / single-ascii 各三轮真实正文 IME；需要 Hyprland、wtype、fcitx5-remote，grim 可选。完整 minibuffer IME 仍需人工观察。 |
-| `manual` | 两个正式窗口的键盘文件 / IME / OS 关闭流程，按下文操作，脚本核对观察回答与磁盘字节。 |
-| `candidates` | 一个正式窗口的候选 / 路径 / buffer、字体布局及正文 / minibuffer IME 人工检查；不自动注键、不运行性能矩阵。 |
-| `syntax` | E1 一个正式窗口，隔离配置的 Rust 高亮 / 分屏、主题 / 覆盖、增量编辑 / 历史、普通文本 / 另存与布局 / 保存；不截图、不注键，不运行性能矩阵。 |
-| `themes` | E0 一个正式窗口的主题 / 用户覆盖、取消、分屏、读入与正文恢复；隔离配置，不截图、不注键，不运行性能矩阵。 |
-| `messages` | D1 一个正式窗口，隔离配置 / 临时文件的长与多行错误、读入提示、历史回看 / 复制、窄窗口 / 字号及正文恢复；不截图、不注键、不改变 IME，不运行性能矩阵。 |
-| `scripting` | 两个正式窗口，隔离配置的首次显示、脚本命令 / undo、成功 / 失败重载及失败启动回退；用户按终端步骤操作，驱动核对磁盘字节。不截图、不全局注键、不改变 IME，不运行性能矩阵。 |
-| `open-diagnostic` | 一次 mixed 文件打开的定向诊断，不继续其他样本或编辑矩阵，不作为验收。 |
+| `perf` | M2 文件 / buffer、普通原生及 M1 持续输入矩阵；开销大，不默认全跑 |
+| `display-perf` | mixed / single-ascii 原生显示、字体与输入代表性复测，不覆盖其余样本或持续输入 |
+| `split-perf` | 两种分屏方向的共享 buffer 双 view 性能；不重复人工功能清单 |
+| `open-diagnostic` | [单次打开诊断](#单次打开诊断)，不是完整验收 |
+| `ime` | wtype / fcitx5 真实正文 IME 测量；需 Hyprland，不替代完整 minibuffer IME 观察 |
+| `split-ime` | 用户按窗口提示完成正文 / minibuffer IME；需 Hyprland、grim，见下节隐私说明 |
+| `manual` | 两窗口文件 / IME / OS 关闭；完整步骤见[人工文件与关闭流程](#manual人工文件与关闭流程) |
+| `candidates` | 候选、路径、buffer、字体及正文 / minibuffer IME；完整步骤见[定向人工验证](#候选式-minibuffer定向人工验证) |
+| `scripting` | 启动、脚本命令、成功 / 失败重载和默认回退；[驱动](../scripts/scripting_manual.py)分阶段打印步骤 |
+| `messages` | 长 / 多行消息、读入注记、历史与编辑恢复；[fixture 工具](../scripts/m2_manual.py)打印五组步骤 |
+| `themes` | 配色 / 用户覆盖、分屏、取消、读入与编辑恢复；fixture 工具打印五组步骤 |
+| `syntax` | Rust 高亮、分屏、主题、历史、普通文本 / 另存与布局 / 保存；fixture 工具打印五组步骤 |
 
-自动性能模式打开测试窗口，内部使用合成 GPUI 输入；不要输入、移动 / 调整或关闭测试窗口。只有 `ime` 注入真实 OS 按键：期间不要操作键鼠，驱动注键前检查目标焦点并恢复原焦点 / 输入法。`split-ime` 不注键；仅按窗口顶部提示输入，不做其他编辑。`manual` / `candidates` / `scripting` / `messages` / `themes` / `syntax` 不自动注键，按提示操作，不可将未观察到的项目答 yes。
+人工模式先读终端提示；`scripting` / `messages` / `themes` / `syntax` 使用英文输入，不自动注键、不改变 IME、不截图，不测原生性能。详细键序列只在驱动中维护，不在本文再复制。不要直接照抄历史批次目录名。
 
-原生性能验收要求硬件渲染；软件诊断不能套用硬件验收结论。fish 入口不提供软件降级；底层驱动的 `--software` 仅供另行授权的诊断。普通原生 / IME 模式在每份窗口报告完成后判定，M1 / M2 / split-perf 还会在测量过程中检查既有预算；失败停止后续运行。模式与参数含义见 [驱动](../scripts/perf_native.py)，不以本页重述完整动作矩阵。
+## 原生性能与诊断
 
-## 阶段 D：最小脚本宿主冒烟
+自动性能模式使用合成 GPUI 输入；运行期间不要输入、移动 / 调整或关闭窗口，不冒充 OS 键盘覆盖。预算与指标只在 [performance.md](performance.md) 定义，CPU 提交不等于 GPU 执行 / 屏幕呈现；真实 GPU / 呈现测量须另行确认方案。
 
-需本轮单独同意，在正常 fish / Wayland 宿主终端运行：
+`split-perf` 分别记录选中 view 与同场景所有 view 的 ready：前者沿用对应预算，后者是没有新增门限的聚合基线，不能合成“多 view 整体验收通过”。改宽 / 字体走 view 层入口，不冒充正式配置命令端到端时延。字段、动作矩阵及校验以 [perf_native.py](../scripts/perf_native.py) 为准，不为整理文档放宽断言。
 
-```fish
-fish scripts/acceptance.fish scripting .pi/tmp/d-scripting-host-NEW --consent
-```
-
-输出目录必须尚不存在。入口只构建正式 release `semacs`，保存源码差异、二进制 SHA-256、环境、每窗 stdout / stderr、各阶段配置快照及 `scripting/result.json`；不构建或启动性能 probe。
-
-[驱动](../scripts/scripting_manual.py) 只给它启动的两个子进程设置独立 `XDG_CONFIG_HOME`，不修改终端环境或用户配置。新建的 `commands.txt`、`fallback.txt` 是全部编辑目标。脚本不注键、不改变输入法、不截图；本轮仅输入 ASCII，请用户自行选择英文输入，并照常在测试窗口和终端之间切换焦点。
-
-具体编号按终端提示操作，保持窗口打开直到驱动要求关闭：
-
-1. 第一窗口以 24px 配置打开 `alpha beta`。观察首次正文是否直接使用较大字号；通过 `C-c u` 做大写变换，一次 undo 恢复，再经 `M-x smoke-uppercase-region` 变换并保存。回终端确认启动和命令两项，独立检查磁盘为 `ALPHA beta\n`。
-2. 驱动原子替换本批配置为 32px 和 lowercase 命令；用户显式重载。确认旧命令 / 键位移除、新字号和 `C-c l` 生效，变换并保存为 `alpha beta\n`。
-3. 驱动写入故意抛错的配置，试图改为 40px 并取消 `C-c l`。用户重载应报告错误并保持上一阶段字号和键位；用原生输入插入大写 `X`，再用保留的脚本键位转换，保存为 `xalpha beta\n`。确认后按提示关闭第一窗口。
-4. 第二窗口沿用错误配置，打开独立 `fallback.txt`。先观察默认字号与配置错误，再用原生输入插入大写 `Z` 并保存为 `Zfallback\n`。回终端确认两项后，按提示关闭。
-
-每次保存等待 clean 后再回终端；脚本核对当前和非目标文件的精确字节。不要额外编辑或打开用户工作文件，不手工修改 fixture / 配置。任何异常、未观察、EOF、异常退出或字节不符立即停批，保留 STOP 与失败报告，不自动重试。失败 / 中断会终止**驱动自己启动的测试子进程**，不会向其他窗口发送操作；未正常关闭时最多等待 120 秒，超时同样失败。
-
-成功仅表示六项人工观察、两次正常退出及独立磁盘字节检查通过。“未观察到默认字号闪变”是人工观察，不是逐帧证明；性能、真实 IME、GPU / 实际呈现仍未测。回传整个输出目录，即使失败也保留所有产物。
-
-## 阶段 C：最小宿主配合
-
-`split-ime` 在正常 fish / Wayland 宿主终端运行一次命令，自动完成准备、操作和断言。用户仅在右正文、左正文、minibuffer 三个目标依次按顶部提示完成“ni → Escape，再 ni → 提交你”，每一步等待下一条提示；不要额外编辑、移动 / 缩放或关闭测试窗口。输入法由用户照常启用与控制，脚本不全局注键、不代改输入法状态，避免全局注键的焦点检查与实际发送之间存在竞态。它只读写本批新建样本；结束或失败时尝试恢复原窗口焦点并核对，原窗口已关闭则报告无法恢复，不转而修改其他窗口输入法。任何失败保留日志和 STOP，不自动重试。
-
-测试覆盖三个实际输入目标，各执行预编辑取消与重新预编辑提交；共保存六张候选窗截图。为避免输入法 popup 位于窗口外而被裁掉，截图覆盖测试窗口所在的**整块显示器**，可能包含其他可见窗口；取得本轮测试同意前须说明这一范围，用户运行前先隐藏敏感内容。probe 内嵌正式 AppShell，仅顶部增加操作提示；准备分屏、切 view、取消 minibuffer 和保存使用正式命令路由中的合成 GPUI 键。拼音、Escape 和选择“你”提交由用户经真实输入法输入，通常空格首选为“你”；不是首选时请明确选“你”，不能改 fixture 预期或把环境配置差异静默算作通过。不能把合成准备命令表述为 OS 键盘覆盖。
-
-结果自动核对文本只提交一次、共享文本与独立 point、非目标无 marked、兼容 caret 在目标布局内、minibuffer 不修改正文、恢复原 view，以及最终独立磁盘字节。`result.json` 的成功只表示上述自动集成断言通过；不表示截图中的候选窗视觉位置已确认，更不是原生时延、GPU 或完整编辑功能矩阵通过。助手离线审查六张候选截图后，如仍有无法判断的视觉项目再明确请求用户补充观察。
-
-## 显示设置：定向原生性能复测
-
-`display-perf` 覆盖真实字体布局、绘制和输入的代表性路径，不表示其余四类原生样本或长时间持续输入已复测。字体阶段沿用 monospace 16px / 24px → bold 18px / 27px 的既有 view 入口，不是完整新 `M-x` 配置命令及所有视图传播的端到端时延测量。
+fish 不提供软件降级；底层 `--software` 只供另行授权的诊断。普通原生 / IME 模式逐窗判定，M1 / M2 / split-perf 还在运行中检查既有预算，失败停批。
 
 <a id="首轮超限后的单次诊断"></a>
 
-## 单次打开诊断
+### 单次打开诊断
 
-`open-diagnostic` 只运行 scratch 准备和一次正式文件打开；既有预算仍适用，`acceptance=false`，诊断成功也不自动继续矩阵。保留 CSV、逐帧 / 慢 view / 子调用报告与 diagnostic.json，即使失败也交回分析。报告字段与关联校验以 [诊断实现](../examples/support/native_diagnostic.rs) 及 [驱动](../scripts/perf_native.py) 为准；历史超限、定位与修复经过已冻结于 [验收记录](records/m2-m3-local.md#首轮宿主停止与诊断交付)。
+`open-diagnostic` 只运行 scratch 准备和一次 mixed 文件打开，`acceptance=false`；成功不自动继续矩阵。保留主 CSV、frames / views / preparation 侧报告与 diagnostic.json，失败也交回分析。字段见 [诊断实现](../examples/support/native_diagnostic.rs) 和驱动，不重述历史失败过程。
 
-## 人工：第一个窗口
+## 真实 IME 与截图隐私
+
+只有 `ime` 自动注入真实 OS 按键：需 wtype、fcitx5-remote，grim 可选；期间不要操作键鼠，驱动检查目标焦点并恢复原焦点 / 输入法。注入流程与人工真实 IME 观察不能互相冒充。
+
+`split-ime` 不注键、不代改输入法，用户在右正文、左正文、minibuffer 依次按提示完成“ni → Escape，再 ni → 提交你”，等待下一步，不做额外编辑 / 缩放 / 关闭。编辑器准备动作使用正式路由的合成 GPUI 键，不是 OS 键盘覆盖。候选不是“你”时明确选“你”，不改 fixture 预期。结束 / 失败时尝试恢复原焦点，原窗口已关闭则如实记录，不转而修改其他窗口输入法。
+
+该模式的六张候选截图覆盖测试所在的**整块显示器**，可能包含其他窗口；征求同意前必须说明，运行前隐藏敏感内容。`result.json` 只确认自动集成与字节断言，候选窗视觉位置仍须离线审图；不扩展为原生时延、GPU 或完整编辑矩阵通过。
+
+## manual：人工文件与关闭流程
+
+两个窗口均使用本批独立空配置和默认键位，不读取日常 `init.js`。
+
+### 第一个窗口
 
 脚本打印本轮文件目录，下文的路径均指该目录中的可丢弃文件。不要在自己的工作文件上操作。遇到任一步异常，记录现象并答 no，停止，不通过修改期望字节掩盖问题。
 
@@ -212,7 +131,7 @@ fish scripts/acceptance.fish scripting .pi/tmp/d-scripting-host-NEW --consent
 
 在终端分别确认键盘文件闭环、正文 IME、minibuffer IME。脚本最后检查 alpha / overwrite 的 BOM、CRLF、无末尾换行及精确文字，beta 保持 LF 与末尾换行。UI 状态和候选位置仍以你的观察为证。
 
-## 人工：第二个窗口
+### 第二个窗口
 
 1. 初始打开 close.txt，在开头输入大写 `Z`；`M-x` 输入未完成的命令名 `for`。
 2. 使用平时合成器的 **关闭窗口快捷键 / 标题栏关闭按钮**，不要用 `C-x C-c` 代替 OS 关闭。当前实现应取消读命令会话并出现保存询问，而不是立即丢数据。
@@ -224,7 +143,7 @@ fish scripts/acceptance.fish scripting .pi/tmp/d-scripting-host-NEW --consent
 
 ## 候选式 minibuffer：定向人工验证
 
-本项使用 `candidates` 模式，需要本轮真实环境测试同意。脚本准备专用可丢弃目录，保存源码差异、构建日志、二进制 SHA-256、环境 / 字体信息及观察结果；不自动注键，不测性能。不将既有 `manual` 模式的结果当作本项通过。
+本项使用 `candidates` 模式及本批独立空配置，初始默认键位、字号 16px；不自动注键，不测性能。不将既有 `manual` 模式的结果当作本项通过。
 
 脚本打印的 `files` 目录为本轮全部测试文件所在位置。窗口初始打开 `source.txt`，内容为两行 `alpha second` / `next line`，clean。只操作这些文件，不使用自己的工作文件。以下各组按顺序操作；脚本在窗口退出后逐组询问，不必在终端与窗口间来回切换。建议另开本文对照。
 
@@ -277,6 +196,6 @@ fish scripts/acceptance.fish scripting .pi/tmp/d-scripting-host-NEW --consent
 
 ## 结论与证据边界
 
-- 只有获批、实际覆盖的范围才可写为通过。原生硬件路径仍测 CPU / 平台提交，不是 GPU 执行时间或实际屏幕呈现。
-- 自动成功不证明所有候选位置、字体或 F1 / F2 / F3 行为均正确；人工反馈按实际观察范围记录，不冒充助手独立重现。
-- 报告核对结果按需要进入 `docs/records/`，完成状态只在计划维护；不把具体批次目录、实测和失败经过持续追加到本执行手册。
+- 只有获批、实际覆盖的范围才可写为通过；具体窗口尺寸、字体或观察未提供时如实保留，不用推测补齐。
+- 自动成功不证明全部视觉 / 平台行为正确；功能、原生 CPU 时延、真实 IME 和 GPU / 呈现分别解释，不能互相替代。
+- 本文不记某批次已通过，也不产生新的测试授权；冻结记录不随工具或流程整理改写，必要时只修复引用链接。

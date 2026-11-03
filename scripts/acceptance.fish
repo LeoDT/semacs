@@ -183,7 +183,7 @@ else if test "$mode" = messages
     echo
     echo "One manual D1 window; isolated configuration and disposable files only."
     echo "No screenshots, OS key injection, IME changes or performance matrix."
-    echo "Use English/ASCII input; follow docs/acceptance.md, D1 host steps."
+    echo "Use English/ASCII input; follow the five groups printed above."
     echo "C-c l: long error; C-c m: multiline error; C-c b: +1px; C-c n: reset to 24px."
     echo "On a problem stop the steps, close the test window and answer no; do not repair or retry."
     echo "Files: $output/files"
@@ -220,7 +220,7 @@ else if test "$mode" = candidates
     echo "Follow docs/acceptance.md, candidate manual section, steps 1–6."
     echo "Use only these disposable files: $output/files"
     echo "On any problem stop the steps, close the test window and answer no; do not repair fixtures or retry."
-    "$root/target/release/semacs" "$output/files/source.txt" > "$output/candidates.stdout.log" 2> "$output/candidates.stderr.log"
+    env XDG_CONFIG_HOME="$output/files/config" "$root/target/release/semacs" "$output/files/source.txt" > "$output/candidates.stdout.log" 2> "$output/candidates.stderr.log"
     or fail "candidate session exited abnormally; keep this output directory"
     for item in candidate-command candidate-files candidate-buffers candidate-layout-font candidate-minibuffer-ime candidate-body-ime
         read -l -P "$item: all corresponding observations passed? Type yes or no: " answer
@@ -245,7 +245,7 @@ else
     echo "Follow docs/acceptance.md, manual section. Only disposable files under:"
     echo "$output/files"
     echo "First window: keyboard file loop + body/minibuffer IME. Close with C-x C-c."
-    "$root/target/release/semacs" "$output/files/alpha.txt" > "$output/keyboard.stdout.log" 2> "$output/keyboard.stderr.log"
+    env XDG_CONFIG_HOME="$output/files/config" "$root/target/release/semacs" "$output/files/alpha.txt" > "$output/keyboard.stdout.log" 2> "$output/keyboard.stderr.log"
     or fail "keyboard session exited abnormally"
     for item in keyboard-file-loop body-ime minibuffer-ime
         read -l -P "$item: all corresponding observations passed? Type yes or no: " answer
@@ -256,7 +256,7 @@ else
         end
     end
     echo "Second window: OS close cancel / reject / save / clean close; see docs/acceptance.md."
-    "$root/target/release/semacs" "$output/files/close.txt" > "$output/close.stdout.log" 2> "$output/close.stderr.log"
+    env XDG_CONFIG_HOME="$output/files/config" "$root/target/release/semacs" "$output/files/close.txt" > "$output/close.stdout.log" 2> "$output/close.stderr.log"
     or fail "OS-close session exited abnormally"
     for item in os-close-cancel os-close-clean
         read -l -P "$item: all corresponding observations passed? Type yes or no: " answer

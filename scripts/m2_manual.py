@@ -15,17 +15,20 @@ SEEDS = {
     "beta.txt": b"beta\n",
     "overwrite.txt": b"outside\n",
     "close.txt": b"close\n",
+    "config/semacs/init.js": b"",
 }
 EXPECTED = {
     "alpha.txt": b"\xef\xbb\xbfX" + "你".encode() + b"alpha\r\nsecond",
     "beta.txt": b"Ybeta\n",
     "overwrite.txt": b"\xef\xbb\xbfX" + "你".encode() + b"alpha\r\nsecond",
     "close.txt": b"Zclose\n",
+    "config/semacs/init.js": b"",
 }
 
 
 CANDIDATE_SEEDS = {
     "source.txt": b"alpha second\nnext line\n",
+    "config/semacs/init.js": b"",
     "alpha-existing.txt": b"outside\n",
     "overwrite.txt": b"outside\n",
     "sub/child-document.txt": b"child\n",
@@ -268,7 +271,7 @@ def verify(directory, profile="m2"):
         "errors": errors, "evidence": "user-observed real desktop plus independent disk bytes",
         "performance": "unmeasured",
     }
-    if "config/semacs/init.js" in expected_files:
+    if profile in ("messages", "themes", "syntax"):
         result.update(ime="unmeasured", gpu="unmeasured", screenshots=False)
     (directory / "result.json").write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n")
     if errors:
