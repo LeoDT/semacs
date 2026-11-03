@@ -11,6 +11,24 @@
   and covered-source availability in the dependency audit before distributing
   binaries. semacs uses the matcher, not nucleo's picker runtime or query syntax.
 
+## Syntax parsing and paint decoration dependencies
+
+- `tree-sitter` 0.27.1 and `tree-sitter-language` 0.1.9 are registry
+  dependencies under MIT, attributed to Max Brunsfeld. `tree-sitter-rust`
+  0.24.2 is a registry dependency under MIT, attributed to Maxim Sokolov.
+  Their manifests and license texts were reviewed; no parser or grammar source
+  is vendored or patched.
+- semacs consumes `tree-sitter-rust::HIGHLIGHTS_QUERY` from the dependency and
+  maps its captures to neutral syntax styles. `src/syntax/rust.scm` adds local
+  captures for constants, numbers, operators and punctuation; no Zed language
+  or project subsystem is imported.
+- The transitive `streaming-iterator` 0.1.9 is MIT OR Apache-2.0, attributed
+  to Steven Fackler. The existing transitive `smallvec` 1.16.4 (MIT OR
+  Apache-2.0, The Servo Project Developers) is now also a direct dependency
+  for inline paint decorations. Their manifests and MIT notices were reviewed.
+- Include these dependency notices, including the bundled grammar query, in
+  the dependency audit before distributing binaries.
+
 ## JavaScript runtime dependency
 
 - `rquickjs`, `rquickjs-core` and `rquickjs-sys` 0.14.0 are registry

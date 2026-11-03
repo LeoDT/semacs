@@ -100,11 +100,16 @@ fn theme_configuration_is_copied_validated_and_resolved_after_all_declarations()
         const cursor = {foreground: "#445566"};
         semacs.setStyle("cursor", cursor);
         cursor.foreground = "#aabbcc";
+        semacs.setStyle("syntax.keyword", {foreground: "#123456"});
         semacs.setStyle("cursor", {background: "#778899"});
     "##,
     )
     .unwrap();
     assert_eq!(config.theme.active(), "night");
+    assert_eq!(
+        config.theme.style(StyleRole::SyntaxKeyword).foreground,
+        gpui_kit::rgb(0x123456).into()
+    );
     assert_eq!(
         config.theme.style(StyleRole::Default).foreground,
         gpui_kit::rgb(0x112233).into()
@@ -113,6 +118,38 @@ fn theme_configuration_is_copied_validated_and_resolved_after_all_declarations()
     assert_eq!(cursor.foreground, gpui_kit::rgb(0x445566).into());
     assert_eq!(cursor.background, gpui_kit::rgb(0x778899).into());
     assert_eq!(load("").unwrap().1.theme, ThemeSettings::default());
+}
+
+#[test]
+fn a_theme_accepts_every_named_interface_and_syntax_style() {
+    use crate::theme::StyleRole;
+    let entries = StyleRole::ALL
+        .into_iter()
+        .map(|role| {
+            format!(
+                "\"{}\":{{{}:\"#123456\"}}",
+                role.name(),
+                if role == StyleRole::Region {
+                    "background"
+                } else {
+                    "foreground"
+                }
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(",");
+    let (_, config) = load(&format!("semacs.defineTheme('all-styles', {{appearance:'dark', styles:{{{entries}}}}}); semacs.loadTheme('all-styles');")).unwrap();
+    for role in StyleRole::ALL {
+        let style = config.theme.style(role);
+        assert_eq!(
+            if role == StyleRole::Region {
+                style.background
+            } else {
+                style.foreground
+            },
+            gpui_kit::rgb(0x123456).into()
+        );
+    }
 }
 
 #[test]
@@ -133,7 +170,8 @@ fn invalid_themes_reject_the_entire_configuration() {
         r##"semacs.setStyle("default", [])"##,
         r##"semacs.setStyle("region", {foreground:"#112233"})"##,
         r##"semacs.setStyle("minibuffer-prompt", {background:"#112233"})"##,
-        r##"semacs.setStyle("syntax.keyword", {foreground:"#112233"})"##,
+        r##"semacs.setStyle("syntax.unknown", {foreground:"#112233"})"##,
+        r##"semacs.setStyle("syntax.keyword", {background:"#112233"})"##,
         r##"for(let i=0;i<33;i++)semacs.defineTheme("t-"+i,{appearance:"dark",styles:{}})"##,
         r##"for(let i=0;i<129;i++)semacs.setStyle("default", {})"##,
     ] {

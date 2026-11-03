@@ -6,11 +6,14 @@ interface SemacsFontSettings {
 type SemacsStyleName =
     | "default" | "cursor" | "region" | "mode-line" | "mode-line-inactive"
     | "minibuffer-prompt" | "echo-area" | "completion" | "completion-selected"
-    | "completion-match" | "completion-annotation" | "separator";
+    | "completion-match" | "completion-annotation" | "separator"
+    | "syntax.keyword" | "syntax.comment" | "syntax.string" | "syntax.number"
+    | "syntax.type" | "syntax.function" | "syntax.variable" | "syntax.constant"
+    | "syntax.operator" | "syntax.punctuation";
 
 type SemacsStyleColors<N extends SemacsStyleName> =
     N extends "region" ? { background?: string } :
-    N extends "minibuffer-prompt" | "completion-match" | "completion-annotation" | "separator"
+    N extends "minibuffer-prompt" | "completion-match" | "completion-annotation" | "separator" | `syntax.${string}`
         ? { foreground?: string } :
     { foreground?: string; background?: string };
 

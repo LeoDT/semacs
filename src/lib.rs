@@ -21,6 +21,7 @@ pub mod preparation_trace;
 mod saves;
 pub mod scripting;
 pub mod session;
+mod syntax;
 pub mod text;
 pub mod theme;
 pub mod view;

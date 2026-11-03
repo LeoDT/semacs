@@ -9,6 +9,7 @@ use std::time::{Duration, Instant};
 use gpui_kit::profiler::journal::ForegroundJournalCollector;
 use gpui_kit::{App, Entity, Keystroke, WeakEntity, Window};
 use semacs::app::AppShell;
+use semacs::buffer::BufferId;
 use semacs::session::ReadKind;
 use semacs::view::BufferView;
 
@@ -221,6 +222,126 @@ impl Reading {
     }
 }
 
+#[derive(Default)]
+struct BufferCounts {
+    scratch: usize,
+    files: usize,
+    messages: usize,
+}
+
+struct Lifecycle {
+    scratch: BufferId,
+    files: [Option<BufferId>; 3],
+    messages: Option<BufferId>,
+    messages_required: bool,
+}
+
+impl Lifecycle {
+    fn new(scratch: BufferId) -> Self {
+        Self {
+            scratch,
+            files: [None; 3],
+            messages: None,
+            messages_required: false,
+        }
+    }
+
+    fn opened(&mut self, index: usize, id: BufferId) -> Result<(), String> {
+        if self.files[index].is_some_and(|previous| previous != id) {
+            return Err("open replaced a live fixture buffer identity".into());
+        }
+        self.files[index] = Some(id);
+        Ok(())
+    }
+
+    fn killed(&mut self, index: usize, id: BufferId) -> Result<(), String> {
+        if self.files[index] != Some(id) {
+            return Err("kill target is not the expected live fixture".into());
+        }
+        self.files[index] = None;
+        Ok(())
+    }
+
+    fn counts(&self, shell: &AppShell) -> BufferCounts {
+        let mut counts = BufferCounts::default();
+        for buffer in shell.buffers() {
+            let id = buffer.snapshot_id().buffer;
+            if id == self.scratch {
+                counts.scratch += 1;
+            } else if self.files.contains(&Some(id)) {
+                counts.files += 1;
+            } else if buffer.is_message_log() {
+                counts.messages += 1;
+            }
+        }
+        counts
+    }
+
+    fn verify(&mut self, shell: &AppShell, directory: &Path) -> Result<(), String> {
+        let mut scratch = 0;
+        let mut files = [false; 3];
+        let mut messages = 0;
+        for buffer in shell.buffers() {
+            let id = buffer.snapshot_id().buffer;
+            if id == self.scratch {
+                if buffer.path().is_some()
+                    || buffer.display_name() != "*scratch*"
+                    || buffer.is_read_only()
+                    || buffer.is_modified()
+                    || !buffer.text().is_empty()
+                {
+                    return Err("original scratch identity or state changed".into());
+                }
+                scratch += 1;
+            } else if let Some(index) = self.files.iter().position(|known| *known == Some(id)) {
+                if buffer.path().as_deref()
+                    != Some(directory.join(format!("input-{index}.txt")).as_path())
+                {
+                    return Err("fixture path does not match its buffer identity".into());
+                }
+                if files[index] {
+                    return Err("duplicate fixture buffer identity".into());
+                }
+                files[index] = true;
+            } else if buffer.is_message_log() {
+                if !self.messages_required
+                    || self.messages.is_some_and(|known| known != id)
+                    || messages != 0
+                    || buffer.display_name() != "*Messages*"
+                    || buffer.path().is_some()
+                    || !buffer.is_read_only()
+                    || buffer.is_modified()
+                {
+                    return Err("unexpected message history identity or state".into());
+                }
+                self.messages = Some(id);
+                messages += 1;
+            } else {
+                return Err(format!(
+                    "unexpected retained buffer: id={id:?}, name={:?}, path={:?}",
+                    buffer.display_name(),
+                    buffer.path()
+                ));
+            }
+        }
+        if scratch != 1
+            || files != self.files.map(|id| id.is_some())
+            || messages != usize::from(self.messages_required)
+        {
+            return Err("missing expected scratch, fixture or message history buffer".into());
+        }
+        Ok(())
+    }
+
+    fn verify_finished(&self, open_diagnostic: bool) -> Result<(), String> {
+        let files = self.files.map(|id| id.is_some());
+        if files != [open_diagnostic, false, false] || self.messages_required == open_diagnostic {
+            return Err("lifecycle did not finish with the expected scratch / fixture / message history set".into());
+        }
+        Ok(())
+    }
+}
+
 struct Run {
     session: Session,
     output: File,
@@ -235,6 +356,7 @@ struct Run {
     expected_points: [usize; 3],
     disk_expected: Option<String>,
     retired: Vec<WeakEntity<BufferView>>,
+    lifecycle: Lifecycle,
     settle_ticks: usize,
 }
 
@@ -293,6 +415,11 @@ impl Run {
         } else {
             None
         };
+        if self.step == Step::Kill {
+            let id = self.active(cx).read(cx).buffer().snapshot_id().buffer;
+            self.lifecycle
+                .killed(file.ok_or("kill target is not a fixture")?, id)?;
+        }
         let mut reading = std::mem::take(&mut self.reading);
         let start = Instant::now();
         match self.step {
@@ -356,6 +483,8 @@ impl Run {
                     }
                     return Ok(false);
                 }
+                self.lifecycle
+                    .opened(index, view.buffer().snapshot_id().buffer)?;
                 self.expected_points[index] = 0;
                 self.reading.stamp = Some(EditStamp::capture(view));
                 self.reading.bytes = view.buffer().text().len();
@@ -429,7 +558,7 @@ impl Run {
         Ok(self.reading.ready_ms.is_some())
     }
 
-    fn verify(&self, cx: &App) -> Result<(), String> {
+    fn verify(&mut self, cx: &App) -> Result<(), String> {
         let active = self.active(cx);
         let view = active.read(cx);
         if let Some(index) = self.active_file(cx)
@@ -452,7 +581,11 @@ impl Run {
         {
             return Err("buffer switch did not select its target".into());
         }
-        Ok(())
+        if matches!(self.step, Step::Save | Step::SaveEdit) {
+            self.lifecycle.messages_required = true;
+        }
+        self.lifecycle
+            .verify(self.session.shell.read(cx), &self.session.directory)
     }
 
     fn write_row(&mut self, status: &str, cx: &App) {
@@ -470,9 +603,10 @@ impl Run {
                         .ok()
                 })
             });
+        let counts = self.lifecycle.counts(self.session.shell.read(cx));
         writeln!(
             self.output,
-            "{},{},{},{:.3},{},{},{},{},{},{},{:.3},{},{},{:.1},{:.1},{},{},{},{}",
+            "{},{},{},{:.3},{},{},{},{},{},{},{:.3},{},{},{:.1},{:.1},{},{},{},{},{},{},{}",
             self.index,
             self.step.name(),
             status,
@@ -490,6 +624,9 @@ impl Run {
             r.width,
             r.height,
             self.session.shell.read(cx).buffer_count(),
+            counts.scratch,
+            counts.files,
+            counts.messages,
             self.retired
                 .iter()
                 .filter(|view| view.upgrade().is_some())
@@ -618,10 +755,8 @@ impl Run {
             key(window, cx, "ctrl-g");
         }
         let Some(step) = self.steps.pop_front() else {
-            let expected_buffers = if self.session.open_diagnostic { 2 } else { 1 };
-            if self.session.shell.read(cx).buffer_count() != expected_buffers {
-                return Err("lifecycle did not return to one scratch buffer".into());
-            }
+            self.lifecycle
+                .verify_finished(self.session.open_diagnostic)?;
             return Ok(false);
         };
         self.step = step;
@@ -663,9 +798,20 @@ pub fn start(session: Session, window: &Window, cx: &App) {
     )
     .unwrap();
     writeln!(output, "# confirm/TAB-to-submit for body operations; completion/cancel are UI observation only, NOT submission; save-edit first/ready start at next-tick y, save completion starts at C-x C-s; save_ack_before_edit reports whether saving was already acknowledged (worker overlap is not proven)").unwrap();
+    writeln!(output, "# lifecycle counts include D1 message history; scratch/fixture/message identities are validated separately; closed fixture views must be released").unwrap();
     writeln!(output, "# prompt typing, assertions and fixture setup excluded; filesystem cache uncontrolled; RSS is observational, not a leak verdict; timeout is not a latency budget").unwrap();
-    writeln!(output, "step,phase,status,action_cpu_ms,save_action_cpu_ms,save_ack_before_edit,first_submit_ms,ready_submit_ms,save_observed_ms,result_observed_ms,draw_cpu_max_ms,frames,blank_frames,width_px,height_px,buffers,retained_closed_views,rss_kib,observed_elapsed_ms").unwrap();
+    writeln!(output, "step,phase,status,action_cpu_ms,save_action_cpu_ms,save_ack_before_edit,first_submit_ms,ready_submit_ms,save_observed_ms,result_observed_ms,draw_cpu_max_ms,frames,blank_frames,width_px,height_px,buffers,scratch_buffers,file_buffers,message_buffers,retained_closed_views,rss_kib,observed_elapsed_ms").unwrap();
     output.flush().unwrap();
+    let lifecycle = Lifecycle::new(
+        session
+            .shell
+            .read(cx)
+            .active_view()
+            .read(cx)
+            .buffer()
+            .snapshot_id()
+            .buffer,
+    );
     let expected = std::array::from_fn(|_| session.original.clone());
     let mut steps = plan(session.open_diagnostic);
     let step = steps.pop_front().unwrap();
@@ -684,6 +830,7 @@ pub fn start(session: Session, window: &Window, cx: &App) {
             prepared_at: Instant::now(),
             reading: Reading::default(),
             expected,
+            lifecycle,
             expected_points: [0; 3],
             disk_expected: None,
             retired: Vec::new(),
@@ -752,6 +899,17 @@ mod tests {
                 cx.update(|cx| cx.foreground_journal().collector()),
             )
         });
+        let lifecycle = visual.read(|cx| {
+            Lifecycle::new(
+                shell
+                    .read(cx)
+                    .active_view()
+                    .read(cx)
+                    .buffer()
+                    .snapshot_id()
+                    .buffer,
+            )
+        });
         let mut run = Run {
             session: Session {
                 shell,
@@ -774,6 +932,7 @@ mod tests {
             prepared_at: Instant::now(),
             reading: Reading::default(),
             expected: std::array::from_fn(|_| "base\n".into()),
+            lifecycle,
             expected_points: [0; 3],
             disk_expected: None,
             retired: Vec::new(),
@@ -849,6 +1008,17 @@ mod tests {
             assert!(preparation.contains("completed_open=true; lost_entries=0; acceptance=false"));
         }
         assert!(run.retired.iter().all(|view| view.upgrade().is_none()));
+        let report = fs::read_to_string(directory.0.join("report.csv")).unwrap();
+        let last: Vec<_> = report.lines().last().unwrap().split(',').collect();
+        assert_eq!(last.len(), 22);
+        assert_eq!(
+            &last[15..20],
+            if open_diagnostic {
+                &["2", "1", "1", "0", "0"]
+            } else {
+                &["2", "1", "0", "1", "0"]
+            }
+        );
         assert_eq!(
             fs::read(directory.0.join("input-0.txt")).unwrap(),
             if open_diagnostic {
@@ -880,6 +1050,109 @@ mod tests {
     ) {
         assert_eq!(plan(true), VecDeque::from([Step::Boot, Step::Open(0)]));
         exercise_workload(cx, true);
+    }
+
+    #[gpui_kit::test]
+    fn lifecycle_rejects_unknown_buffers_and_recreated_message_history(
+        cx: &mut gpui_kit::TestAppContext,
+    ) {
+        use gpui_kit::{VisualTestContext, px, size};
+        use semacs::buffer::Buffer;
+
+        cx.update(semacs::app::init);
+        let window = cx.open_window(size(px(960.), px(640.)), |window, cx| {
+            AppShell::new(Buffer::scratch(), window, cx)
+        });
+        let shell = window.entity(cx).unwrap();
+        let mut visual = VisualTestContext::from_window(window.into(), cx);
+        let mut lifecycle = visual.read(|cx| {
+            Lifecycle::new(
+                shell
+                    .read(cx)
+                    .active_view()
+                    .read(cx)
+                    .buffer()
+                    .snapshot_id()
+                    .buffer,
+            )
+        });
+        let redraw = |visual: &mut VisualTestContext| {
+            visual.run_until_parked();
+            visual.update(|window, cx| window.draw(cx).clear(cx));
+        };
+        let check = |lifecycle: &mut Lifecycle, visual: &VisualTestContext| {
+            visual.read(|cx| lifecycle.verify(shell.read(cx), Path::new(".pi/tmp")))
+        };
+        redraw(&mut visual);
+        visual.simulate_keystrokes("ctrl-g");
+        redraw(&mut visual);
+        lifecycle.messages_required = true;
+        check(&mut lifecycle, &visual).unwrap();
+        let original_message = lifecycle.messages.unwrap();
+        let mut fake_message = Buffer::named("*Messages*");
+        fake_message.set_read_only(true);
+        for unexpected in [
+            Buffer::named("unexpected"),
+            fake_message,
+            Buffer::new_file(".pi/tmp/leaked.txt".into()),
+        ] {
+            visual.update(|window, cx| {
+                shell.update(cx, |shell, cx| {
+                    let index = shell.create_buffer(unexpected, window, cx);
+                    assert!(shell.activate(index, window, cx));
+                })
+            });
+            assert!(
+                check(&mut lifecycle, &visual)
+                    .unwrap_err()
+                    .contains("unexpected retained buffer")
+            );
+            visual.simulate_keystrokes("ctrl-x k");
+            redraw(&mut visual);
+            visual.simulate_keystrokes("enter");
+            redraw(&mut visual);
+            check(&mut lifecycle, &visual).unwrap();
+        }
+        visual.update(|window, cx| {
+            shell.update(cx, |shell, cx| {
+                let index = shell.buffers().position(Buffer::is_message_log).unwrap();
+                assert!(shell.activate(index, window, cx));
+            })
+        });
+        visual.simulate_keystrokes("ctrl-x k");
+        redraw(&mut visual);
+        visual.simulate_keystrokes("enter");
+        redraw(&mut visual);
+        assert!(
+            check(&mut lifecycle, &visual)
+                .unwrap_err()
+                .contains("missing expected")
+        );
+        visual.simulate_keystrokes("ctrl-g");
+        redraw(&mut visual);
+        assert!(
+            check(&mut lifecycle, &visual)
+                .unwrap_err()
+                .contains("message history identity")
+        );
+        assert_eq!(lifecycle.messages, Some(original_message));
+    }
+
+    #[test]
+    fn fixture_identity_cannot_be_replaced_or_killed_by_another_buffer() {
+        let scratch = semacs::buffer::Buffer::scratch().snapshot_id().buffer;
+        let first = semacs::buffer::Buffer::scratch().snapshot_id().buffer;
+        let other = semacs::buffer::Buffer::scratch().snapshot_id().buffer;
+        let mut lifecycle = Lifecycle::new(scratch);
+        lifecycle.opened(0, first).unwrap();
+        assert!(lifecycle.opened(0, other).is_err());
+        assert!(lifecycle.killed(0, other).is_err());
+        assert_eq!(lifecycle.files[0], Some(first));
+        lifecycle.killed(0, first).unwrap();
+        assert!(lifecycle.verify_finished(false).is_err());
+        lifecycle.messages_required = true;
+        assert!(lifecycle.verify_finished(false).is_ok());
+        assert!(lifecycle.verify_finished(true).is_err());
     }
 
     #[test]

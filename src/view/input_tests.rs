@@ -13,7 +13,6 @@ use gpui_kit::{
 use std::sync::atomic::AtomicBool;
 
 pub(super) fn open(text: &str, cx: &mut TestAppContext) -> (VisualTestContext, Entity<BufferView>) {
-    cx.update(crate::app::init);
     let buffer = Buffer::new(
         None,
         DecodedFile {
@@ -21,6 +20,14 @@ pub(super) fn open(text: &str, cx: &mut TestAppContext) -> (VisualTestContext, E
             format: FileFormat::default(),
         },
     );
+    open_buffer(buffer, cx)
+}
+
+pub(super) fn open_buffer(
+    buffer: Buffer,
+    cx: &mut TestAppContext,
+) -> (VisualTestContext, Entity<BufferView>) {
+    cx.update(crate::app::init);
     let window = cx.open_window(size(px(400.), px(240.)), |window, cx| {
         let shell = cx.new(|cx| AppShell::new(buffer, window, cx));
         gpui_kit::base::Root::new(shell, window, cx)

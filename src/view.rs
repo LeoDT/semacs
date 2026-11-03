@@ -27,6 +27,7 @@ use crate::text::ByteOffset;
 use crate::theme::{StyleRole, ThemeSettings};
 
 mod cursor;
+mod decoration;
 mod feedback;
 pub(crate) use feedback::Feedback;
 mod initial;
@@ -431,6 +432,16 @@ impl BufferView {
             #[cfg(test)]
             geometry_refreshes: 0,
         }
+    }
+
+    pub fn syntax_snapshot(&self) -> Option<crate::buffer::SnapshotId> {
+        self.buffer()
+            .syntax_highlights()
+            .map(|syntax| syntax.snapshot)
+    }
+
+    pub fn syntax_ready(&self) -> bool {
+        self.buffer().syntax_ready()
     }
 
     pub fn buffer(&self) -> &Buffer {
@@ -903,6 +914,7 @@ impl BufferView {
     }
 
     fn prepare(&mut self, bounds: Bounds<Pixels>, window: &mut Window, cx: &mut Context<Self>) {
+        self.buffer().prepare_syntax(cx.weak_entity().into(), cx);
         #[cfg(feature = "native-profiler")]
         let _trace =
             crate::preparation_trace::Span::new("prepare", self.display_snapshot().text().len());
@@ -1411,7 +1423,7 @@ impl Element for TextCanvas {
             }
         });
         let annotation = self.view.read(cx).annotation_lines(window, cx);
-        let (layout, cursor, marked, region, prompt_end) = {
+        let (layout, cursor, marked, region, prompt_end, syntax) = {
             let view = self.view.read(cx);
             let Some(layout) = view.paint_layout().cloned() else {
                 return;
@@ -1419,6 +1431,10 @@ impl Element for TextCanvas {
             let focus = view.focus.is_focused(window);
             let snapshot = view.display_snapshot();
             let cursor = focus.then(|| view.cursor()).flatten();
+            let syntax = view
+                .buffer()
+                .syntax_highlights()
+                .filter(|syntax| syntax.snapshot == layout.key.display.committed);
             (
                 layout,
                 cursor,
@@ -1433,8 +1449,15 @@ impl Element for TextCanvas {
                 } else {
                     ByteOffset(0)
                 },
+                syntax,
             )
         };
+        let style = decoration::TextStyle::new(
+            ThemeSettings::global(cx),
+            syntax.as_deref(),
+            marked.as_ref().map(|range| range.start.0..range.end.0),
+            prompt_end.0,
+        );
         let cursor_colors = ThemeSettings::global(cx).style(StyleRole::Cursor);
         window.with_content_mask(
             Some(ContentMask {
@@ -1458,11 +1481,11 @@ impl Element for TextCanvas {
                         .as_ref()
                         .filter(|cursor| cursor.row == row.source.index);
                     for part in &row.parts {
-                        part.paint_with_cursor(
+                        part.paint_text(
                             point(origin.x + part.x, origin.y),
                             layout.key.settings.line_height,
                             cursor,
-                            prompt_end,
+                            &style,
                             window,
                             cx,
                         );
@@ -1530,6 +1553,8 @@ mod region_tests;
 mod routing_tests;
 #[cfg(test)]
 mod split_tests;
+#[cfg(test)]
+mod syntax_tests;
 #[cfg(test)]
 mod theme_tests;
 

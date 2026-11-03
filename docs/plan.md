@@ -2,9 +2,11 @@
 
 里程碑按可验收行为划分，不按工期估算。本文是跨会话工作的统一入口；维护与归档规则见 [文档说明](README.md#维护规则)。范围见 [需求](requirements.md)，行为见 [保真度契约](emacs-fidelity.md)。
 
-## 当前状态：E0 已收尾，E1 待启动
+## 当前状态：E1 与 profiler 工具修复已收尾
 
-用户已确认 E0 按本轮范围收尾，本地及宿主证据见下文。当前没有进行中的实现；下一步为 E1：Rust tree-sitter，不在本轮启动。旧 M2 profiler 工具失败仍按已知问题独立跟踪，不因 E0 收尾而记作解决。
+E1 已按确认范围完成本地及用户宿主定向验收；随后依用户顺序完成旧 M2 profiler 生命周期工具修复，完整默认 / feature 测试和审查通过，证据见下文。当前没有进行中的实现，也没有剩余必测的宿主批次。
+
+下一产品阶段为 F：diff → magit，尚未展开规格；启动前先确认 diff 的最小行为与范围，不自动推进。原生性能、真实 IME / GPU 等未测边界继续按各记录保留，不因本轮收尾自动追加补测。
 
 ## 后续阶段
 
@@ -12,12 +14,9 @@
 
 | 阶段 | 交付边界与前置条件 |
 |---|---|
-| **E1：Rust tree-sitter** | E0 完成后，以 Rust 为首个语言打通 Rust 核心的增量解析与高亮，消费主题的中性语法样式；按需再增加其他语言 / 查询等脚本接口，不同时扩展为 LSP / 完整语言平台。 |
 | **F：diff → magit** | 先 diff 查看，再推进 git 工作流；按实际需求增加进程、section 与 transient 原语，不预建通用 UI 框架。 |
 
 ## 已知问题与未排期事项
-
-- **旧 M2 profiler 生命周期自检失败**：E0 扩展检查中，`cargo test --all-targets --features native-profiler` 的 `m2::tests::native_workload_runs_through_the_production_shell_headlessly` 在 step 30 Kill 报“lifecycle did not return to one scratch buffer”；未修改基线 `9bff704` 在独立源码目录运行同一测试也失败，不能归为 E0 回退或宣称 feature 全套通过。当前保留失败日志于 `.pi/tmp/e0-profiler-tests.log` / `.pi/tmp/e0-base-profiler-test.log`，不擅自修改产品生命周期或放宽旧驱动断言；下一步确认额外 buffer 身份、对齐 D1 消息历史契约并单独修正 / 验证旧工具。同一断言也影响 `scripts/acceptance.fish perf` 的原生 M2 驱动；保持 fail-closed，不自动重跑原生批次。基线复现与精确排除 1 项后的 feature 测试边界见 [E0 本地记录](records/e0-themes-local.md#既有-profiler-工具失败与证据边界)。此项不扩大本轮 E0 宿主配色观察范围。
 
 - **多 view 聚合性能观察（非阻塞）**：六类 headless 双 view 全部 ready 曾约 350 ms；它与旧单 view / 选中 view 的 300 ms 指标不同，聚合没有另定数值门限，不能判作预算超限或自动产生补测任务。用户已接受保留该观察并收尾阶段 C。后续仅在出现实际响应问题或确认新预算时再考虑定向分析；不外推两个原生代表样本为六类全覆盖，也不安排追加测试。
 - **日常编辑增强**：isearch、`M-y`、`C-u`、occur 等未排期，实际需要时再确认优先级与范围。
@@ -62,7 +61,19 @@ D 验收时遗留的错误信息与 mode line 重叠缺陷已由下节 D1 处理
 
 应用级单一主题、用户颜色覆盖、JS 主题配置及 `M-x load-theme` 候选切换已完成，用户确认按本轮范围收尾。正文及外围界面统一使用命名样式；换色只重绘，超长字形行的布局和输入坐标保持可用，不引入 Emacs font-lock / 完整 face 机制。行为见 [E0 契约](emacs-fidelity.md#阶段-e0基础主题与命名样式)，配置 API 见 [JS 配置](scripting.md#主题与命名样式)，证据见 [本地验证](records/e0-themes-local.md)及[宿主定向验收](records/e0-themes-host.md)。
 
-默认 453 项 Rust 测试、静态检查、受影响的 headless 性能回归及五项宿主功能观察通过。具体窗口尺寸未提供，原生性能、真实 IME 和 GPU 未测，按记录保留，不自动追加补测。既有 profiler 生命周期自检失败继续按上节独立跟踪，不宣称完整 feature 测试通过；不改写冻结证据，不启动 E1。
+默认 453 项 Rust 测试、静态检查、受影响的 headless 性能回归及五项宿主功能观察通过。具体窗口尺寸未提供，原生性能、真实 IME 和 GPU 未测，按记录保留，不自动追加补测。E0 收尾时既有 profiler 生命周期自检仍失败，当时不宣称完整 feature 测试通过；后续独立修复见下节工具维护，不改写 E0 冻结证据。E0 收尾轮未启动 E1。
+
+### 阶段 E1：Rust tree-sitter
+
+`.rs` 自动启用的共享后台增量解析、中性主题语法前景色与 paint-only 高亮已完成，本地回归 / 一次集中审查修复及用户五项宿主定向观察通过。行为见 [E1 契约](emacs-fidelity.md#阶段-e1rust-tree-sitter)，证据见 [本地验证](records/e1-syntax-local.md)与[宿主验收](records/e1-syntax-host.md)。
+
+本地 470 项 Rust 测试及静态 / 工具检查通过；既有 headless 指标满足预算，新语法加布局就绪仅作独立基线，不套用旧纯布局 ready 门限。宿主额外 `.ts` 文件已确认为名称笔误；具体窗口尺寸未记录，原生性能、真实 IME 与 GPU 未测，按记录保留，不自动追加补测。旧 profiler 工具失败没有记作 E1 交付解决，而是在下节后续工具维护中单独处理。
+
+### 后续工具维护：M2 profiler 生命周期
+
+已确认旧失败由 D1 的真实只读 `*Messages*` 使“一份 scratch”旧假设失效引起；工具现逐步骤核对 scratch、fixture 与消息历史的身份 / 状态，并同步 Rust CSV 分类和 Python 校验，未知 buffer 与关闭 view 释放检查保持 fail-closed，产品生命周期与性能预算不变。
+
+完整默认 470 项、`native-profiler` 501 项 Rust 测试均通过且未跳过；两套 Clippy、51 项 Python、16 项 fixture 工具、fish / 格式 / 差异检查及 release profiler 构建通过，单次集中审查无待修项。证据见 [本地修复验证](records/profiler-lifecycle-local.md)。旧失败已从当前问题中移除，历史失败日志继续保留；没有运行原生窗口或性能矩阵，不扩大为原生性能 / IME / GPU 通过。
 
 ## 完成标准
 

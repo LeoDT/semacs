@@ -109,6 +109,7 @@ struct Document {
     format: FileFormat,
     modified: bool,
     history: history::History,
+    syntax: crate::syntax::Syntax,
 }
 
 impl Document {
@@ -164,14 +165,17 @@ impl Buffer {
             .unwrap_or_else(|| "*scratch*".to_owned());
         let point = Rc::new(TrackedPoint::new(0));
         let points = vec![Rc::downgrade(&point)];
-        let document = Document {
-            snapshot: BufferSnapshot {
-                id: SnapshotId {
-                    buffer: BufferId(id),
-                    version: TextVersion::default(),
-                },
-                text,
+        let snapshot = BufferSnapshot {
+            id: SnapshotId {
+                buffer: BufferId(id),
+                version: TextVersion::default(),
             },
+            text,
+        };
+        let syntax = crate::syntax::Syntax::new(snapshot.clone(), path.as_deref());
+        let document = Document {
+            snapshot,
+            syntax,
             revision: 0,
             last_edit: None,
             points,
@@ -244,7 +248,7 @@ impl Buffer {
         buffer
     }
 
-    pub(crate) fn is_message_log(&self) -> bool {
+    pub fn is_message_log(&self) -> bool {
         self.document.borrow().message_log
     }
 
@@ -307,6 +311,18 @@ impl Buffer {
         }
         Ok(())
     }
+    pub(crate) fn prepare_syntax(&self, observer: gpui_kit::AnyWeakEntity, cx: &mut gpui_kit::App) {
+        self.document.borrow().syntax.prepare(observer, cx);
+    }
+
+    pub(crate) fn syntax_highlights(&self) -> Option<std::sync::Arc<crate::syntax::Highlights>> {
+        self.document.borrow().syntax.highlights()
+    }
+
+    pub(crate) fn syntax_ready(&self) -> bool {
+        self.document.borrow().syntax.ready()
+    }
+
     pub(crate) fn revision(&self) -> u64 {
         self.document.borrow().revision
     }
@@ -421,6 +437,7 @@ impl Buffer {
             .map(|n| n.to_string_lossy().into_owned())
             .unwrap_or_else(|| "*scratch*".to_owned());
         d.display_name = d.base_name.clone();
+        d.syntax.set_path(&path);
         d.path = Some(path);
         d.touch();
     }
@@ -486,6 +503,8 @@ impl Buffer {
         );
         doc.snapshot.text.replace(start..old_end, edit.text);
         doc.snapshot.id.version = version;
+        doc.syntax
+            .edited(doc.snapshot.clone(), start..old_end, start + inserted);
         doc.points.retain(|weak| {
             if let Some(point) = weak.upgrade() {
                 if !Rc::ptr_eq(&point, &self.point) {

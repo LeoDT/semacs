@@ -17,10 +17,21 @@ pub enum StyleRole {
     CompletionMatch,
     CompletionAnnotation,
     Separator,
+    SyntaxKeyword,
+    SyntaxComment,
+    SyntaxString,
+    SyntaxNumber,
+    SyntaxType,
+    SyntaxFunction,
+    SyntaxVariable,
+    SyntaxConstant,
+    SyntaxOperator,
+    SyntaxPunctuation,
 }
 
 impl StyleRole {
-    pub const ALL: [Self; 12] = [
+    pub const COUNT: usize = 22;
+    pub const ALL: [Self; Self::COUNT] = [
         Self::Default,
         Self::Cursor,
         Self::Region,
@@ -33,6 +44,16 @@ impl StyleRole {
         Self::CompletionMatch,
         Self::CompletionAnnotation,
         Self::Separator,
+        Self::SyntaxKeyword,
+        Self::SyntaxComment,
+        Self::SyntaxString,
+        Self::SyntaxNumber,
+        Self::SyntaxType,
+        Self::SyntaxFunction,
+        Self::SyntaxVariable,
+        Self::SyntaxConstant,
+        Self::SyntaxOperator,
+        Self::SyntaxPunctuation,
     ];
 
     pub fn name(self) -> &'static str {
@@ -49,6 +70,16 @@ impl StyleRole {
             Self::CompletionMatch => "completion-match",
             Self::CompletionAnnotation => "completion-annotation",
             Self::Separator => "separator",
+            Self::SyntaxKeyword => "syntax.keyword",
+            Self::SyntaxComment => "syntax.comment",
+            Self::SyntaxString => "syntax.string",
+            Self::SyntaxNumber => "syntax.number",
+            Self::SyntaxType => "syntax.type",
+            Self::SyntaxFunction => "syntax.function",
+            Self::SyntaxVariable => "syntax.variable",
+            Self::SyntaxConstant => "syntax.constant",
+            Self::SyntaxOperator => "syntax.operator",
+            Self::SyntaxPunctuation => "syntax.punctuation",
         }
     }
 
@@ -141,7 +172,7 @@ pub struct ThemeSettings {
     themes: BTreeMap<String, ThemeDefinition>,
     active: String,
     overrides: BTreeMap<StyleRole, StyleOverride>,
-    resolved: [StyleColors; 12],
+    resolved: [StyleColors; StyleRole::COUNT],
 }
 
 impl Global for ThemeSettings {}
@@ -265,7 +296,7 @@ impl ThemeSettings {
     }
 }
 
-fn builtin_colors(mode: ThemeMode) -> [StyleColors; 12] {
+fn builtin_colors(mode: ThemeMode) -> [StyleColors; StyleRole::COUNT] {
     let (foreground, background, muted, active_bg, inactive_bg, selection, accent, separator) =
         if mode == ThemeMode::Dark {
             (
@@ -274,6 +305,16 @@ fn builtin_colors(mode: ThemeMode) -> [StyleColors; 12] {
         } else {
             (
                 0x202124, 0xffffff, 0x626873, 0xdce5f2, 0xf0f1f3, 0xc5d9f5, 0x174ea6, 0xb9bec7,
+            )
+        };
+    let (keyword, comment, string, number, type_color, function, constant) =
+        if mode == ThemeMode::Dark {
+            (
+                0xc792ea, 0x9aa0a6, 0xa5d6a7, 0xffcc80, 0x80cbc4, 0x82b1ff, 0xf4b4c4,
+            )
+        } else {
+            (
+                0x7b1fa2, 0x626873, 0x2e7d32, 0x945500, 0x00695c, 0x174ea6, 0x9c254d,
             )
         };
     let pair = |fg, bg| StyleColors {
@@ -293,6 +334,16 @@ fn builtin_colors(mode: ThemeMode) -> [StyleColors; 12] {
         pair(accent, background),
         pair(muted, background),
         pair(separator, background),
+        pair(keyword, background),
+        pair(comment, background),
+        pair(string, background),
+        pair(number, background),
+        pair(type_color, background),
+        pair(function, background),
+        pair(foreground, background),
+        pair(constant, background),
+        pair(foreground, background),
+        pair(muted, background),
     ]
 }
 

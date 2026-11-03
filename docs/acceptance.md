@@ -15,6 +15,8 @@
 
 实现阶段收尾执行 `cargo test --all-targets`、`cargo clippy --all-targets -- -D warnings`、`cargo fmt --check` 和差异检查；若改动 profiler / 驱动，还检查相应 feature 和工具（`cargo test --all-targets --features native-profiler`、对应 Clippy 及 `python3 -B -m unittest discover -s tests -p 'test_*.py'`）。日常小改动按影响检查，纯文档整理不机械重跑产品测试。修改 split IME 驱动时，另运行 `python3 -B -m unittest discover -s scripts -p 'test_split_ime.py' -v`（不访问桌面）。修改人工 fixture / 验证工具时，另运行 `python3 -B -m unittest discover -s scripts -p 'test_m2_manual.py' -v`；脚本接入冒烟驱动另运行 `python3 -B -m unittest discover -s scripts -p 'test_scripting_manual.py' -v`；fish 入口用 `fish --no-execute scripts/acceptance.fish` 检查语法，以上检查均不启动桌面窗口。
 
+M2 原生工具的生命周期报告分别核对 scratch、fixture 文件和真实消息历史，CSV 保留总数并提供 `scratch_buffers` / `file_buffers` / `message_buffers`；首次保存后预期保留一份只读消息历史，不把它当成文件泄漏。分类缺失、未知 buffer 或关闭 view 未释放仍拒绝通过；旧报告按其冻结版本解释，不因新工具字段变化自动重跑历史批次。
+
 有输入 / 布局性能影响时，可在不访问桌面的 TestPlatform / TestTextSystem 上运行：
 
 ```sh
@@ -34,6 +36,29 @@ target/release/examples/perf_candidates .pi/tmp/NEW-candidate-fixture
 该入口在 960×640 的 TestPlatform / TestTextSystem 上各测三轮命令过滤、文件过滤和候选导航；文件 fixture 为 2000 个目录项，保留产物。它不是原生候选呈现或平台 IME 验收。
 
 `perf_view` 测视图布局 / 绘制与基础输入；`perf_m1` 测有界命令链与未等待布局的输入段，ready 只代表末键恢复，不是原生长时间持续输入。文件层入口为 `examples/perf_load.rs` / `scripts/perf_baseline.sh`。具体参数、样本和断言以工具为准；headless 结果不替代原生字体、GPU 或真实 IME 证据。
+
+## 阶段 E1：Rust 语法
+
+本地 `cargo test --all-targets` 覆盖增量 / 合并编辑与 fresh parse 对照、Unicode 字节坐标、undo / redo、未完成语法、迟到结果 / 语言代次隔离、共享 buffer / view 生命周期，以及预编辑投影、装饰优先级和正式另存路径。高亮到达与换色不重做 shaping、不失效输入坐标；文件 / 文本修改仍走既有入口。
+
+除受影响的 `perf_view` / `perf_m1` 回归外，可运行新的无新增就绪门限的语法基线：
+
+```sh
+cargo build --release --example perf_syntax
+RUNS=3 target/release/examples/perf_syntax
+```
+
+入口在 TestPlatform / TestTextSystem、960×640、默认字体和软换行下，生成约 8 MiB 的多行 Rust 与单行长 raw string，各三轮。冷启动从窗口创建前计时，不含 buffer 模型构造；输入分别记录同步分发、首次 draw 和语法加布局全部就绪，包含 insert、undo / redo、同回调 32 键、换色和稳定强制重绘。`syntax_and_layout_ready_ms` 包含后台解析 / 查询，不能拿它冒充旧的纯布局指标或套用原 ready 门限；它不是原生呈现 / 持续输入验收。小样本 workload 自检随 all-targets 执行，按正式 redo 的编辑起点恢复语义断言，失败不输出整份大正文。
+
+取得本轮宿主验证同意后，在正常 fish / Wayland 终端运行（目录必须不存在）：
+
+```fish
+fish scripts/acceptance.fish syntax .pi/tmp/e1-syntax-host-01 --consent
+```
+
+只构建正式 release `semacs`，沿用既有人工 fixture / 独立字节校验工具，只对子进程设置独立 `XDG_CONFIG_HOME`。终端打印五组步骤：Rust 分类 / region / 方块光标及分屏；light / dark / 自定义字符串配色与关键字用户覆盖；未闭合块注释及 undo / redo；相同内容的普通文本与 `.rs → .txt → .rs` 另存；窄窗口 / 字号、minibuffer 和正文保存。最终 `body.rs`、`plain.txt` 与配置不变，新增 `language.txt` 为原文，`restored.rs` 仅在开头增加 `// done` 和换行。
+
+不截图、不注键、不改变输入法，本轮使用英文输入；不测原生性能、真实 IME 或 GPU。记录源码 / 二进制身份、环境、stdout / stderr、五项人工观察、大致尺寸及独立磁盘 / 配置字节。遇到异常或未观察项立即停止步骤，关闭测试窗口并答 no；保留失败目录，不修复 fixture 或自动重试。本页不授权实际桌面测试。
 
 ## 阶段 E0：主题与命名样式
 
@@ -120,11 +145,13 @@ fish scripts/acceptance.fish MODE NEW_OUTPUT_DIRECTORY --consent
 | `ime` | mixed / single-ascii 各三轮真实正文 IME；需要 Hyprland、wtype、fcitx5-remote，grim 可选。完整 minibuffer IME 仍需人工观察。 |
 | `manual` | 两个正式窗口的键盘文件 / IME / OS 关闭流程，按下文操作，脚本核对观察回答与磁盘字节。 |
 | `candidates` | 一个正式窗口的候选 / 路径 / buffer、字体布局及正文 / minibuffer IME 人工检查；不自动注键、不运行性能矩阵。 |
+| `syntax` | E1 一个正式窗口，隔离配置的 Rust 高亮 / 分屏、主题 / 覆盖、增量编辑 / 历史、普通文本 / 另存与布局 / 保存；不截图、不注键，不运行性能矩阵。 |
+| `themes` | E0 一个正式窗口的主题 / 用户覆盖、取消、分屏、读入与正文恢复；隔离配置，不截图、不注键，不运行性能矩阵。 |
 | `messages` | D1 一个正式窗口，隔离配置 / 临时文件的长与多行错误、读入提示、历史回看 / 复制、窄窗口 / 字号及正文恢复；不截图、不注键、不改变 IME，不运行性能矩阵。 |
 | `scripting` | 两个正式窗口，隔离配置的首次显示、脚本命令 / undo、成功 / 失败重载及失败启动回退；用户按终端步骤操作，驱动核对磁盘字节。不截图、不全局注键、不改变 IME，不运行性能矩阵。 |
 | `open-diagnostic` | 一次 mixed 文件打开的定向诊断，不继续其他样本或编辑矩阵，不作为验收。 |
 
-自动性能模式打开测试窗口，内部使用合成 GPUI 输入；不要输入、移动 / 调整或关闭测试窗口。只有 `ime` 注入真实 OS 按键：期间不要操作键鼠，驱动注键前检查目标焦点并恢复原焦点 / 输入法。`split-ime` 不注键；仅按窗口顶部提示输入，不做其他编辑。`manual` / `candidates` / `scripting` / `messages` 不自动注键，按提示操作，不可将未观察到的项目答 yes。
+自动性能模式打开测试窗口，内部使用合成 GPUI 输入；不要输入、移动 / 调整或关闭测试窗口。只有 `ime` 注入真实 OS 按键：期间不要操作键鼠，驱动注键前检查目标焦点并恢复原焦点 / 输入法。`split-ime` 不注键；仅按窗口顶部提示输入，不做其他编辑。`manual` / `candidates` / `scripting` / `messages` / `themes` / `syntax` 不自动注键，按提示操作，不可将未观察到的项目答 yes。
 
 原生性能验收要求硬件渲染；软件诊断不能套用硬件验收结论。fish 入口不提供软件降级；底层驱动的 `--software` 仅供另行授权的诊断。普通原生 / IME 模式在每份窗口报告完成后判定，M1 / M2 / split-perf 还会在测量过程中检查既有预算；失败停止后续运行。模式与参数含义见 [驱动](../scripts/perf_native.py)，不以本页重述完整动作矩阵。
 

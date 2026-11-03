@@ -145,6 +145,33 @@ class ManualFixtureTests(unittest.TestCase):
         self.assertFalse(result["screenshots"])
         self.assertEqual(config.read_bytes(), b"changed configuration")
 
+    def test_syntax_fixture_checks_language_roundtrip_and_configuration(self):
+        self.completed_fixture("syntax")
+        result = m2_manual.verify(self.directory, "syntax")
+        self.assertTrue(result["completed"])
+        self.assertEqual((self.directory / "body.rs").read_bytes(), m2_manual.SYNTAX_BODY)
+        self.assertEqual((self.directory / "plain.txt").read_bytes(), m2_manual.SYNTAX_BODY)
+        self.assertEqual((self.directory / "language.txt").read_bytes(), m2_manual.SYNTAX_BODY)
+        self.assertEqual((self.directory / "restored.rs").read_bytes(), b"// done\n" + m2_manual.SYNTAX_BODY)
+        self.assertEqual(result["ime"], "unmeasured")
+        self.assertEqual(result["gpu"], "unmeasured")
+        self.assertFalse(result["screenshots"])
+        (self.directory / "restored.rs").write_bytes(m2_manual.SYNTAX_BODY)
+        with self.assertRaisesRegex(RuntimeError, "disk-byte mismatch: restored.rs"):
+            m2_manual.verify(self.directory, "syntax")
+
+    def test_syntax_no_observation_or_altered_config_cannot_pass(self):
+        self.completed_fixture("syntax")
+        (self.directory / "observations.tsv").write_text("syntax-start-split\tno\n")
+        config = self.directory / "config/semacs/init.js"
+        config.write_bytes(b"preserve changed syntax config")
+        with self.assertRaises(RuntimeError):
+            m2_manual.verify(self.directory, "syntax")
+        result = json.loads((self.directory / "result.json").read_text())
+        self.assertFalse(result["completed"])
+        self.assertFalse(result["disk_bytes"]["config/semacs/init.js"])
+        self.assertEqual(config.read_bytes(), b"preserve changed syntax config")
+
     def test_wrong_profile_cannot_pass(self):
         self.completed_fixture("m2")
         with self.assertRaisesRegex(RuntimeError, "fixture profile does not match"):

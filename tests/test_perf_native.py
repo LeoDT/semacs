@@ -351,16 +351,20 @@ class NativeBudgetTests(unittest.TestCase):
 
 def m2_rows():
     result = []
-    buffers = 1
+    file_buffers = 0
+    message_buffers = 0
     for index, phase in enumerate(runner.M2_PHASES):
-        buffers += (phase == "open") - (phase == "kill")
+        file_buffers += (phase == "open") - (phase == "kill")
+        if phase in ("save-edit", "save"):
+            message_buffers = 1
         value = {
             "step": str(index), "phase": phase, "status": "complete",
             "action_cpu_ms": "0.1", "save_action_cpu_ms": "", "save_ack_before_edit": "",
             "first_submit_ms": "1", "ready_submit_ms": "2",
             "save_observed_ms": "", "result_observed_ms": "",
             "draw_cpu_max_ms": "1", "frames": "1", "blank_frames": "0",
-            "width_px": "838", "height_px": "1306", "buffers": str(buffers),
+            "width_px": "838", "height_px": "1306", "buffers": str(1 + file_buffers + message_buffers),
+            "scratch_buffers": "1", "file_buffers": str(file_buffers), "message_buffers": str(message_buffers),
             "retained_closed_views": "0", "rss_kib": "1000", "observed_elapsed_ms": "3",
         }
         if phase in ("save", "complete", "cancel-completion"):
@@ -409,6 +413,28 @@ class M2ReportTests(unittest.TestCase):
         next(r for r in values if r["phase"] == "complete")["first_submit_ms"] = "1"
         with self.assertRaisesRegex(RuntimeError, "incorrectly claims"):
             self.validate(values)
+
+    def test_lifecycle_requires_exact_file_scratch_and_message_counts(self):
+        values = m2_rows()
+        self.assertEqual(values[-1]["buffers"], "2")
+        self.assertEqual(values[-1]["file_buffers"], "0")
+        self.assertEqual(values[-1]["message_buffers"], "1")
+        for key, invalid in (("scratch_buffers", "0"), ("scratch_buffers", "2"),
+                             ("file_buffers", "1"), ("message_buffers", "0"),
+                             ("message_buffers", "2"), ("buffers", "3")):
+            changed = m2_rows()
+            changed[-1][key] = invalid
+            with self.subTest(key=key, invalid=invalid), self.assertRaisesRegex(RuntimeError, "lifecycle"):
+                self.validate(changed)
+        early = m2_rows()
+        early[0].update(message_buffers="1", buffers="2")
+        with self.assertRaisesRegex(RuntimeError, "lifecycle"):
+            self.validate(early)
+        for key in ("scratch_buffers", "file_buffers", "message_buffers"):
+            missing = m2_rows()
+            del missing[-1][key]
+            with self.subTest(key=key), self.assertRaises(RuntimeError):
+                self.validate(missing)
 
     def test_concurrent_input_keeps_existing_budget(self):
         for key, value in (("action_cpu_ms", "3"), ("first_submit_ms", "17"),

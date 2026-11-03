@@ -1,7 +1,7 @@
 use super::*;
 use crate::view::input_tests::{app_shell, handler, open, redraw};
 use gpui_kit as gpui;
-use gpui_kit::{InputHandler, TestAppContext, black, font, px, size, white};
+use gpui_kit::{InputHandler, LineLayout, TestAppContext, black, font, px, size};
 use std::sync::Arc;
 
 #[gpui::test]
@@ -233,57 +233,4 @@ fn shaping_clusters_without_a_separate_glyph_are_not_split_by_cursor_stops(
         len: 2,
     });
     assert_eq!(cursor_stops(&line), vec![0, 2]);
-}
-
-#[test]
-fn prompt_and_cursor_decoration_ranges_preserve_body_and_cursor_priority() {
-    use gpui_kit::rgb;
-    let prompt = rgb(0xff0000).into();
-    let cursor = rgb(0x00ff00).into();
-    for range in [None, Some(0..1), Some(2..5), Some(4..7)] {
-        let runs = text_decorations(8, range.clone(), white(), cursor, 4, prompt);
-        let mut offset = 0;
-        for run in runs {
-            for byte in offset..offset + run.len as usize {
-                assert_eq!(
-                    run.color,
-                    if range.as_ref().is_some_and(|range| range.contains(&byte)) {
-                        cursor
-                    } else if byte < 4 {
-                        prompt
-                    } else {
-                        white()
-                    }
-                );
-            }
-            offset += run.len as usize;
-        }
-        assert_eq!(offset, 8);
-    }
-}
-
-#[test]
-fn cursor_decorations_invert_only_the_selected_cluster_without_reshaping() {
-    for range in [0..1, 1..4, 4..5, 0..5] {
-        let runs = text_decorations(5, Some(range.clone()), white(), black(), 0, white());
-        let mut offset = 0;
-        for run in runs {
-            let end = offset + run.len as usize;
-            assert!(
-                end <= range.start
-                    || offset >= range.end
-                    || (offset == range.start && end == range.end)
-            );
-            assert_eq!(
-                run.color,
-                if offset == range.start {
-                    black()
-                } else {
-                    white()
-                }
-            );
-            offset = end;
-        }
-        assert_eq!(offset, 5);
-    }
 }

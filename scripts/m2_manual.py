@@ -157,11 +157,71 @@ E0 配色效果验证（仅本批窗口，英文输入；异常立即停止步�
 
 不会截图、注键、改变输入法或读取日常配置；不测原生性能、真实 IME 或 GPU。
 """
+SYNTAX_BODY = '''// Rust syntax: 中文 🙂 é
+const ANSWER: i32 = 42;
+fn greet(name: &str) -> i32 {
+    let text = r#"hello fn"#;
+    if name.len() > 0 { ANSWER + 1 } else { 0 }
+}
+'''.encode()
+SYNTAX_CONFIG = b'''semacs.setFont({family: "monospace", size: 20});
+semacs.defineTheme("e1-custom", {
+    appearance: "dark", styles: {"syntax.string": {foreground: "#ffb3d1"}}
+});
+semacs.loadTheme("dark");
+semacs.setStyle("syntax.keyword", {foreground: "#e53935"});
+semacs.setStyle("cursor", {foreground: "#202124", background: "#ffcc66"});
+'''
+SYNTAX_SEEDS = {
+    "body.rs": SYNTAX_BODY,
+    "plain.txt": SYNTAX_BODY,
+    "config/semacs/init.js": SYNTAX_CONFIG,
+}
+SYNTAX_EXPECTED = {
+    **SYNTAX_SEEDS,
+    "language.txt": SYNTAX_BODY,
+    "restored.rs": b"// done\n" + SYNTAX_BODY,
+}
+SYNTAX_OBSERVATIONS = (
+    "syntax-start-split", "syntax-theme", "syntax-edit-history",
+    "syntax-language", "syntax-layout-save",
+)
+SYNTAX_INSTRUCTIONS = """
+E1 Rust 语法定向目视验证（仅本批窗口，英文输入；异常立即停止，关闭窗口后答 no，不修复或重试）：
+
+1. 初始 / 分屏（syntax-start-split）
+   body.rs 应以深色、20px 显示；等待后台高亮就绪。fn / const / let / if 等关键字为红色，
+   注释、字符串、数字、类型和函数有区别；字符串内的 fn 不应被当作关键字。
+   C-x 3 左右分屏，两侧语法颜色一致。M-< C-t C-n 选择首行，region 内注释颜色保留；
+   C-g 后在首行用 C-f / C-b 检查黄色方块覆盖文字仍可读，不错位。
+2. 主题与覆盖（syntax-theme）
+   M-x load-theme RET，输入 light RET，再切 dark；关键字始终红色（用户覆盖），其它语法颜色随主题变化。
+   再切 e1-custom，字符串应变粉色，关键字仍红；再切 dark，字符串应恢复内置颜色。
+   两个 pane 都应更新，文字、位置与字号不因换色改变。
+3. 编辑与历史（syntax-edit-history）
+   M-<，连续输入 /*（不加空格），正文暂时成为未闭合块注释；等待两侧变成注释颜色。
+   C-/ 一次撤销，原文及高亮恢复；C-? redo，注释颜色恢复；再 C-/ 回到原文。
+   不应有旧颜色落在新文字上，也不应吞键、出现空白正文或改变另一侧 point / scroll。
+4. 普通文本与另存（syntax-language）
+   C-x 1 保留当前正文；C-x C-f 输入 plain.txt RET：相同文字不应有 Rust 语法颜色。
+   C-x b 输入 body.rs RET 返回；C-x C-w 输入 language.txt 后 M-RET，等待 clean：颜色应变为普通文本。
+   再 C-x C-w 输入 restored.rs 后 M-RET，等待 clean 和后台高亮：Rust 颜色应恢复，正文不变。
+5. 布局 / 读入 / 保存（syntax-layout-save）
+   将窗口缩窄（例如约 480px），M-x increase-font-size RET，检查折行和光标不因着色错位。
+   M-x 输入 fn，候选、prompt 仍是读入配色，不套用 Rust 关键字颜色；C-g 返回正文。
+   M-<，输入 // done 后 RET；C-x C-s 保存等待 clean，C-x C-c 正常关闭。
+   不要编辑 plain.txt、body.rs 或配置；回终端确认五组观察及大致窗口尺寸。
+
+不截图、不自动注键、不改变输入法、不读取日常配置；不测原生性能、真实 IME 或 GPU。
+"""
+INSTRUCTIONS = {"messages": MESSAGES_INSTRUCTIONS, "themes": THEMES_INSTRUCTIONS, "syntax": SYNTAX_INSTRUCTIONS}
+
 PROFILES = {
     "m2": (SEEDS, EXPECTED, OBSERVATIONS),
     "candidates": (CANDIDATE_SEEDS, CANDIDATE_EXPECTED, CANDIDATE_OBSERVATIONS),
     "messages": (MESSAGES_SEEDS, MESSAGES_EXPECTED, MESSAGES_OBSERVATIONS),
     "themes": (THEMES_SEEDS, THEMES_EXPECTED, THEMES_OBSERVATIONS),
+    "syntax": (SYNTAX_SEEDS, SYNTAX_EXPECTED, SYNTAX_OBSERVATIONS),
 }
 
 
@@ -208,7 +268,7 @@ def verify(directory, profile="m2"):
         "errors": errors, "evidence": "user-observed real desktop plus independent disk bytes",
         "performance": "unmeasured",
     }
-    if profile in ("messages", "themes"):
+    if "config/semacs/init.js" in expected_files:
         result.update(ime="unmeasured", gpu="unmeasured", screenshots=False)
     (directory / "result.json").write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n")
     if errors:
@@ -226,10 +286,8 @@ def main():
     if args.action == "prepare":
         prepare(directory, args.profile)
         print(directory)
-        if args.profile == "messages":
-            print(MESSAGES_INSTRUCTIONS, flush=True)
-        elif args.profile == "themes":
-            print(THEMES_INSTRUCTIONS, flush=True)
+        if args.profile in INSTRUCTIONS:
+            print(INSTRUCTIONS[args.profile], flush=True)
     else:
         verify(directory, args.profile)
         print(f"manual observations and disk bytes verified: {directory / 'result.json'}")

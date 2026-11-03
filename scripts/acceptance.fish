@@ -8,8 +8,8 @@ function fail
     exit 1
 end
 
-if test (count $argv) -ne 3; or not contains -- $argv[1] perf display-perf split-perf ime split-ime manual candidates scripting messages themes open-diagnostic; or test "$argv[3]" != --consent
-    echo "Usage: fish scripts/acceptance.fish <perf|display-perf|split-perf|ime|split-ime|manual|candidates|scripting|messages|themes|open-diagnostic> NEW_OUTPUT_DIRECTORY --consent" >&2
+if test (count $argv) -ne 3; or not contains -- $argv[1] perf display-perf split-perf ime split-ime manual candidates scripting messages themes syntax open-diagnostic; or test "$argv[3]" != --consent
+    echo "Usage: fish scripts/acceptance.fish <perf|display-perf|split-perf|ime|split-ime|manual|candidates|scripting|messages|themes|syntax|open-diagnostic> NEW_OUTPUT_DIRECTORY --consent" >&2
     exit 2
 end
 set -l mode $argv[1]
@@ -48,7 +48,7 @@ for file in $untracked
 end
 echo "Output: $output"
 echo "Build logs are saved; any failure stops the batch without retries."
-if contains -- "$mode" candidates scripting messages themes
+if contains -- "$mode" candidates scripting messages themes syntax
     cargo build --release --bin semacs --target-dir "$root/target" > "$output/build.log" 2>&1
 else if test "$mode" = split-ime
     cargo build --release --bin semacs --example native_split_ime --target-dir "$root/target" > "$output/build.log" 2>&1
@@ -135,36 +135,42 @@ else if test "$mode" = scripting
     echo "Any failure stops the batch and terminates only the child test app; all artifacts are kept."
     python3 -B scripts/scripting_manual.py "$output/scripting" --binary "$root/target/release/semacs" --consent
     or fail "scripting smoke stopped; keep and report $output, do not rerun"
-else if test "$mode" = themes
+else if contains -- "$mode" themes syntax
     begin
         uname -a
         rustc --version
         printf 'WAYLAND_DISPLAY=%s\nXDG_SESSION_TYPE=%s\nXDG_CURRENT_DESKTOP=%s\nLANG=%s\n' "$WAYLAND_DISPLAY" "$XDG_SESSION_TYPE" "$XDG_CURRENT_DESKTOP" "$LANG"
         fc-match monospace
     end > "$output/environment.txt" 2>&1
-    python3 -B scripts/m2_manual.py prepare "$output/files" --profile themes
-    or fail "theme fixture generation failed"
-    echo "One manual E0 window; isolated configuration and disposable files only."
+    set -l body body.txt
+    set -l checks theme-start-split theme-switch theme-cancel-unknown theme-minibuffer-messages theme-editing
+    if test "$mode" = syntax
+        set body body.rs
+        set checks syntax-start-split syntax-theme syntax-edit-history syntax-language syntax-layout-save
+    end
+    python3 -B scripts/m2_manual.py prepare "$output/files" --profile "$mode"
+    or fail "theme/syntax fixture generation failed"
+    echo "One manual $mode window; isolated configuration and disposable files only."
     echo "No screenshots, OS key injection, IME changes or performance measurements."
     echo "Follow the five printed groups; stop on a problem, close the window and answer no."
-    env XDG_CONFIG_HOME="$output/files/config" "$root/target/release/semacs" "$output/files/body.txt" > "$output/themes.stdout.log" 2> "$output/themes.stderr.log"
-    or fail "theme session exited abnormally; keep this output directory"
-    for item in theme-start-split theme-switch theme-cancel-unknown theme-minibuffer-messages theme-editing
+    env XDG_CONFIG_HOME="$output/files/config" "$root/target/release/semacs" "$output/files/$body" > "$output/$mode.stdout.log" 2> "$output/$mode.stderr.log"
+    or fail "theme/syntax session exited abnormally; keep this output directory"
+    for item in $checks
         read -l -P "$item: all corresponding observations passed? Type yes or no: " answer
         or set answer no
         printf '%s\t%s\n' "$item" "$answer" >> "$output/files/observations.tsv"
         if test "$answer" != yes
             read -l -P "Failure / unobserved details (optional): " note
             printf '%s\n' "$item: $note" >> "$output/notes.txt"
-            python3 -B scripts/m2_manual.py verify "$output/files" --profile themes > "$output/verification.log" 2>&1
-            fail "theme observation not passed; keep and report $output"
+            python3 -B scripts/m2_manual.py verify "$output/files" --profile "$mode" > "$output/verification.log" 2>&1
+            fail "theme/syntax observation not passed; keep and report $output"
         end
     end
     read -l -P "Observed normal/narrow dimensions and color readability (approximate is OK): " geometry
     printf '%s\n' "$geometry" >> "$output/notes.txt"
-    python3 -B scripts/m2_manual.py verify "$output/files" --profile themes > "$output/verification.log" 2>&1
-    or fail "theme observations or independent disk/config bytes failed; see $output/verification.log"
-    echo "E0 manual observations and disk/config bytes verified; native performance/IME/GPU remain unmeasured."
+    python3 -B scripts/m2_manual.py verify "$output/files" --profile "$mode" > "$output/verification.log" 2>&1
+    or fail "theme/syntax observations or independent disk/config bytes failed; see $output/verification.log"
+    echo "Theme/syntax manual observations and disk/config bytes verified; native performance/IME/GPU remain unmeasured."
 else if test "$mode" = messages
     begin
         uname -a

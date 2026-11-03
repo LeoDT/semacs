@@ -269,22 +269,29 @@ def validate_m2_report(content, rows, software, open_diagnostic=False):
     verdict = "not-applicable" if software else "true"
     if f"# completed=true; existing_budget_passed={verdict};" not in content:
         raise RuntimeError("missing M2 existing-budget verdict")
-    buffers = 1
+    file_buffers = 0
+    message_buffers = 0
     for row in rows:
         phase = row["phase"]
         values = {key: metric(row, key) for key in (
             "action_cpu_ms", "draw_cpu_max_ms", "frames", "blank_frames",
-            "width_px", "height_px", "buffers", "retained_closed_views", "observed_elapsed_ms",
+            "width_px", "height_px", "buffers", "scratch_buffers", "file_buffers", "message_buffers",
+            "retained_closed_views", "observed_elapsed_ms",
         )}
         if row["status"] != "complete" or values["blank_frames"]:
             raise RuntimeError(f"invalid M2 coverage: {row}")
         if not values["width_px"] or not values["height_px"]:
             raise RuntimeError(f"missing M2 body: {row}")
         if phase == "open":
-            buffers += 1
+            file_buffers += 1
         elif phase == "kill":
-            buffers -= 1
-        if values["buffers"] != buffers or (phase == "kill" and values["retained_closed_views"]):
+            file_buffers -= 1
+        if phase in ("save-edit", "save"):
+            message_buffers = 1
+        if (values["scratch_buffers"] != 1 or values["file_buffers"] != file_buffers
+                or values["message_buffers"] != message_buffers
+                or values["buffers"] != 1 + file_buffers + message_buffers
+                or (phase == "kill" and values["retained_closed_views"])):
             raise RuntimeError(f"incorrect M2 lifecycle: {row}")
         limits = {"draw_cpu_max_ms": 16}
         if phase in ("save", "complete", "cancel-completion"):
@@ -307,8 +314,8 @@ def validate_m2_report(content, rows, software, open_diagnostic=False):
             limits.update(action_cpu_ms=2, first_submit_ms=16, ready_submit_ms=300)
         metric(row, "rss_kib", optional=True)
         check_limits(row, values, limits, software)
-    if buffers != (2 if open_diagnostic else 1):
-        raise RuntimeError("M2 buffer count did not match the requested workload")
+    if file_buffers != int(open_diagnostic) or message_buffers != int(not open_diagnostic):
+        raise RuntimeError("M2 buffer classes did not match the requested workload")
 
 
 def verify_m2_files(directory, open_diagnostic=False):
@@ -696,6 +703,9 @@ def main():
                         "sample": sample, "run": run,
                         "save_ack_before_edit": next(row["save_ack_before_edit"] for row in rows if row["phase"] == "save-edit"),
                         "closed_views_retained_at_end": rows[-1]["retained_closed_views"],
+                        "scratch_buffers_at_end": rows[-1]["scratch_buffers"],
+                        "file_buffers_at_end": rows[-1]["file_buffers"],
+                        "message_buffers_at_end": rows[-1]["message_buffers"],
                         "disk_bytes_verified": True,
                     })
                 if args.m1:

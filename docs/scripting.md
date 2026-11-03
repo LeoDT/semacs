@@ -38,8 +38,11 @@
 | `completion-match` | 仅 `foreground`，优先于候选行文字颜色 |
 | `completion-annotation` | 仅 `foreground`，候选注释及计数 |
 | `separator` | 仅 `foreground`，分屏分隔线 |
+| `syntax.keyword` / `syntax.comment` / `syntax.string` / `syntax.number` | 仅 `foreground`，语法关键字 / 注释 / 字符串 / 数字 |
+| `syntax.type` / `syntax.function` / `syntax.variable` / `syntax.constant` | 仅 `foreground`，语法类型 / 函数 / 变量 / 常量 |
+| `syntax.operator` / `syntax.punctuation` | 仅 `foreground`，语法运算符 / 标点 |
 
-未知样式、未支持的属性及非法颜色均拒绝整份配置。这里只定义颜色，不支持任意继承、多个启用主题叠加或自动跟随系统；语法样式待 tree-sitter 阶段增加。
+未知样式、未支持的属性及非法颜色均拒绝整份配置。这里只定义颜色，不支持任意继承、多个启用主题叠加或自动跟随系统。语法启用与显示边界见 [E1 契约](emacs-fidelity.md#阶段-e1rust-tree-sitter)。
 
 ```js
 semacs.defineTheme("night", {
@@ -105,7 +108,7 @@ rquickjs 只执行 JavaScript。不内置 TypeScript 转译器或类型检查器
 | QuickJS 内存 / 栈 | 每个运行时 32 MiB / 256 KiB，不等于整个进程 RSS 上限 |
 | region 输入 / 返回文本 | 各最多 256 KiB UTF-8 字节 |
 | 脚本命令 / 自定义键位 | 每份配置最多 256 / 1024 条 |
-| 自定义主题 / 样式覆盖调用 | 每份配置最多 32 个 / 128 次；每个主题最多 12 个界面样式 |
+| 自定义主题 / 样式覆盖调用 | 每份配置最多 32 个 / 128 次；每个主题最多 22 个界面 / 语法样式 |
 | 正文请求 | 每个窗口最多一个未完成的脚本命令及一个配置重载；重复请求立即报告忙，不累计 |
 | worker 请求队列 | 容量 1，发送不等待空位 |
 

@@ -22,6 +22,8 @@ semacs 将 Emacs 的操作模型带到现代 GPU UI，不复刻 Emacs 外观或 
 
 | 材料 | 用途 |
 |---|---|
+| [M2 profiler 生命周期工具修复](records/profiler-lifecycle-local.md) | E1 后对齐 D1 消息历史、精确身份 / 分类校验与完整 feature 回归；未运行原生矩阵 |
+| [Rust 语法本地验证](records/e1-syntax-local.md) / [宿主定向验收](records/e1-syntax-host.md) | E1 增量解析 / 绘制高亮、审查修复、headless 回归、新语法就绪基线与五项宿主功能确认；尺寸及原生性能 / IME / GPU 边界按记录保留 |
 | [基础主题本地验证](records/e0-themes-local.md) / [宿主定向验收](records/e0-themes-host.md) | E0 配置 / 配色切换、审查修复、headless 回归及五项宿主功能确认；尺寸、原生性能 / IME / GPU 与旧 profiler 工具失败的边界按记录保留 |
 | [消息显示与历史本地验证](records/d1-messages-local.md) / [宿主定向验收](records/d1-messages-host.md) | 阶段 D1 本地回归、Emacs 参照、审查修复、headless 性能及五项宿主人工确认；尺寸、原生性能 / IME / GPU 边界按记录保留 |
 | [最小脚本接入本地验证](records/d-scripting-local.md) / [宿主冒烟](records/d-scripting-host.md) | 阶段 D 配置 / 命令 / 键位 / 变换隔离、静态检查、headless 回归及宿主主功能确认；宿主另有消息重叠反馈，按记录保留 |

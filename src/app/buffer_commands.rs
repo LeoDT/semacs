@@ -34,6 +34,10 @@ impl AppShell {
         index
     }
 
+    pub fn buffers(&self) -> impl Iterator<Item = &Buffer> {
+        self.buffers.iter().map(|slot| &slot.buffer)
+    }
+
     pub fn buffer_count(&self) -> usize {
         self.buffers.len()
     }
