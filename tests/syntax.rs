@@ -74,6 +74,19 @@ fn successful_write_file_changes_language_but_failure_keeps_old_language_and_ide
         assert_eq!(view.syntax_snapshot(), Some(before));
     });
     assert!(!invalid.exists());
+    for name in ["saved.jsx", "saved.tsx", "saved.md", "saved.html"] {
+        let target = fixture.path(name);
+        write_file(&mut visual, &target);
+        settle(&mut visual, &view);
+        visual.read(|cx| {
+            let view = view.read(cx);
+            assert_eq!(view.buffer().path().as_deref(), Some(target.as_path()));
+            assert_eq!(view.buffer().snapshot_id(), before);
+            assert_eq!(view.syntax_snapshot(), Some(before));
+            assert!(!view.buffer().is_modified());
+        });
+        assert_eq!(fs::read(target).unwrap(), b"fn main() {}\n");
+    }
     let plain = fixture.path("plain.txt");
     write_file(&mut visual, &plain);
     settle(&mut visual, &view);

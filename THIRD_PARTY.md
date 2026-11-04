@@ -22,6 +22,26 @@
   maps its captures to neutral syntax styles. `src/syntax/rust.scm` adds local
   captures for constants, numbers, operators and punctuation; no Zed language
   or project subsystem is imported.
+- E2 additionally consumes registry grammars and their bundled highlight queries:
+  `tree-sitter-javascript` 0.25.0 (MIT, Copyright 2014 Max Brunsfeld),
+  `tree-sitter-typescript` 0.23.2 (MIT, Copyright 2017 Max Brunsfeld),
+  `tree-sitter-html` 0.23.2 (MIT, Copyright 2014 Max Brunsfeld),
+  `tree-sitter-css` 0.25.0 (MIT, Copyright 2018 Max Brunsfeld), and
+  `tree-sitter-md` 0.5.4 (MIT, Copyright 2021 Matthias Deiml).
+  JavaScript and CSS license texts were reviewed in the registry package.
+  The other three packages omit their top-level license file; their MIT
+  notices were reviewed at the exact upstream commits identified by
+  `.cargo_vcs_info.json`:
+  [TypeScript](https://github.com/tree-sitter/tree-sitter-typescript/blob/f975a621f4e7f532fe322e13c4f79495e0a7b2e7/LICENSE),
+  [HTML](https://github.com/tree-sitter/tree-sitter-html/blob/5a5ca8551a179998360b4a4ca2c0f366a35acc03/LICENSE),
+  [Markdown](https://github.com/tree-sitter-grammars/tree-sitter-markdown/blob/41ff24a6c775492c543b09228aeb98d1cd2b3a0f/LICENSE).
+  Markdown's highlight queries credit nvim-treesitter; retain that upstream
+  attribution in the distribution dependency audit.
+- E2 uses HTML's bundled script / style injection query.
+  `src/syntax/markdown-injections.scm` independently declares the selected
+  block-to-inline and fenced-code captures; other upstream injection rules
+  are not imported. No parser, scanner, wrapper implementation or Zed
+  language subsystem is vendored or translated.
 - The transitive `streaming-iterator` 0.1.9 is MIT OR Apache-2.0, attributed
   to Steven Fackler. The existing transitive `smallvec` 1.16.4 (MIT OR
   Apache-2.0, The Servo Project Developers) is now also a direct dependency

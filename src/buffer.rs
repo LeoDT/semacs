@@ -319,6 +319,12 @@ impl Buffer {
         self.document.borrow().syntax.highlights()
     }
 
+    pub(crate) fn syntax_display(
+        &self,
+    ) -> Option<std::sync::Arc<crate::syntax::DisplayHighlights>> {
+        self.document.borrow().syntax.display_highlights()
+    }
+
     pub(crate) fn syntax_ready(&self) -> bool {
         self.document.borrow().syntax.ready()
     }

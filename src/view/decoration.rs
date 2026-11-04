@@ -1,5 +1,5 @@
 use super::{RowPart, cursor::Cursor};
-use crate::syntax::Highlights;
+use crate::syntax::DisplayHighlights;
 use crate::theme::{StyleRole, ThemeSettings};
 use gpui_kit::{App, DecorationRun, Hsla, LineLayout, Pixels, Point, TextAlign, Window};
 use smallvec::SmallVec;
@@ -7,7 +7,7 @@ use std::ops::Range;
 
 pub(super) struct TextStyle<'a> {
     colors: [Hsla; StyleRole::COUNT],
-    pub syntax: Option<&'a Highlights>,
+    pub syntax: Option<&'a DisplayHighlights>,
     pub marked: Option<Range<usize>>,
     pub prompt_end: usize,
 }
@@ -15,7 +15,7 @@ pub(super) struct TextStyle<'a> {
 impl<'a> TextStyle<'a> {
     pub(super) fn new(
         theme: &ThemeSettings,
-        syntax: Option<&'a Highlights>,
+        syntax: Option<&'a DisplayHighlights>,
         marked: Option<Range<usize>>,
         prompt_end: usize,
     ) -> Self {
@@ -169,7 +169,7 @@ mod tests {
         let observer = cx.new(|_| ());
         cx.update(|cx| buffer.prepare_syntax(observer.downgrade().into(), cx));
         cx.run_until_parked();
-        let syntax = buffer.syntax_highlights().unwrap();
+        let syntax = buffer.syntax_display().unwrap();
         let theme = ThemeSettings::default();
         let marked = 1..4;
         let cursor = 3..7;

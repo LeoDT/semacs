@@ -217,7 +217,141 @@ E1 Rust 语法定向目视验证（仅本批窗口，英文输入；异常立即
 
 不截图、不自动注键、不改变输入法、不读取日常配置；不测原生性能、真实 IME 或 GPU。
 """
-INSTRUCTIONS = {"messages": MESSAGES_INSTRUCTIONS, "themes": THEMES_INSTRUCTIONS, "syntax": SYNTAX_INSTRUCTIONS}
+
+LANGUAGES_MARKDOWN = '''```html
+<script>
+// MD:
+const n = call(42);
+</script>
+<style>.box { width: 12px; color: red; }</style>
+```
+
+# 标题 中🙂
+*italic* **bold** [link](https://example.com) `inline code`
+
+```js
+const text = "hello"; // JavaScript
+```
+```jsx
+const node = <div title="hello">{call(42)}</div>;
+```
+```ts
+interface User { name: string }
+```
+```tsx
+const node: Element = <div>{call(42)}</div>;
+```
+```css
+.box { width: 12px; }
+```
+```rust
+fn main() { let n = 42; }
+```
+```unknown
+const ordinary = 42;
+```
+'''.encode()
+LANGUAGES_HTML = b'''<script>
+// HTML:
+const n = call(42);
+</script>
+<style>.box { width: 12px; color: red; }</style>
+<div class="box">plain text</div>
+'''
+LANGUAGES_CONFIG = b'''semacs.setFont({family: "monospace", size: 20});
+semacs.loadTheme("dark");
+'''
+LANGUAGES_SEEDS = {
+    "body.md": LANGUAGES_MARKDOWN,
+    "body.html": LANGUAGES_HTML,
+    "config/semacs/init.js": LANGUAGES_CONFIG,
+}
+LANGUAGES_EXPECTED = {
+    **LANGUAGES_SEEDS,
+    "body.md": LANGUAGES_MARKDOWN.replace(b"// MD:", "// MD:你".encode()),
+    "body.html": LANGUAGES_HTML.replace(b"// HTML:", "// HTML:你".encode()),
+}
+LANGUAGES_OBSERVATIONS = (
+    "languages-colors", "languages-split-theme", "languages-markdown-ime-history",
+    "languages-html-ime", "languages-layout-save",
+)
+LANGUAGES_INSTRUCTIONS = """
+E2 多语言 / 真实 IME 定向观察；一个窗口，只有 body.md / body.html 和隔离配置。
+人工输入与切换输入法；不自动注键、不自动改变输入法、不截图、不测 IME 时延或 GPU。
+任何异常立即停止后续组，关闭窗口后对失败 / 未观察组答 no；不要修复 fixture 或重试。
+
+1. 颜色（languages-colors）
+   初始 body.md 应有块级 / 行内及围栏高亮。HTML 围栏内的 script 中 const / 42，
+   style 中 width / 12px 应按 JS / CSS 着色，而不是整块一种颜色。
+   检查后面的 JSX / TSX 标签与表达式、TS 类型、CSS、Rust 围栏；
+   unknown 围栏内容应为普通代码文本。强调只换颜色，不改变字重 / 字号。
+2. 分屏 / 主题（languages-split-theme）
+   C-x 3 左右分屏，C-x o 来回选择，两侧颜色一致。
+   M-x load-theme RET，输入 light RET，再切 dark。检查文字 / region / 方块光标可读，
+   没有颜色错位、空白正文或因换色改变折行。
+3. Markdown 嵌入代码 IME / 历史（languages-markdown-ime-history）
+   保持分屏，在当前 pane 按 M-< C-n C-n C-e，point 应在第 3 行 // MD: 的冒号后。
+   开启你平时使用的中文输入法，输入 ni：检查预编辑文字和候选位置，后面的正文颜色不能位移错乱。
+   用输入法消费的 Escape 取消，不能留下 ni。再输入 ni，明确选择“你”提交一次。
+   关闭中文输入状态，此行应为 // MD:你；另一 pane 也只出现一次“你”。
+   C-/ 撤销，应回到 // MD: 且高亮恢复；C-? redo，应恢复 // MD:你。
+   C-x C-s 保存等待 clean。不要额外输入字符 / 空格。
+4. HTML 嵌入代码 IME（languages-html-ime）
+   C-x 1 保留当前 pane。C-x C-f 输入 body.html RET。
+   script / style 内容仍按 JS / CSS 着色。M-< C-n C-e 定位到第 2 行 // HTML: 的冒号后。
+   再做 ni -> Escape 取消，然后 ni -> 明确选择“你”提交；观察候选、预编辑与后续颜色位置。
+   关闭中文输入状态，应恰好为 // HTML:你，不重复、不残留拼音。C-x C-s 保存等待 clean。
+5. 布局 / 保存（languages-layout-save）
+   将窗口缩窄到约 480px，M-x increase-font-size RET，检查折行、光标与后续语法颜色不错位。
+   C-x b 输入 body.md RET，检查保存后的“你”和 HTML 围栏高亮仍正常；不要继续改字。
+   C-x C-c 正常关闭窗口。回终端逐组确认，并记录正常 / 窄窗口大致尺寸与输入法名称。
+
+最终只允许 body.md 的 // MD: 后和 body.html 的 // HTML: 后各增加一个“你”。
+配置不可改。脚本会独立核对全部文件字节；目视观察不冒充自动判定或 IME 时延测量。
+"""
+
+FLICKER_SCRIPT = b"<script>\n// FLICKER:\nconst n = call(42);\n</script>\n"
+FLICKER_STYLE = b"<style>.box { width: 12px; color: red; }</style>\n"
+FLICKER_UNITS = {
+    "body.md": b"```html\n" + FLICKER_SCRIPT + FLICKER_STYLE + b"```\n\n",
+    "body.html": FLICKER_SCRIPT + FLICKER_STYLE,
+}
+FLICKER_SEEDS = {
+    name: unit * ((256 * 1024 + len(unit) - 1) // len(unit))
+    for name, unit in FLICKER_UNITS.items()
+}
+FLICKER_SEEDS["config/semacs/init.js"] = b""
+FLICKER_OBSERVATIONS = ("flicker-markdown", "flicker-html", "flicker-shared-history")
+FLICKER_INSTRUCTIONS = """
+E2 闪烁修复定向目视复核；一个窗口，两份约 256 KiB 的可丢弃正文和隔离空配置。
+只用英文/ASCII 输入，不切换输入法；不自动注键、不截图、不测性能或 IME。
+任何异常立即停止后续组，关闭窗口后对失败 / 未观察组答 no；不要修复 fixture 或重试。
+编辑时检查未改动的代码、数字和标签不再整片闪回普通色，颜色不位移、正文不空白；
+刚输入的文字短暂普通色是允许的，解析完成后应更新。
+
+1. Markdown（flicker-markdown）
+   初始 body.md，等待高亮出现。M-< C-n C-n C-e，到第 3 行 // FLICKER: 末尾。
+   逐字输入 xxxxxxxxxx（10 个 x），再按 10 次 Backspace 删除，重复三次；
+   输入 / 删除时观察后面的 const / 42 和屏幕其他语法颜色。最后 C-x C-s 保存。
+2. HTML（flicker-html）
+   C-x C-f 输入本批文件目录中的 body.html 完整路径 RET。
+   等待高亮后，M-< C-n C-e，到第 2 行 // FLICKER: 末尾。
+   同样输入 10 个 x 再删除 10 个，重复三次；观察 script 和后续 style / 标签颜色。
+   最后 C-x C-s 保存。
+3. 共享显示 / 历史（flicker-shared-history）
+   C-x b 输入 body.md RET。M-< C-n C-n C-e，C-x 3 左右分屏。
+   输入一个 x，观察两侧未改动文字的颜色；C-/ undo、C-? redo、C-/ undo，
+   最终两侧都应回到 // FLICKER:，没有额外字符或颜色错位。C-x C-s 保存。
+   C-x C-c 正常关闭窗口，回终端确认三组观察，并记录大致窗口尺寸及是否仍闪烁。
+
+最终两份正文及配置须与初始字节完全一致；不要在出现问题后修复字节来通过检查。
+"""
+
+INSTRUCTIONS = {
+    "messages": MESSAGES_INSTRUCTIONS, "themes": THEMES_INSTRUCTIONS,
+    "syntax": SYNTAX_INSTRUCTIONS, "languages": LANGUAGES_INSTRUCTIONS,
+    "flicker": FLICKER_INSTRUCTIONS,
+}
 
 PROFILES = {
     "m2": (SEEDS, EXPECTED, OBSERVATIONS),
@@ -225,6 +359,8 @@ PROFILES = {
     "messages": (MESSAGES_SEEDS, MESSAGES_EXPECTED, MESSAGES_OBSERVATIONS),
     "themes": (THEMES_SEEDS, THEMES_EXPECTED, THEMES_OBSERVATIONS),
     "syntax": (SYNTAX_SEEDS, SYNTAX_EXPECTED, SYNTAX_OBSERVATIONS),
+    "languages": (LANGUAGES_SEEDS, LANGUAGES_EXPECTED, LANGUAGES_OBSERVATIONS),
+    "flicker": (FLICKER_SEEDS, FLICKER_SEEDS, FLICKER_OBSERVATIONS),
 }
 
 
@@ -271,8 +407,12 @@ def verify(directory, profile="m2"):
         "errors": errors, "evidence": "user-observed real desktop plus independent disk bytes",
         "performance": "unmeasured",
     }
-    if profile in ("messages", "themes", "syntax"):
-        result.update(ime="unmeasured", gpu="unmeasured", screenshots=False)
+    if profile in ("messages", "themes", "syntax", "languages", "flicker"):
+        result.update(ime="unmeasured", ime_latency="unmeasured", gpu="unmeasured", screenshots=False)
+    if profile == "languages":
+        confirmed = all(observations.get(name) == "yes" for name in
+                        ("languages-markdown-ime-history", "languages-html-ime"))
+        result["ime"] = "user-confirmed Markdown/HTML body preedit/cancel/commit" if confirmed else "unconfirmed"
     (directory / "result.json").write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n")
     if errors:
         raise RuntimeError("; ".join(errors))

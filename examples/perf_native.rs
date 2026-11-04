@@ -31,6 +31,8 @@ mod m1;
 mod m2;
 #[path = "support/native_split.rs"]
 mod split;
+#[path = "support/native_syntax.rs"]
+mod syntax;
 #[path = "support/m1_workload.rs"]
 mod workload;
 
@@ -617,15 +619,16 @@ fn main() {
     let mut args = std::env::args_os().skip(1);
     let input =
         PathBuf::from(args.next().expect(
-            "expected MIXED_SAMPLE SAMPLE NEW_REPORT [--allow-software] [--external | --m1 | --m2-directory NEW_DIRECTORY | --split right|below]",
+            "expected MIXED_SAMPLE SAMPLE NEW_REPORT [--allow-software] [--external | --m1 | --m2-directory NEW_DIRECTORY | --split right|below | --syntax]",
         ));
     let sample = args.next().expect("expected SAMPLE").into_string().unwrap();
-    assert!(samples::NAMES.contains(&sample.as_str()));
+
     let report = PathBuf::from(args.next().expect("expected NEW_REPORT"));
     assert!(!report.exists(), "report must not already exist");
     let mut allow_software = false;
     let mut external = false;
     let mut m1_mode = false;
+    let mut syntax_mode = false;
     let mut split_direction = None;
     let mut m2_directory = None;
     let mut m2_open_diagnostic = false;
@@ -636,6 +639,7 @@ fn main() {
             "--allow-software" => allow_software = true,
             "--external" => external = true,
             "--m1" => m1_mode = true,
+            "--syntax" => syntax_mode = true,
             "--split" => {
                 let direction = args.next().expect("split direction: right or below");
                 let direction = direction.into_string().unwrap();
@@ -674,8 +678,9 @@ fn main() {
             + usize::from(m1_mode)
             + usize::from(m2_directory.is_some())
             + usize::from(split_direction.is_some())
+            + usize::from(syntax_mode)
             <= 1,
-        "external, M1, M2 and split are separate measurements"
+        "external, M1, M2, split and syntax are separate measurements"
     );
     assert!(!pacing_options || m1_mode, "pacing options require --m1");
     assert!(
@@ -686,6 +691,11 @@ fn main() {
     let mixed = files::read(&input)
         .expect("read deterministic mixed sample")
         .text;
+    if syntax_mode {
+        syntax::run(input, sample, mixed, report, allow_software);
+        return;
+    }
+    assert!(samples::NAMES.contains(&sample.as_str()));
     let text = samples::build(&sample, &mixed);
     if let Some(direction) = split_direction {
         split::run(text, sample, report, direction, allow_software);

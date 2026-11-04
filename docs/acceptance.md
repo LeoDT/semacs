@@ -57,7 +57,7 @@ RUNS=3 target/release/examples/perf_m1 .pi/tmp/NEW-sample.txt
 | `perf_view` / `perf_m1` | 基础布局 / 绘制与命令输入；M1 未等待输入段的 ready 只是末键恢复，不是逐键 ready 或原生持续输入 |
 | `RUNS=3 target/release/examples/perf_split .pi/tmp/NEW-sample.txt` | 共享 buffer 双 view；聚合 ready 与选中 view 分开记录，不给聚合擅加旧单 view 门限 |
 | `target/release/examples/perf_candidates .pi/tmp/NEW-candidate-fixture` | 候选过滤 / 导航基线，无新增门限，fixture 目录必须不存在 |
-| `RUNS=3 target/release/examples/perf_syntax` | 自建 Rust / 长 raw string 样本；`syntax_and_layout_ready_ms` 包含解析 / 查询，不能套用旧纯布局 ready 门限 |
+| `RUNS=3 target/release/examples/perf_syntax` | Rust / 长 raw string（8 MiB）及 TSX / HTML / Markdown（256 KiB）独立语法基线，可用 `SHAPES=rust,long-string` 等筛选；`syntax_and_layout_ready_ms` 包含解析 / 查询 / 子语言，不能套用旧纯布局 ready 门限 |
 | [perf_load](../examples/perf_load.rs) / [perf_baseline.sh](../scripts/perf_baseline.sh) | 文件层基线；参数、样本和断言以工具为准 |
 
 headless 仅作 CPU / 功能回归，不代表原生字体、平台 IME、GPU 或实际呈现；软件诊断与宿主硬件验收分开。
@@ -86,8 +86,19 @@ fish scripts/acceptance.fish MODE NEW_OUTPUT_DIRECTORY --consent
 | `messages` | 长 / 多行消息、读入注记、历史与编辑恢复；[fixture 工具](../scripts/m2_manual.py)打印五组步骤 |
 | `themes` | 配色 / 用户覆盖、分屏、取消、读入与编辑恢复；fixture 工具打印五组步骤 |
 | `syntax` | Rust 高亮、分屏、主题、历史、普通文本 / 另存与布局 / 保存；fixture 工具打印五组步骤 |
+| `languages` | 一个窗口，Markdown / HTML 嵌入高亮、分屏 / 主题、两处正文真实 IME 取消 / 提交、历史及保存；fixture 工具打印五组步骤，独立核对两个“你”和配置字节 |
+| `flicker` | 一个窗口，Markdown / HTML 各约 256 KiB，ASCII 连续输入 / 删除及共享显示 / 历史的配色稳定性；三组目视步骤，独立核对正文恢复及空配置，不复测 IME |
+| `syntax-perf` | Markdown（含 HTML→JS/CSS）/ HTML 各约 256 KiB、各三轮原生 CPU 输入 / 绘制；布局与语法 ready 分开记录，不外推大文件全矩阵 |
 
-人工模式先读终端提示；`scripting` / `messages` / `themes` / `syntax` 使用英文输入，不自动注键、不改变 IME、不截图，不测原生性能。详细键序列只在驱动中维护，不在本文再复制。不要直接照抄历史批次目录名。
+人工模式先读终端提示；`scripting` / `messages` / `themes` / `syntax` / `flicker` 使用英文输入，不自动注键、不改变 IME、不截图，不测原生性能。`languages` 由用户在指定两处手动使用日常中文输入法；脚本不注键、不切换输入法、不截图，其 IME 结论来自用户观察及保存字节，不是自动状态断言或时延测量。详细键序列只在驱动中维护，不在本文再复制。不要直接照抄历史批次目录名。
+
+### E2 定向原生 CPU 批次
+
+`syntax-perf` 使用隔离空配置和带 `.md` / `.html` 路径的 buffer，六个窗口依次运行；不接受无语法路径的普通文本作为 E2 证据。两份样本生成时写入统一 SHA-256 manifest，fish 将同一 manifest 摘要交给两种样本的驱动；每轮启动前 / 完成后核对整批两份文件及 manifest，不能在后一个样本启动时重新建立变更后的基线。输入位置由完整 script marker（Markdown 还包含围栏上下文）定位到嵌入 JavaScript 的 `call(42)` 前，测插入 / 删除、换行 / 合行、同回调 32 键插入 / 删除，随后 30 次稳定强制重绘及 30 个无主动失效 tick。只使用合成 GPUI 输入；运行期间不要键入、改变窗口或关闭 probe。
+
+逐帧核对精确 display 目标、当前 committed 语法快照、正文可见和索引覆盖；报告单列首次提交、布局 ready、观察到的语法 + 布局 ready。中间版本可在布局就绪后被下一次编辑取代，未观察到的语法 ready 留空，不填 0；最后一次编辑须等待当前快照语法完成后才进入稳定绘制 / idle。报告记录动作前语法 pending 状态；若整轮没有在前一版本语法仍 pending 时输入，按覆盖缺失停止，不冒充测到实际 worker 线程并行或自动调整样本重测。
+
+已适用的输入 / CPU 提交 / draw / idle 门限不变，语法整体就绪没有新增数值门限，也不套旧纯布局门限。超限、帧 / 身份缺失、字节错误、未取得 pending 输入覆盖或配置 / fixture 变化均停止后续窗口并保留失败报告。此代表性批次不替代 8 MiB 六类矩阵、持续输入、真实 IME 时延或 GPU / 实际呈现证明。
 
 ## 原生性能与诊断
 
@@ -95,7 +106,7 @@ fish scripts/acceptance.fish MODE NEW_OUTPUT_DIRECTORY --consent
 
 `split-perf` 分别记录选中 view 与同场景所有 view 的 ready：前者沿用对应预算，后者是没有新增门限的聚合基线，不能合成“多 view 整体验收通过”。改宽 / 字体走 view 层入口，不冒充正式配置命令端到端时延。字段、动作矩阵及校验以 [perf_native.py](../scripts/perf_native.py) 为准，不为整理文档放宽断言。
 
-fish 不提供软件降级；底层 `--software` 只供另行授权的诊断。普通原生 / IME 模式逐窗判定，M1 / M2 / split-perf 还在运行中检查既有预算，失败停批。
+fish 不提供软件降级；底层 `--software` 只供另行授权的诊断。普通原生 / IME 模式逐窗判定，M1 / M2 / split-perf / syntax-perf 还在运行中检查既有预算，失败停批。
 
 <a id="首轮超限后的单次诊断"></a>
 

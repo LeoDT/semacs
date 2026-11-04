@@ -30,7 +30,14 @@ fn completed_but_unreceived_results_and_queued_input_are_released_on_the_backgro
             executor: executor.clone(),
             dropped_on: dropped_on.clone(),
         };
-        let parsed = parse(buffer().snapshot(), None, None, &AtomicBool::new(false)).unwrap();
+        let parsed = parse(
+            LanguageId::Rust,
+            buffer().snapshot(),
+            None,
+            None,
+            &AtomicBool::new(false),
+        )
+        .unwrap();
         let guarded = BackgroundOwned::new((parsed, probe), executor.clone());
         let finished = Arc::new(AtomicBool::new(false));
         let worker_finished = finished.clone();
@@ -113,7 +120,14 @@ fn coalesces_in_flight_edits_into_one_followup_and_only_exposes_current_results(
     assert_eq!(result.snapshot, buffer.snapshot_id());
     assert!(syntax.0.borrow().pending.is_none());
     assert!(syntax.0.borrow().work.is_none());
-    let fresh = parse(buffer.snapshot(), None, None, &AtomicBool::new(false)).unwrap();
+    let fresh = parse(
+        LanguageId::Rust,
+        buffer.snapshot(),
+        None,
+        None,
+        &AtomicBool::new(false),
+    )
+    .unwrap();
     assert_eq!(result.spans, fresh.highlights.spans);
     assert!(cancel.load(Ordering::Relaxed));
 }
@@ -125,16 +139,27 @@ fn language_epoch_cancels_old_work_even_when_text_identity_is_unchanged(cx: &mut
     let observer = cx.new(|_| ());
     cx.update(|cx| syntax.prepare(observer.downgrade().into(), cx));
     let cancelled = syntax.0.borrow().work.as_ref().unwrap().cancelled.clone();
-    syntax.set_path(Path::new("worker.txt"));
+    syntax.set_path(Path::new("worker.html"));
     assert!(cancelled.load(Ordering::Relaxed));
-    assert!(syntax.ready());
+    assert!(!syntax.ready());
     assert!(syntax.highlights().is_none());
-    syntax.set_path(Path::new("again.rs"));
+    syntax.set_path(Path::new("again.md"));
     assert_eq!(syntax.0.borrow().generation, 2);
     cx.update(|cx| syntax.prepare(observer.downgrade().into(), cx));
     cx.run_until_parked();
     assert_eq!(syntax.highlights().unwrap().snapshot, buffer.snapshot_id());
     assert_eq!(syntax.0.borrow().generation, 2);
+    assert_eq!(
+        syntax.0.borrow().base.as_ref().unwrap().language,
+        LanguageId::Markdown
+    );
+    let highlights = syntax.highlights().unwrap();
+    syntax.set_path(Path::new("alias.markdown"));
+    assert_eq!(syntax.0.borrow().generation, 2);
+    assert!(Arc::ptr_eq(&highlights, &syntax.highlights().unwrap()));
+    syntax.set_path(Path::new("plain.txt"));
+    assert!(syntax.ready());
+    assert!(syntax.highlights().is_none());
 }
 
 #[gpui_kit::test]

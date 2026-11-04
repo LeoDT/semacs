@@ -1433,7 +1433,7 @@ impl Element for TextCanvas {
             let cursor = focus.then(|| view.cursor()).flatten();
             let syntax = view
                 .buffer()
-                .syntax_highlights()
+                .syntax_display()
                 .filter(|syntax| syntax.snapshot == layout.key.display.committed);
             (
                 layout,

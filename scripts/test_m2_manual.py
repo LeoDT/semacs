@@ -255,6 +255,87 @@ Path(os.environ["CAPTURE"]).write_text(json.dumps({
         self.assertFalse(result["disk_bytes"]["config/semacs/init.js"])
         self.assertEqual(config.read_bytes(), b"preserve changed syntax config")
 
+
+    def test_languages_fixture_tracks_only_the_two_committed_ime_characters(self):
+        self.completed_fixture("languages")
+        result = m2_manual.verify(self.directory, "languages")
+        self.assertTrue(result["completed"])
+        self.assertIn("user-confirmed", result["ime"])
+        self.assertEqual(result["ime_latency"], "unmeasured")
+        self.assertEqual(result["gpu"], "unmeasured")
+        self.assertFalse(result["screenshots"])
+        self.assertEqual((self.directory / "body.md").read_bytes().count("你".encode()), 1)
+        self.assertEqual((self.directory / "body.html").read_bytes().count("你".encode()), 1)
+        self.assertEqual((self.directory / "config/semacs/init.js").read_bytes(), m2_manual.LANGUAGES_CONFIG)
+
+    def test_languages_unobserved_ime_is_not_reported_as_confirmed(self):
+        self.completed_fixture("languages")
+        path = self.directory / "observations.tsv"
+        path.write_text(path.read_text().replace("languages-html-ime\tyes", "languages-html-ime\tno"))
+        with self.assertRaisesRegex(RuntimeError, "manual observation not confirmed"):
+            m2_manual.verify(self.directory, "languages")
+        result = json.loads((self.directory / "result.json").read_text())
+        self.assertFalse(result["completed"])
+        self.assertEqual(result["ime"], "unconfirmed")
+
+    def test_languages_incorrect_commit_or_config_is_preserved_and_rejected(self):
+        for name, data in (
+            ("body.md", m2_manual.LANGUAGES_MARKDOWN),
+            ("body.html", m2_manual.LANGUAGES_HTML.replace(b"// HTML:", "// HTML:你你ni".encode())),
+            ("config/semacs/init.js", b"changed config"),
+        ):
+            with self.subTest(name=name):
+                self.directory = Path(self.temporary.name) / name.replace("/", "-")
+                self.completed_fixture("languages")
+                path = self.directory / name
+                path.write_bytes(data)
+                with self.assertRaisesRegex(RuntimeError, "disk-byte mismatch"):
+                    m2_manual.verify(self.directory, "languages")
+                self.assertEqual(path.read_bytes(), data)
+
+    def test_languages_instructions_address_embedded_comments_and_both_files(self):
+        lines = m2_manual.LANGUAGES_MARKDOWN.decode().splitlines()
+        self.assertEqual(lines[:4], ["\x60\x60\x60html", "<script>", "// MD:", "const n = call(42);"])
+        self.assertEqual(m2_manual.LANGUAGES_HTML.decode().splitlines()[1], "// HTML:")
+        self.assertEqual(m2_manual.LANGUAGES_EXPECTED["body.md"],
+                         m2_manual.LANGUAGES_MARKDOWN.replace(b"// MD:", "// MD:你".encode()))
+        self.assertIn("body.html", m2_manual.LANGUAGES_INSTRUCTIONS)
+        self.assertIn("C-? redo", m2_manual.LANGUAGES_INSTRUCTIONS)
+        self.assertEqual(len(m2_manual.LANGUAGES_OBSERVATIONS), 5)
+
+    def test_flicker_uses_large_isolated_fixtures_without_ime_claims(self):
+        self.completed_fixture("flicker")
+        result = m2_manual.verify(self.directory, "flicker")
+        for name in ("body.md", "body.html"):
+            data = (self.directory / name).read_bytes()
+            self.assertTrue(256 * 1024 <= len(data) < 257 * 1024)
+            self.assertIn(b"// FLICKER:\nconst n = call(42);", data)
+        self.assertEqual((self.directory / "body.md").read_text().splitlines()[2], "// FLICKER:")
+        self.assertEqual((self.directory / "body.html").read_text().splitlines()[1], "// FLICKER:")
+        self.assertEqual((self.directory / "config/semacs/init.js").read_bytes(), b"")
+        self.assertEqual(result["ime"], "unmeasured")
+        self.assertEqual(result["ime_latency"], "unmeasured")
+        self.assertEqual(result["gpu"], "unmeasured")
+        self.assertFalse(result["screenshots"])
+        self.assertEqual(len(m2_manual.FLICKER_OBSERVATIONS), 3)
+
+    def test_flicker_unobserved_or_unrestored_bytes_stop_without_repair(self):
+        for name, data in (
+            ("body.md", b"extra x"),
+            ("body.html", b"extra x"),
+            ("config/semacs/init.js", b"changed"),
+            ("observations.tsv", b"flicker-markdown\tyes\n"),
+        ):
+            with self.subTest(name=name):
+                self.directory = Path(self.temporary.name) / name.replace("/", "-")
+                self.completed_fixture("flicker")
+                path = self.directory / name
+                path.write_bytes(data)
+                with self.assertRaises(RuntimeError):
+                    m2_manual.verify(self.directory, "flicker")
+                self.assertEqual(path.read_bytes(), data)
+                self.assertFalse(json.loads((self.directory / "result.json").read_text())["completed"])
+
     def test_wrong_profile_cannot_pass(self):
         self.completed_fixture("m2")
         with self.assertRaisesRegex(RuntimeError, "fixture profile does not match"):

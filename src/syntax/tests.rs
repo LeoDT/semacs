@@ -13,7 +13,7 @@ fn buffer(text: &str) -> Buffer {
     )
 }
 
-fn edit(buffer: &mut Buffer, range: Range<usize>, text: &str) -> Change {
+pub(super) fn edit(buffer: &mut Buffer, range: Range<usize>, text: &str) -> Change {
     buffer
         .edit(Edit {
             snapshot: buffer.snapshot_id(),
@@ -29,10 +29,17 @@ fn edit(buffer: &mut Buffer, range: Range<usize>, text: &str) -> Change {
 }
 
 fn parsed(buffer: &Buffer) -> Parsed {
-    parse(buffer.snapshot(), None, None, &AtomicBool::new(false)).unwrap()
+    parse(
+        LanguageId::Rust,
+        buffer.snapshot(),
+        None,
+        None,
+        &AtomicBool::new(false),
+    )
+    .unwrap()
 }
 
-fn style_at(parsed: &Parsed, offset: usize) -> Option<StyleRole> {
+pub(super) fn style_at(parsed: &Parsed, offset: usize) -> Option<StyleRole> {
     parsed
         .highlights
         .in_range(offset..offset + 1)
@@ -69,7 +76,7 @@ fn bundled_query_colors_rust_categories_and_tolerates_incomplete_syntax() {
         style_at(&parsed, text.find("fn false").unwrap()),
         Some(StyleRole::SyntaxString)
     );
-    assert!(parsed.tree.root_node().has_error());
+    assert!(parsed.layers[0].tree.root_node().has_error());
     for span in &parsed.highlights.spans {
         assert!(text.is_char_boundary(span.range.start));
         assert!(text.is_char_boundary(span.range.end));
@@ -87,6 +94,7 @@ fn incremental_parse_matches_fresh_after_coalesced_unicode_edits_and_history() {
     change.compose(edit(&mut buffer, end..end, "fn extra() {}\n"));
     change.compose(edit(&mut buffer, 0..3, "/*"));
     base = parse(
+        LanguageId::Rust,
         buffer.snapshot(),
         Some(base),
         Some(change),
@@ -95,8 +103,8 @@ fn incremental_parse_matches_fresh_after_coalesced_unicode_edits_and_history() {
     .unwrap();
     let fresh = parsed(&buffer);
     assert_eq!(
-        base.tree.root_node().to_sexp(),
-        fresh.tree.root_node().to_sexp()
+        base.layers[0].tree.root_node().to_sexp(),
+        fresh.layers[0].tree.root_node().to_sexp()
     );
     assert_eq!(base.highlights.spans, fresh.highlights.spans);
     for redo in [false, false, true, true] {
@@ -108,6 +116,7 @@ fn incremental_parse_matches_fresh_after_coalesced_unicode_edits_and_history() {
             new_end: applied.new_range.end.0,
         };
         base = parse(
+            LanguageId::Rust,
             buffer.snapshot(),
             Some(base),
             Some(change),
@@ -116,8 +125,8 @@ fn incremental_parse_matches_fresh_after_coalesced_unicode_edits_and_history() {
         .unwrap();
         let fresh = parsed(&buffer);
         assert_eq!(
-            base.tree.root_node().to_sexp(),
-            fresh.tree.root_node().to_sexp()
+            base.layers[0].tree.root_node().to_sexp(),
+            fresh.layers[0].tree.root_node().to_sexp()
         );
         assert_eq!(base.highlights.spans, fresh.highlights.spans);
     }
@@ -127,6 +136,7 @@ fn incremental_parse_matches_fresh_after_coalesced_unicode_edits_and_history() {
 fn cancelled_work_never_produces_a_result() {
     assert!(
         parse(
+            LanguageId::Rust,
             buffer("fn main() {}").snapshot(),
             None,
             None,
@@ -145,9 +155,12 @@ fn language_detection_and_path_changes_do_not_depend_on_text_version() {
         ("test.rs.txt", false),
         ("test.txt", false),
     ] {
-        assert_eq!(is_rust(Some(Path::new(name))), expected);
+        assert_eq!(
+            for_path(Some(Path::new(name))) == Some(LanguageId::Rust),
+            expected
+        );
     }
-    assert!(!is_rust(None));
+    assert_eq!(for_path(None), None);
     let mut buffer = buffer("fn main() {}");
     let snapshot = buffer.snapshot_id();
     assert!(!buffer.syntax_ready());
@@ -161,10 +174,8 @@ fn language_detection_and_path_changes_do_not_depend_on_text_version() {
 #[test]
 fn display_projection_splits_committed_spans_around_uncolored_preedit() {
     let parsed = parsed(&buffer("fn main() {}"));
-    let spans: Vec<_> = parsed
-        .highlights
-        .in_display_range(0..15, Some(1..4))
-        .collect();
+    let display = DisplayHighlights::new(parsed.highlights, parsed.snapshot.text().len());
+    let spans: Vec<_> = display.in_display_range(0..15, Some(1..4)).collect();
     assert_eq!(
         spans[0],
         Span {
@@ -185,8 +196,7 @@ fn display_projection_splits_committed_spans_around_uncolored_preedit() {
             .all(|span| span.range.end <= 1 || span.range.start >= 4)
     );
     for range in [0..1, 1..2, 2..4, 3..8, 4..5, 8..13] {
-        let clipped: Vec<_> = parsed
-            .highlights
+        let clipped: Vec<_> = display
             .in_display_range(range.clone(), Some(1..4))
             .collect();
         assert!(

@@ -522,14 +522,151 @@ def validate_split_report(content, rows, software, direction, sample):
         check_limits(row, values, limits, software)
 
 
-def read_report(path, software, ime, m1=None, m2=False, split=None, sample=None):
+
+SYNTAX_SAMPLES = ("markdown", "html")
+SYNTAX_PHASES = ["open", "insert", "delete", "newline", "join", "burst-insert", "burst-delete"] + ["forced"] * 30 + ["idle"]
+SYNTAX_FIELDS = (
+    "phase,step,bytes,point,target_buffer,target_version,painted_buffer,painted_version,"
+    "syntax_buffer,syntax_version,syntax_pending_before_action,syntax_pending_frames,"
+    "first_frame_submit_ms,first_submit_ms,ready_submit_ms,syntax_and_layout_submit_ms,"
+    "action_cpu_ms,draw_cpu_max_ms,frames,missing_observations,blank_frames,idle_ticks,"
+    "visible_rows,indexed_bytes,width_px,height_px,first_visible_rows,text_verified,syntax_status,observed_elapsed_ms"
+).split(",")
+
+
+def syntax_input_offset(data, sample):
+    prefix = b"\x60\x60\x60html\n" if sample == "markdown" else b""
+    marker = prefix + b"<script>const n = call(42);</script><style>"
+    try:
+        return data.index(marker) + len(prefix + b"<script>const n = ")
+    except ValueError as error:
+        raise RuntimeError("missing embedded script input marker") from error
+
+
+def verify_syntax_batch(directory, expected_sha256):
+    manifest = directory / "syntax-fixtures.json"
+    if manifest.is_symlink() or not manifest.is_file():
+        raise RuntimeError("missing regular syntax batch manifest")
+    raw = manifest.read_bytes()
+    if hashlib.sha256(raw).hexdigest() != expected_sha256:
+        raise RuntimeError("syntax batch manifest identity changed")
+    metadata = json.loads(raw)
+    if (not isinstance(metadata, dict) or set(metadata) != {"schema", "files"}
+            or metadata["schema"] != 1 or not isinstance(metadata["files"], dict)
+            or set(metadata["files"]) != {"markdown.md", "html.html"}):
+        raise RuntimeError("unexpected syntax batch fixture manifest")
+    for name, digest in metadata["files"].items():
+        path = directory / name
+        if (not isinstance(digest, str) or re.fullmatch(r"[0-9a-f]{64}", digest) is None
+                or path.is_symlink() or not path.is_file()
+                or hashlib.sha256(path.read_bytes()).hexdigest() != digest):
+            raise RuntimeError(f"syntax batch fixture identity changed: {name}")
+    return metadata["files"]
+
+
+def syntax_fixture(path, sample):
+    extension = {"markdown": ".md", "html": ".html"}.get(sample)
+    data = path.read_bytes()
+    marker = b"<script>const n = call(42);</script><style>"
+    if (extension is None or path.suffix != extension
+            or not 256 * 1024 <= len(data) < 257 * 1024 or marker not in data
+            or (sample == "markdown" and b"\x60\x60\x60html\n" + marker not in data)):
+        raise RuntimeError("expected representative 256 KiB Markdown/HTML syntax fixture")
+    data.decode("utf-8")
+    syntax_input_offset(data, sample)
+    return data
+
+
+def count(row, key):
+    value = row.get(key, "")
+    if not isinstance(value, str) or re.fullmatch(r"[0-9]+", value) is None:
+        raise RuntimeError(f"invalid integer {key}: {row}")
+    return int(value)
+
+
+def validate_syntax_report(content, rows, software, sample, fixture):
+    offset = syntax_input_offset(fixture, sample)
+    header = f"# mode=syntax; sample={sample}; release=true; fixture_bytes={len(fixture)}; input_offset={offset}; graphics="
+    if not any(line.startswith(header) for line in content.splitlines()):
+        raise RuntimeError("syntax mode / sample / release / fixture identity mismatch")
+    if [row.get("phase") for row in rows] != SYNTAX_PHASES:
+        raise RuntimeError("incomplete or reordered syntax phase matrix")
+    if any(set(row) != set(SYNTAX_FIELDS) for row in rows):
+        raise RuntimeError("unexpected syntax report columns")
+    target_buffer = rows[0]["target_buffer"]
+    if re.fullmatch(r"BufferId\([1-9][0-9]*\)", target_buffer) is None:
+        raise RuntimeError("missing syntax buffer identity")
+    deltas = [0, 1, 0, 0, -1, 31, -1]
+    versions = [0, 1, 2, 3, 4, 36, 68]
+    pending_inputs = 0
+    for index, row in enumerate(rows):
+        delta = deltas[min(index, 6)]
+        version = f"TextVersion({versions[min(index, 6)]})"
+        if (count(row, "step") != index or count(row, "bytes") != len(fixture) + delta
+                or count(row, "point") != offset + delta
+                or row["target_buffer"] != target_buffer or row["target_version"] != version
+                or row["painted_buffer"] != target_buffer or row["painted_version"] != version
+                or row["text_verified"] != "true"):
+            raise RuntimeError(f"syntax target / workload / text verification mismatch: {row}")
+        if row["syntax_pending_before_action"] not in ("true", "false"):
+            raise RuntimeError(f"missing syntax pending state: {row}")
+        pending = row["syntax_pending_before_action"] == "true"
+        if index >= 7 and pending:
+            raise RuntimeError("stable draw / idle started before syntax settled")
+        if index > 0 and rows[index - 1]["syntax_status"] == "ready" and pending:
+            raise RuntimeError("prior syntax was already ready; pending input claim is contradictory")
+        if 1 <= index <= 6 and pending:
+            pending_inputs += 1
+        frames = count(row, "frames")
+        pending_frames = count(row, "syntax_pending_frames")
+        if (count(row, "missing_observations") or count(row, "blank_frames")
+                or pending_frames > frames or count(row, "visible_rows") == 0
+                or count(row, "indexed_bytes") != len(fixture) + delta):
+            raise RuntimeError(f"missing syntax body / frame coverage: {row}")
+        combined = metric(row, "syntax_and_layout_submit_ms", optional=True)
+        if index == len(rows) - 1:
+            if (row["syntax_status"] != "idle" or frames != 0 or count(row, "idle_ticks") != 30
+                    or pending_frames != 0 or combined is not None
+                    or any(row[key] for key in ("first_frame_submit_ms", "first_submit_ms", "ready_submit_ms"))):
+                raise RuntimeError("syntax idle coverage mismatch")
+        else:
+            if (count(row, "idle_ticks") or not count(row, "first_visible_rows")
+                    or metric(row, "ready_submit_ms") > metric(row, "observed_elapsed_ms")):
+                raise RuntimeError("syntax first visibility / idle ticks / timing mismatch")
+            if row["syntax_status"] == "ready":
+                if (pending_frames >= frames or combined is None
+                        or not metric(row, "ready_submit_ms") <= combined <= metric(row, "observed_elapsed_ms")):
+                    raise RuntimeError("invalid syntax/layout timing boundary")
+            elif row["syntax_status"] == "not-observed" and index < 6:
+                if combined is not None or pending_frames == 0:
+                    raise RuntimeError("unobserved syntax cannot have a ready time")
+            else:
+                raise RuntimeError("final syntax completion missing")
+        if row["syntax_status"] in ("ready", "idle"):
+            if row["syntax_buffer"] != target_buffer or row["syntax_version"] != version:
+                raise RuntimeError("syntax snapshot does not match current committed target")
+        elif row["syntax_buffer"] or row["syntax_version"]:
+            raise RuntimeError("unobserved syntax must not invent a snapshot")
+    validate_native_metrics(rows, software, False)
+    footer = f"# completed=true; input_while_syntax_pending={pending_inputs}; layout_budget_separate=true; syntax_ready_budget=not-established; gpu_execution_ms=unmeasured; compositor_presentation_ms=unmeasured"
+    if not pending_inputs or footer not in content.splitlines():
+        raise RuntimeError("coverage missing: input while prior syntax pending / completion verdict")
+
+
+def read_report(path, software, ime, m1=None, m2=False, split=None, sample=None, syntax=False, fixture=None):
     content = path.read_text()
     if "# completed=true;" not in content:
         raise RuntimeError(f"incomplete report {path}")
     renderer = "is_software_emulated: true" if software else "is_software_emulated: false"
     if renderer not in content:
         raise RuntimeError(f"unexpected renderer class in {path}")
-    rows = list(csv.DictReader(line for line in content.splitlines() if not line.startswith("#")))
+    reader = csv.DictReader(line for line in content.splitlines() if not line.startswith("#"))
+    rows = list(reader)
+    if syntax:
+        if reader.fieldnames != SYNTAX_FIELDS:
+            raise RuntimeError("unexpected syntax report columns")
+        validate_syntax_report(content, rows, software, sample, fixture)
+        return rows
     if split is not None:
         validate_split_report(content, rows, software, split, sample)
         return rows
@@ -566,6 +703,10 @@ def run_probe(args, desktop, sample, run):
         invocation.append("--allow-software")
     if args.ime:
         invocation.append("--external")
+    if getattr(args, "syntax", False):
+        if not hasattr(args, "syntax_fixture"):
+            args.syntax_fixture = syntax_fixture(args.input, sample)
+        invocation.append("--syntax")
     if getattr(args, "m2", False):
         invocation.extend(["--m2-directory", str(stem.with_suffix(".files"))])
     if getattr(args, "m2_open_diagnostic", False):
@@ -578,6 +719,8 @@ def run_probe(args, desktop, sample, run):
     environment = os.environ.copy()
     token = uuid.uuid4().hex
     environment["SEMACS_PERF_TOKEN"] = token
+    if getattr(args, "syntax", False):
+        environment["XDG_CONFIG_HOME"] = str(args.output / "config")
     if args.software:
         environment["LIBGL_ALWAYS_SOFTWARE"] = "1"
     with stem.with_suffix(".stderr.log").open("x") as stderr, stem.with_suffix(".stdout.log").open("x") as stdout:
@@ -611,7 +754,9 @@ def run_probe(args, desktop, sample, run):
                 verify_m2_files(stem.with_suffix(".files"), open_diagnostic=True)
                 return diagnostic_rows
             pacing = (args.duration_seconds, args.interval_ms) if args.m1 else None
-            rows = read_report(report, args.software, args.ime, pacing, getattr(args, "m2", False), getattr(args, "split", None), sample)
+            rows = read_report(report, args.software, args.ime, pacing, getattr(args, "m2", False), getattr(args, "split", None), sample,
+                               getattr(args, "syntax", False),
+                               getattr(args, "syntax_fixture", None) if getattr(args, "syntax", False) else None)
             if getattr(args, "m2", False):
                 verify_m2_files(stem.with_suffix(".files"))
             return rows
@@ -639,11 +784,13 @@ def main():
     mode.add_argument("--ime", action="store_true", help="real Wayland/fcitx5 Pinyin; requires Hyprland/wtype")
     mode.add_argument("--m2-open-diagnostic", action="store_true", help="one mixed-file open only; buffered frame / slow-view diagnostic, NOT acceptance")
     mode.add_argument("--m2", action="store_true", help="M2 file / save / switch / completion / lifecycle baseline")
+    mode.add_argument("--syntax", action="store_true", help="syntax-enabled Markdown/HTML input/draw baseline; layout and syntax ready are separate")
     mode.add_argument("--m1", action="store_true", help="M1 command chain + paced native sustained input; stop on first hardware budget failure")
     parser.add_argument("--duration-seconds", type=int, help="M1 sustained duration, 1..600; default 60")
     parser.add_argument("--interval-ms", type=int, help="M1 input cadence, 20..1000 ms; default 50")
-    parser.add_argument("--sample", choices=SAMPLES, action="append")
+    parser.add_argument("--sample", choices=SAMPLES + SYNTAX_SAMPLES, action="append")
     parser.add_argument("--runs", type=int, default=3)
+    parser.add_argument("--syntax-manifest-sha256", help="frozen manifest digest shared by both syntax sample invocations")
     parser.add_argument("--hyprland-instance", default=os.environ.get("HYPRLAND_INSTANCE_SIGNATURE"))
     parser.add_argument("--binary", type=Path, default=ROOT / "target/release/examples/perf_native")
     args = parser.parse_args()
@@ -667,19 +814,47 @@ def main():
         parser.error("--ime requires the actual Wayland/Hyprland session environment")
     if args.split and args.sample is None:
         args.sample = ["mixed", "single-ascii"]
+    if args.syntax:
+        if args.sample is None or len(args.sample) != 1 or args.sample[0] not in SYNTAX_SAMPLES:
+            parser.error("--syntax requires exactly one --sample markdown|html")
+        if re.fullmatch(r"[0-9a-f]{64}", args.syntax_manifest_sha256 or "") is None:
+            parser.error("--syntax requires the frozen --syntax-manifest-sha256")
+    elif args.syntax_manifest_sha256 is not None:
+        parser.error("--syntax-manifest-sha256 requires --syntax")
+    elif any(sample not in SAMPLES for sample in (args.sample or [])):
+        parser.error("syntax samples require --syntax")
     args.input = args.input.resolve(strict=True)
-    if args.input.stat().st_size < 8 * 1024 * 1024:
+    if args.syntax:
+        try:
+            extension = {"markdown": "md", "html": "html"}[args.sample[0]]
+            if args.input.name != f"{args.sample[0]}.{extension}":
+                raise RuntimeError("syntax input must be the selected generated batch fixture")
+            args.syntax_batch = verify_syntax_batch(args.input.parent, args.syntax_manifest_sha256)
+            args.syntax_fixture = syntax_fixture(args.input, args.sample[0])
+        except (RuntimeError, ValueError, OSError) as error:
+            parser.error(str(error))
+    elif args.input.stat().st_size < 8 * 1024 * 1024:
         parser.error("R1 mixed fixture must be at least 8 MiB; use scripts/perf_sample.py")
     args.binary = args.binary.resolve(strict=True)
     args.output = args.output.resolve()
     args.output.mkdir(parents=True, exist_ok=False)
     digest = hashlib.sha256(args.input.read_bytes()).hexdigest()
+    config = args.output / "config/semacs/init.js"
+    if args.syntax:
+        config.parent.mkdir(parents=True)
+        with config.open("xb") as file:
+            file.write(b"")
     metadata = {
         "uname": list(os.uname()), "software_diagnostic": args.software,
-        "ime": args.ime, "m1": args.m1, "m2": args.m2, "split": args.split,
+        "ime": args.ime, "m1": args.m1, "m2": args.m2, "split": args.split, "syntax": args.syntax,
+        "syntax_ready_budget": "not-established" if args.syntax else None,
+        "syntax_batch_manifest_sha256": args.syntax_manifest_sha256,
+        "syntax_batch_fixtures": args.syntax_batch if args.syntax else None,
+        "syntax_fixture_bytes": args.input.stat().st_size if args.syntax else None,
+        "isolated_config_sha256": hashlib.sha256(b"").hexdigest() if args.syntax else None,
         "all_view_ready_budget": "not-established" if args.split else None,
         "m2_open_diagnostic": args.m2_open_diagnostic,
-        "acceptance": not (args.m2_open_diagnostic or args.split),
+        "acceptance": not (args.m2_open_diagnostic or args.split or args.syntax),
         "measurement_scope": "selected-view-budgets-and-all-view-baseline" if args.split else None,
         "duration_seconds": args.duration_seconds,
         "interval_ms": args.interval_ms, "runs": args.runs, "samples": args.sample or list(SAMPLES),
@@ -692,12 +867,21 @@ def main():
         "fontconfig_bold": command("fc-match", "-f", "%{family}\n%{file}\n", "monospace:style=Bold"),
         "completed": False, "restored": False,
     }
-    desktop = Desktop(args.hyprland_instance, args.ime)
+    desktop = None
     values = {}
     try:
+        desktop = Desktop(args.hyprland_instance, args.ime)
         for sample in metadata["samples"]:
             for run in range(1, args.runs + 1):
+                if args.syntax:
+                    verify_syntax_batch(args.input.parent, args.syntax_manifest_sha256)
                 rows = run_probe(args, desktop, sample, run)
+                if args.syntax:
+                    verify_syntax_batch(args.input.parent, args.syntax_manifest_sha256)
+                    if args.input.read_bytes() != args.syntax_fixture:
+                        raise RuntimeError("syntax fixture changed; refusing subsequent probes")
+                    if config.is_symlink() or config.read_bytes() != b"":
+                        raise RuntimeError("isolated syntax configuration changed; refusing subsequent probes")
                 if args.m2 and not args.m2_open_diagnostic:
                     metadata.setdefault("m2_coverage", []).append({
                         "sample": sample, "run": run,
@@ -720,7 +904,7 @@ def main():
                     for key in (
                         "first_submit_ms", "ready_submit_ms", "draw_cpu_max_ms",
                         "action_cpu_ms", "blank_frames", "first_frame_submit_ms", "schedule_lag_ms",
-                        "all_ready_submit_ms",
+                        "all_ready_submit_ms", "syntax_and_layout_submit_ms", "syntax_pending_frames",
                         "save_action_cpu_ms", "save_observed_ms", "result_observed_ms",
                         "rss_kib", "retained_closed_views",
                     ):
@@ -734,10 +918,20 @@ def main():
         raise
     finally:
         try:
-            desktop.restore()
+            if desktop is not None:
+                desktop.restore()
             if hashlib.sha256(args.input.read_bytes()).hexdigest() != digest:
                 raise RuntimeError("fixture changed during native measurements")
-            metadata["restored"] = True
+            if args.syntax:
+                verify_syntax_batch(args.input.parent, args.syntax_manifest_sha256)
+                if config.is_symlink() or config.read_bytes() != b"":
+                    raise RuntimeError("isolated syntax configuration changed")
+            metadata["restored"] = desktop is not None
+        except Exception as error:
+            metadata["completed"] = False
+            metadata["error"] = f"{metadata.get('error', '')}; {error}".lstrip("; ")
+            (args.output / "STOP.txt").write_text(metadata["error"] + "\n")
+            raise
         finally:
             (args.output / "environment.json").write_text(json.dumps(metadata, ensure_ascii=False, indent=2) + "\n")
     summary = [
