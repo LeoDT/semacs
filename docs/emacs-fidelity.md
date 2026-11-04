@@ -46,6 +46,7 @@
 ### 已登记的 F2 motion 差异
 
 - 词由连续 Unicode 字母 / 数字组成；其余字符作为分隔符，不实现 syntax table 或按文字系统细分词。下划线、组合附加符号和 emoji 均为分隔符；例如 `M-f` 在 `éclair` 中先停在 `e` 后，在 `🙂last` 中直接到 `last` 后，与 Emacs 的精确边界不同。
+- `forward-paragraph` / `backward-paragraph` 按空行或仅含 ASCII 空格 / Tab 的逻辑行分隔段落，不实现 mode-specific 段落正则。向前停在当前段之后首个分隔行的行首，向后停在当前段之前最近分隔行的行首，而不是正文段首。从分隔行出发先越过当前连续空白行，再越过相应方向的一段正文，停在下一处分隔行；无目标时停在 buffer 首尾，重复不报边界错误。含空格 / Tab 的分隔行也停在行首；保留 mark / active，不建历史组，和词移动一样不按 minibuffer field 截断。当前没有默认键位，可通过 JS 配置绑定；不支持数值前缀参数。
 - `C-n` / `C-p` 按逻辑行移动，不按软换行显示行；连续上下行共用临时目标列，其他命令、指针定位和平台输入提交打断。列宽复用基础缩进的 Unicode 宽度与 tab-width=8；目标列落在 TAB / 宽字符内时越过该字符，不实现行尾特殊 goal 或像素目标列。
 - 翻页按完整可见显示行数减两行移动（至少一行）；point 仍在新页内则保留，否则移到最近可见行的行首。末页 / 首页先移到 buffer 边缘，再次同向翻页报边界错误；不承诺 Emacs 的精确窗口边距与列定位。
 - `C-l` 连续执行按居中 → 顶部 → 底部循环，其他命令打断；按像素定位，允许 EOB 后留白，不承诺 Emacs 的整行取整和滚动边距。
@@ -76,6 +77,7 @@
 | `M-<` / `M->` | beginning-of-buffer / end-of-buffer | 是 |
 | `C-v` / `M-v` | scroll-up-command / scroll-down-command | 是 |
 | `C-d` / `DEL` / GUI Delete | delete-char / delete-backward-char / delete-forward-char | 是 |
+| `M-d` / `M-DEL` | kill-word / backward-kill-word | 是（后续日常编辑增强） |
 | `C-k` | kill-line | 是 |
 | `C-w` / `M-w` | kill-region / kill-ring-save | 是 |
 | `C-y` | yank | 是 |
@@ -108,7 +110,7 @@
 ### 历史与保存点
 
 - 连续同类自插入、连续后删、连续前删分别合并；移动、换行与其他命令打断合并。
-- 连续 `kill-line` 各自成组，连续 yank 也各自成组；kill ring 追加不等于历史合并。
+- 连续 `kill-line` / `kill-word` / `backward-kill-word` 各自成组，连续 yank 也各自成组；kill ring 追加不等于历史合并。
 - undo / redo 不与输入合并；undo 后输入开新组并清空 redo。
 - undo 恢复组开始前的 point；redo 回到组内最早变更起点，不是组末。
 - 回到保存点为 clean；已固定的保存后 undo 越过保存点场景仍 clean，再输入为 dirty。磁盘内容单独验证，不以当前文本等于磁盘重定义 modified。
@@ -125,7 +127,8 @@
 ### kill ring
 
 - `C-k` / `C-w` / `M-w` / `C-y` 遵循参照语义；`C-w` / `M-w` 在 mark 已设置时使用 point / mark 范围，不要求 active；空 region 可写入空 ring 条目但不创建文本编辑。kill / copy 停用 region，保留 mark。
-- 连续 kill 按应用级命令链追加；正向追加、反向 region 前置。非 kill 命令、undefined、指针定位、输入会话结束及平台输入提交打断连续 kill；等待前缀本身不是命令。`M-w` 可续接前一条 kill，但自身不构成下一条 kill 的连续前驱。
+- `kill-word` / `backward-kill-word` 使用与 `forward-word` / `backward-word` 相同的词边界，忽略 active region，删除 point 到目标词边界的内容；在 buffer 边缘范围为空时沿用空 region 的 ring / 无编辑语义，不报边界错误。只读时先复制并移动到目标边界，再报只读错误，不建历史组；跨 prompt 同样遵循只读保护，不单独截断到输入区。不支持数值前缀参数。
+- 连续 kill 按应用级命令链追加；正向追加、反向 word / region 前置。非 kill 命令、undefined、指针定位、输入会话结束及平台输入提交打断连续 kill；等待前缀本身不是命令。`M-w` 可续接前一条 kill，但自身不构成下一条 kill 的连续前驱。
 - `kill-line` 在 EOB 回显 `End of buffer`，不建历史组。
 - 只读 buffer 的 kill 按参照复制到 ring 后报告只读错误，不修改文本 / modified；`C-k` 此时还会把 point 移到被复制范围末端。`M-w` 在只读 buffer 可正常复制；只读 yank 在改变 mark 前拒绝。
 - yank 在插入起点设置 mark，回显 `Mark set`；非空插入停用 region，不替换原 region。空 ring 报错但仍在 point 设置 mark；空字符串 yank 无文本编辑，不主动停用已有 active。

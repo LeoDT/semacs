@@ -468,6 +468,13 @@ impl EditTarget {
                     command == Command::ForwardWord,
                 ))?;
             }
+            Command::ForwardParagraph | Command::BackwardParagraph => {
+                self.buffer.set_point(motion::paragraph(
+                    text,
+                    point,
+                    command == Command::ForwardParagraph,
+                ))?;
+            }
             Command::NextLine | Command::PreviousLine => {
                 let goal = *self
                     .goal_column
@@ -574,7 +581,11 @@ impl EditTarget {
                 self.buffer.deactivate_mark();
                 return Ok(CommandOutcome::default());
             }
-            Command::KillLine | Command::KillRegion | Command::KillRingSave => {
+            Command::KillWord
+            | Command::BackwardKillWord
+            | Command::KillLine
+            | Command::KillRegion
+            | Command::KillRingSave => {
                 return self.kill(token, command, append_kill);
             }
             Command::Yank => return self.yank(token),

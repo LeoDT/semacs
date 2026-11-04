@@ -55,6 +55,239 @@ fn press(target: &mut EditTarget, map: &Keymap, key: &'static str) {
 }
 
 #[test]
+fn word_kills_share_motion_boundaries_and_do_not_require_a_mark() {
+    for (text, point, command, remaining, destination, killed) in [
+        ("one_two", 0, Command::KillWord, "_two", 0, "one"),
+        ("one_two", 7, Command::BackwardKillWord, "one_", 4, "two"),
+        (
+            "one, \n中🙂tail",
+            3,
+            Command::KillWord,
+            "one🙂tail",
+            3,
+            ", \n中",
+        ),
+        (
+            "one, \n中🙂tail",
+            13,
+            Command::BackwardKillWord,
+            "one, \ntail",
+            6,
+            "中🙂",
+        ),
+        (
+            "e\u{301}clair",
+            0,
+            Command::KillWord,
+            "\u{301}clair",
+            0,
+            "e",
+        ),
+        (
+            "e\u{301}clair",
+            8,
+            Command::BackwardKillWord,
+            "e\u{301}",
+            3,
+            "clair",
+        ),
+        ("foo-bar", 1, Command::KillWord, "f-bar", 1, "oo"),
+        ("foo-bar", 2, Command::BackwardKillWord, "o-bar", 0, "fo"),
+        (" \t!\n", 0, Command::KillWord, "", 0, " \t!\n"),
+        (" \t!\n", 4, Command::BackwardKillWord, "", 0, " \t!\n"),
+    ] {
+        let ring = KillRing::default();
+        let mut target = target(text, &ring);
+        at(&mut target, point);
+        let update = run(&mut target, command).update.unwrap();
+        assert_eq!(target.buffer().text().to_string(), remaining);
+        assert_eq!(target.buffer().point(), ByteOffset(destination));
+        assert_eq!(entries(&ring), [killed]);
+        assert_eq!(update.edit.unwrap().source, EditSource::Command);
+        assert!(target.buffer().is_modified());
+    }
+}
+
+#[test]
+fn word_kills_ignore_active_region_but_deactivate_and_preserve_its_mark() {
+    let ring = KillRing::default();
+    let mut target = target("one two", &ring);
+    region(&mut target, 7, 0);
+    run(&mut target, Command::KillWord);
+    assert_eq!(target.buffer().text().to_string(), " two");
+    assert_eq!(target.buffer().mark(), Some(ByteOffset(4)));
+    assert!(!target.buffer().mark_active());
+    assert_eq!(entries(&ring), ["one"]);
+}
+
+#[test]
+fn consecutive_word_kills_append_or_prepend_and_yank_in_original_order() {
+    for (command, point) in [(Command::KillWord, 0), (Command::BackwardKillWord, 13)] {
+        let ring = KillRing::default();
+        let mut target = target("one two three", &ring);
+        at(&mut target, point);
+        for _ in 0..3 {
+            run(&mut target, command);
+        }
+        assert!(target.buffer().text().is_empty());
+        assert_eq!(entries(&ring), ["one two three"]);
+        run(&mut target, Command::Yank);
+        assert_eq!(target.buffer().text().to_string(), "one two three");
+    }
+}
+
+#[test]
+fn mixed_word_and_line_kills_share_the_chain_until_a_non_kill_command() {
+    let ring = KillRing::default();
+    let mut target = target("one two three\nfour", &ring);
+    at(&mut target, 7);
+    run(&mut target, Command::BackwardKillWord);
+    run(&mut target, Command::KillWord);
+    assert_eq!(entries(&ring), ["two three"]);
+    run(&mut target, Command::KillLine);
+    assert_eq!(entries(&ring), ["two three\n"]);
+    run(&mut target, Command::BackwardWord);
+    run(&mut target, Command::KillWord);
+    assert_eq!(entries(&ring), ["one", "two three\n"]);
+}
+
+#[test]
+fn each_word_kill_is_an_independent_undo_group_even_when_the_ring_merges() {
+    for (command, point, first, second, second_point) in [
+        (Command::KillWord, 0, " two three", " three", 0),
+        (Command::BackwardKillWord, 13, "one two ", "one ", 8),
+    ] {
+        let ring = KillRing::default();
+        let mut target = target("one two three", &ring);
+        at(&mut target, point);
+        run(&mut target, command);
+        run(&mut target, command);
+        let killed = entries(&ring);
+        assert_eq!(target.buffer().text().to_string(), second);
+        run(&mut target, Command::Undo);
+        assert_eq!(target.buffer().text().to_string(), first);
+        assert_eq!(target.buffer().point(), ByteOffset(second_point));
+        run(&mut target, Command::Undo);
+        assert_eq!(target.buffer().text().to_string(), "one two three");
+        assert_eq!(target.buffer().point(), ByteOffset(point));
+        assert!(!target.buffer().is_modified());
+        run(&mut target, Command::UndoRedo);
+        assert_eq!(target.buffer().text().to_string(), first);
+        run(&mut target, Command::UndoRedo);
+        assert_eq!(target.buffer().text().to_string(), second);
+        assert_eq!(entries(&ring), killed);
+    }
+}
+
+#[test]
+fn readonly_word_kills_copy_move_to_the_destination_and_do_not_create_history() {
+    for (command, point, destination, killed) in [
+        (Command::KillWord, 0, 3, "one"),
+        (Command::BackwardKillWord, 7, 4, "two"),
+    ] {
+        let ring = KillRing::default();
+        let mut target = target("one two", &ring);
+        region(&mut target, 1, point);
+        target.set_read_only(true);
+        let id = target.buffer().snapshot_id();
+        assert_eq!(
+            target.execute(target.token(), command).unwrap_err(),
+            RouteError::Input(InputError::Edit(EditError::ReadOnly))
+        );
+        assert_eq!(target.buffer().text().to_string(), "one two");
+        assert_eq!(target.buffer().point(), ByteOffset(destination));
+        assert_eq!(target.buffer().mark(), Some(ByteOffset(1)));
+        assert!(!target.buffer().mark_active());
+        assert!(!target.buffer().is_modified());
+        assert_eq!(target.buffer().snapshot_id(), id);
+        assert_eq!(entries(&ring), [killed]);
+        target.set_read_only(false);
+        assert_eq!(
+            target.execute(target.token(), Command::Undo).unwrap_err(),
+            RouteError::NoUndoInformation
+        );
+    }
+}
+
+#[test]
+fn word_kills_cannot_delete_a_minibuffer_prompt() {
+    for (command, point, destination) in
+        [(Command::KillWord, 0, 5), (Command::BackwardKillWord, 7, 0)]
+    {
+        let mut target = EditTarget::new(Buffer::minibuffer("Input: ", "abc"))
+            .with_field_boundary(ByteOffset(7))
+            .unwrap();
+        let id = target.buffer().snapshot_id();
+        let modified = target.buffer().is_modified();
+        at(&mut target, point);
+        assert_eq!(
+            target.execute(target.token(), command).unwrap_err(),
+            RouteError::Input(InputError::Edit(EditError::TextReadOnly))
+        );
+        assert_eq!(target.buffer().text().to_string(), "Input: abc");
+        assert_eq!(target.buffer().point(), ByteOffset(destination));
+        assert_eq!(
+            target.kill_ring().latest().unwrap().to_string(),
+            if command == Command::KillWord {
+                "Input"
+            } else {
+                "Input: "
+            }
+        );
+        assert_eq!(target.buffer().snapshot_id(), id);
+        assert_eq!(target.buffer().is_modified(), modified);
+        assert_eq!(
+            target.execute(target.token(), Command::Undo).unwrap_err(),
+            RouteError::NoUndoInformation
+        );
+    }
+}
+
+#[test]
+fn word_kills_at_buffer_edges_store_empty_entries_without_edits_or_history() {
+    for (text, point, command) in [
+        ("abc", 3, Command::KillWord),
+        ("abc", 0, Command::BackwardKillWord),
+        ("", 0, Command::KillWord),
+        ("", 0, Command::BackwardKillWord),
+    ] {
+        let ring = KillRing::default();
+        let mut target = target(text, &ring);
+        at(&mut target, point);
+        let id = target.buffer().snapshot_id();
+        run(&mut target, command);
+        assert_eq!(entries(&ring), [""]);
+        assert_eq!(target.buffer().snapshot_id(), id);
+        assert_eq!(target.buffer().point(), ByteOffset(point));
+        assert!(!target.buffer().is_modified());
+        assert_eq!(
+            target.execute(target.token(), Command::Undo).unwrap_err(),
+            RouteError::NoUndoInformation
+        );
+    }
+}
+
+#[test]
+fn word_kill_default_bindings_and_escape_aliases_route_to_the_edit_target() {
+    let map = Keymap::for_scope(Scope::Edit);
+    for (keys, point, remaining, killed) in [
+        (vec!["alt-d"], 0, " two", "one"),
+        (vec!["escape", "d"], 0, " two", "one"),
+        (vec!["alt-backspace"], 7, "one ", "two"),
+        (vec!["escape", "backspace"], 7, "one ", "two"),
+    ] {
+        let ring = KillRing::default();
+        let mut target = target("one two", &ring);
+        at(&mut target, point);
+        for key in keys {
+            press(&mut target, &map, key);
+        }
+        assert_eq!(target.buffer().text().to_string(), remaining);
+        assert_eq!(entries(&ring), [killed]);
+    }
+}
+
+#[test]
 fn kill_line_handles_text_whitespace_newline_and_unicode() {
     for (text, point, remaining, killed) in [
         ("abc\ndef", 0, "\ndef", "abc"),
@@ -384,6 +617,8 @@ fn prefix_composition_and_stale_tokens_cannot_write_the_ring() {
         .replace_and_mark(target.token(), None, "拼", None)
         .unwrap();
     for command in [
+        Command::KillWord,
+        Command::BackwardKillWord,
         Command::KillLine,
         Command::KillRegion,
         Command::KillRingSave,
@@ -397,10 +632,16 @@ fn prefix_composition_and_stale_tokens_cannot_write_the_ring() {
     let old = target.token();
     target.end_input();
     target.resume_input();
-    assert_eq!(
-        target.execute(old, Command::KillLine).unwrap_err(),
-        RouteError::Input(InputError::StaleSession)
-    );
+    for command in [
+        Command::KillLine,
+        Command::KillWord,
+        Command::BackwardKillWord,
+    ] {
+        assert_eq!(
+            target.execute(old, command).unwrap_err(),
+            RouteError::Input(InputError::StaleSession)
+        );
+    }
     assert!(entries(&ring).is_empty());
     assert!(!target.buffer().is_modified());
 }

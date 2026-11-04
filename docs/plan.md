@@ -85,6 +85,14 @@ D 验收时遗留的错误信息与 mode line 重叠缺陷已由下节 D1 处理
 
 人工窗口尺寸未记录；首批 IME 观察不冒充时延测量，8 MiB 多语言全矩阵、长期持续输入、真实 IME 时延、GPU / 实际呈现等未测边界按记录保留。无剩余必修项，不自动追加补测；用户要求本轮仅收尾提交，不进入 F。
 
+### 日常编辑增强：双向 word kill
+
+已按用户要求补充 `kill-word` / `backward-kill-word`，默认 `M-d` / `M-DEL`；沿用既有词边界、共享 kill ring 与独立撤销组，行为见[编辑契约](emacs-fidelity.md#kill-ring)。新增 9 项测试，`cargo test --lib --tests` 共 495 项通过。按用户要求仅做单元 / 集成测试，不追加宿主、性能或用户配置运行验证，不进入 F。
+
+### 日常编辑增强：段落移动与导航键
+
+已按用户确认的空白行分段规则补充 `forward-paragraph` / `backward-paragraph`，已按用户反馈修正为双向停在分隔空行的行首，连续空白行作为一组处理；边界与停点规则见 [F2 motion 契约](emacs-fidelity.md#已登记的-f2-motion-差异)。用户配置增加 Ctrl+方向键、PageUp / PageDown、Home / End 与 Ctrl+Home / End，应用默认键位不变。新增 7 项测试，并消除候选交互测试对固定命令数量 / 名称排序的依赖；`cargo test --lib --tests` 共 502 项通过。按用户要求不追加宿主、性能或真实配置运行验证，不进入 F。
+
 ## 完成标准
 
 各阶段按已确认范围交付，执行 [本地检查](acceptance.md#本地检查与-headless-入口) 及按影响选择的回归；真实环境验证另行取得同意，未测不记通过。遗留事项、证据归档及下一步按 [维护检查点](README.md#三个维护检查点) 收尾，不为阶段完成重复维护模块 / 测试清单。

@@ -443,6 +443,222 @@ fn word_motion_uses_the_registered_f2_combining_mark_rule() {
 }
 
 #[test]
+fn paragraph_motion_stops_on_separator_lines_in_both_directions() {
+    fn marked(text: &str) -> (String, usize) {
+        let (before, after) = text.split_once('|').unwrap();
+        (format!("{before}{after}"), before.len())
+    }
+
+    for (initial, backward, forward) in [
+        (
+            "fi|rst\nline\n\nnext",
+            "|first\nline\n\nnext",
+            "first\nline\n|\nnext",
+        ),
+        (
+            "|first\nline\n\nnext",
+            "|first\nline\n\nnext",
+            "first\nline\n|\nnext",
+        ),
+        (
+            "first\n|line\n\nnext",
+            "|first\nline\n\nnext",
+            "first\nline\n|\nnext",
+        ),
+        (
+            "first\nline\n\n|next",
+            "first\nline\n|\nnext",
+            "first\nline\n\nnext|",
+        ),
+        (
+            "first\nline\n\nne|xt",
+            "first\nline\n|\nnext",
+            "first\nline\n\nnext|",
+        ),
+        (
+            "first\nline\n|\nnext",
+            "|first\nline\n\nnext",
+            "first\nline\n\nnext|",
+        ),
+        (
+            "first\nline\n| \t\n\nnext",
+            "|first\nline\n \t\n\nnext",
+            "first\nline\n \t\n\nnext|",
+        ),
+        (
+            "first\nline\n \t|\n\nnext",
+            "|first\nline\n \t\n\nnext",
+            "first\nline\n \t\n\nnext|",
+        ),
+        (
+            " \n\t\n|first\n\nnext",
+            " \n|\t\nfirst\n\nnext",
+            " \n\t\nfirst\n|\nnext",
+        ),
+        (
+            "first\n\n  第|二🙂\nlast\n\nnext",
+            "first\n|\n  第二🙂\nlast\n\nnext",
+            "first\n\n  第二🙂\nlast\n|\nnext",
+        ),
+        (
+            "a\n\u{a0}\n|b\n\nc",
+            "|a\n\u{a0}\nb\n\nc",
+            "a\n\u{a0}\nb\n|\nc",
+        ),
+        (
+            "a\n\u{c}\n|b\n\nc",
+            "|a\n\u{c}\nb\n\nc",
+            "a\n\u{c}\nb\n|\nc",
+        ),
+        (
+            "one\n|\n \t\n\nthree\n\nfour",
+            "|one\n\n \t\n\nthree\n\nfour",
+            "one\n\n \t\n\nthree\n|\nfour",
+        ),
+        (
+            "one\n\n \t\n\nthree\n\nfo|ur",
+            "one\n\n \t\n\nthree\n|\nfour",
+            "one\n\n \t\n\nthree\n\nfour|",
+        ),
+        ("single|", "|single", "single|"),
+        ("|", "|", "|"),
+        (" \n|\t\n", "| \n\t\n", " \n\t\n|"),
+        ("one\n\n|", "|one\n\n", "one\n\n|"),
+    ] {
+        let (text, point) = marked(initial);
+        for (command, expected) in [
+            (Command::BackwardParagraph, backward),
+            (Command::ForwardParagraph, forward),
+        ] {
+            let mut target = target(&text);
+            target
+                .set_point_from_pointer(target.token(), ByteOffset(point))
+                .unwrap();
+            let (expected_text, expected_point) = marked(expected);
+            assert_eq!(expected_text, text);
+            let outcome = execute(&mut target, command);
+            assert_eq!(
+                target.buffer().point(),
+                ByteOffset(expected_point),
+                "{initial:?}: {command:?}"
+            );
+            assert!(outcome.reveal_point);
+            assert!(outcome.update.is_none());
+            assert_eq!(target.buffer().text().to_string(), text);
+        }
+    }
+}
+
+#[test]
+fn repeated_paragraph_motion_progresses_and_clamps_at_buffer_edges() {
+    let mut target = target("one\n\ntwo\n\nthree\n \t\n");
+    for expected in [4, 9, 16, 19, 19] {
+        execute(&mut target, Command::ForwardParagraph);
+        assert_eq!(target.buffer().point(), ByteOffset(expected));
+    }
+    for expected in [9, 4, 0, 0] {
+        execute(&mut target, Command::BackwardParagraph);
+        assert_eq!(target.buffer().point(), ByteOffset(expected));
+    }
+    assert!(!target.buffer().is_modified());
+    assert_eq!(
+        target.execute(target.token(), Command::Undo).unwrap_err(),
+        RouteError::NoUndoInformation
+    );
+}
+
+#[test]
+fn paragraph_motion_preserves_readonly_text_active_mark_and_kill_ring() {
+    let mut target = target("one\n\ntwo");
+    execute(&mut target, Command::KillWord);
+    execute(&mut target, Command::Undo);
+    execute(&mut target, Command::SetMark);
+    target.set_read_only(true);
+    let id = target.display_snapshot().id();
+    for command in [Command::ForwardParagraph, Command::BackwardParagraph] {
+        execute(&mut target, command);
+        assert_eq!(target.display_snapshot().id(), id);
+        assert_eq!(target.buffer().mark(), Some(ByteOffset(0)));
+        assert!(target.buffer().mark_active());
+        assert_eq!(target.kill_ring().latest().unwrap().to_string(), "one");
+        assert_eq!(target.buffer().text().to_string(), "one\n\ntwo");
+        assert!(!target.buffer().is_modified());
+    }
+}
+
+#[test]
+fn paragraph_motion_obeys_prefix_composition_and_stale_session_guards() {
+    let map = Keymap::for_scope(Scope::Edit);
+    let mut target = target("one\n\ntwo");
+    press(&mut target, "ctrl-x", &map).unwrap();
+    for command in [Command::ForwardParagraph, Command::BackwardParagraph] {
+        assert_eq!(
+            target.execute(target.token(), command).unwrap_err(),
+            RouteError::PrefixPending
+        );
+    }
+    press(&mut target, "ctrl-g", &map).unwrap();
+    target
+        .replace_and_mark(target.token(), None, "拼", None)
+        .unwrap();
+    for command in [Command::ForwardParagraph, Command::BackwardParagraph] {
+        assert_eq!(
+            target.execute(target.token(), command).unwrap_err(),
+            RouteError::Input(InputError::CompositionActive)
+        );
+    }
+    let old = target.token();
+    target.end_input();
+    target.resume_input();
+    for command in [Command::ForwardParagraph, Command::BackwardParagraph] {
+        assert_eq!(
+            target.execute(old, command).unwrap_err(),
+            RouteError::Input(InputError::StaleSession)
+        );
+    }
+    assert_eq!(target.buffer().point(), ByteOffset(0));
+    assert_eq!(target.buffer().text().to_string(), "one\n\ntwo");
+    assert!(!target.buffer().is_modified());
+}
+
+#[test]
+fn paragraph_motion_handles_rope_chunk_boundaries_without_flattening_lines() {
+    let first = "中".repeat(3000);
+    let separators = format!("\n{}\n\n", " \t".repeat(2000));
+    let second = "🙂tail".repeat(2000);
+    let text = format!("{first}{separators}{second}");
+    let mut target = target(&text);
+    execute(&mut target, Command::ForwardParagraph);
+    assert_eq!(target.buffer().point(), ByteOffset(first.len() + 1));
+    execute(&mut target, Command::ForwardParagraph);
+    assert_eq!(target.buffer().point(), ByteOffset(text.len()));
+    execute(&mut target, Command::BackwardParagraph);
+    assert_eq!(
+        target.buffer().point(),
+        ByteOffset(first.len() + separators.len() - 1)
+    );
+    execute(&mut target, Command::BackwardParagraph);
+    assert_eq!(target.buffer().point(), ByteOffset(0));
+}
+
+#[test]
+fn paragraph_commands_route_through_custom_control_arrow_bindings() {
+    let mut map = Keymap::for_scope(Scope::Edit);
+    for (keys, command) in [
+        ("ctrl-up", Command::BackwardParagraph),
+        ("ctrl-down", Command::ForwardParagraph),
+    ] {
+        map.bind(&semacs::keymap::parse_sequence(keys).unwrap(), command)
+            .unwrap();
+    }
+    let mut target = target("one\n\ntwo");
+    press(&mut target, "ctrl-down", &map).unwrap();
+    assert_eq!(target.buffer().point(), ByteOffset(4));
+    press(&mut target, "ctrl-up", &map).unwrap();
+    assert_eq!(target.buffer().point(), ByteOffset(0));
+}
+
+#[test]
 fn vertical_motion_retains_columns_across_short_lines_and_direction_changes() {
     let map = Keymap::for_scope(Scope::Edit);
     let mut target = target("abcdef\nx\nabcdef\n");

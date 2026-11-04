@@ -151,13 +151,16 @@ fn selection_does_not_edit_input_or_history_and_only_committed_edits_reset_it(
     let (mut visual, shell, _) = open(semacs::buffer::Buffer::scratch(), cx);
     visual.simulate_keystrokes("alt-x");
     visual.simulate_input("forward-");
+    let list = candidates(&visual, &shell);
+    let first = list.items[0].candidate.value.clone();
+    let second = list.items[1].candidate.value.clone();
     visual.simulate_keystrokes("ctrl-n");
     assert_eq!(
         candidates(&visual, &shell)
             .selected_candidate()
             .unwrap()
             .value,
-        "forward-word"
+        second
     );
     visual.simulate_keystrokes("ctrl-a ctrl-f ctrl-e");
     assert_eq!(
@@ -165,11 +168,11 @@ fn selection_does_not_edit_input_or_history_and_only_committed_edits_reset_it(
             .selected_candidate()
             .unwrap()
             .value,
-        "forward-word"
+        second
     );
     assert_eq!(contents(&mut visual, &shell), "forward-");
     visual.simulate_keystrokes("tab");
-    assert_eq!(contents(&mut visual, &shell), "forward-word");
+    assert_eq!(contents(&mut visual, &shell), second);
     visual.simulate_keystrokes("ctrl-/");
     redraw(&mut visual);
     assert_eq!(contents(&mut visual, &shell), "forward-");
@@ -178,14 +181,16 @@ fn selection_does_not_edit_input_or_history_and_only_committed_edits_reset_it(
             .selected_candidate()
             .unwrap()
             .value,
-        "forward-char"
+        first
     );
     visual.simulate_keystrokes("up up enter");
     assert!(candidates(&visual, &shell).selected.is_none());
     assert_eq!(contents(&mut visual, &shell), "forward-");
     visual.simulate_keystrokes("alt-enter");
     assert!(visual.read(|cx| shell.read(cx).session().is_some()));
-    visual.simulate_keystrokes("down down down down");
+    for _ in 0..candidates(&visual, &shell).items.len() {
+        visual.simulate_keystrokes("down");
+    }
     let list = candidates(&visual, &shell);
     assert_eq!(list.selected, Some(list.items.len() - 1));
     visual.simulate_keystrokes("ctrl-g");

@@ -53,6 +53,30 @@ fn configuration_registers_commands_font_and_multiple_keys() {
 }
 
 #[test]
+fn navigation_keys_bind_to_native_commands() {
+    let bindings = [
+        ("ctrl-left", Command::BackwardWord),
+        ("ctrl-right", Command::ForwardWord),
+        ("ctrl-up", Command::BackwardParagraph),
+        ("ctrl-down", Command::ForwardParagraph),
+        ("pageup", Command::ScrollDown),
+        ("pagedown", Command::ScrollUp),
+        ("home", Command::MoveBeginningOfLine),
+        ("end", Command::MoveEndOfLine),
+        ("ctrl-home", Command::BeginningOfBuffer),
+        ("ctrl-end", Command::EndOfBuffer),
+    ];
+    let source: String = bindings
+        .iter()
+        .map(|(keys, command)| format!("semacs.bindKey({keys:?}, {:?});\n", command.name()))
+        .collect();
+    let (_, configuration) = load(&source).unwrap();
+    for (keys, command) in bindings {
+        assert_eq!(binding(&configuration, keys), Lookup::Command(command));
+    }
+}
+
+#[test]
 fn overrides_and_unbinding_do_not_change_other_bindings() {
     let (_, configuration) = load(
         r#"

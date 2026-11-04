@@ -63,6 +63,8 @@ fn default_bindings_match_the_emacs_reference_or_approved_contracts() {
             // Keep the frozen Emacs observations intact when checking our approved override.
             let expected = match binding.reference {
                 "C-t" => Some("set-mark-command"),
+                "M-d" => Some("kill-word"),
+                "M-DEL" => Some("backward-kill-word"),
                 "C-x 0" => Some("delete-window"),
                 "C-h e" => messages_reference.get("C-h e").copied(),
                 key => reference.get(key).copied(),

@@ -80,6 +80,8 @@ commands! {
     MoveEndOfLine => "move-end-of-line", Edit, ["ctrl-e" => "C-e"];
     ForwardWord => "forward-word", Edit, ["alt-f" => "M-f"];
     BackwardWord => "backward-word", Edit, ["alt-b" => "M-b"];
+    ForwardParagraph => "forward-paragraph", Edit, [];
+    BackwardParagraph => "backward-paragraph", Edit, [];
     BeginningOfBuffer => "beginning-of-buffer", Edit, ["alt-<" => "M-<"];
     EndOfBuffer => "end-of-buffer", Edit, ["alt->" => "M->"];
     ScrollUp => "scroll-up-command", Edit, ["ctrl-v" => "C-v"];
@@ -91,6 +93,8 @@ commands! {
     DeleteChar => "delete-char", Edit, ["ctrl-d" => "C-d"];
     DeleteForwardChar => "delete-forward-char", Edit, ["delete" => "<deletechar>"];
     DeleteBackwardChar => "delete-backward-char", Edit, ["backspace" => "DEL"];
+    KillWord => "kill-word", Edit, ["alt-d" => "M-d"];
+    BackwardKillWord => "backward-kill-word", Edit, ["alt-backspace" => "M-DEL"];
     KillLine => "kill-line", Edit, ["ctrl-k" => "C-k"];
     KillRegion => "kill-region", Edit, ["ctrl-w" => "C-w"];
     KillRingSave => "kill-ring-save", Edit, ["alt-w" => "M-w"];

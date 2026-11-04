@@ -27,6 +27,39 @@ fn scan_word(chars: impl Iterator<Item = char>, point: ByteOffset, forward: bool
     ByteOffset(offset)
 }
 
+pub(super) fn paragraph(text: &Rope, point: ByteOffset, forward: bool) -> ByteOffset {
+    let mut row = text.offset_to_point(point.0).row;
+    let last_row = text.max_point().row;
+    let line_start = |row| ByteOffset(text.point_to_offset(Point::new(row, 0)));
+    let separator = |row| {
+        let start = line_start(row).0;
+        text.chunks_in_range(start..start + text.line_len(row) as usize)
+            .all(|chunk| chunk.bytes().all(|byte| matches!(byte, b' ' | b'\t')))
+    };
+    if forward {
+        while separator(row) {
+            if row == last_row {
+                return ByteOffset(text.len());
+            }
+            row += 1;
+        }
+        while !separator(row) {
+            if row == last_row {
+                return ByteOffset(text.len());
+            }
+            row += 1;
+        }
+    } else {
+        while row > 0 && separator(row) {
+            row -= 1;
+        }
+        while row > 0 && !separator(row) {
+            row -= 1;
+        }
+    }
+    line_start(row)
+}
+
 pub(super) fn goal(text: &Rope, point: ByteOffset) -> usize {
     let row = text.offset_to_point(point.0).row;
     let start = text.point_to_offset(Point::new(row, 0));

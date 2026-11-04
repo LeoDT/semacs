@@ -76,6 +76,8 @@ semacs.setStyle("cursor", { foreground: "#202124", background: "#ffcc66" });
 | `ctrl-c u` | `C-c u` |
 | `ctrl-c U` | `C-c S-u` |
 | `enter`、`tab`、`backspace` | `RET`、`<tab>`、`DEL` |
+| `left`、`right`、`up`、`down` | 方向键，可加 `ctrl-` 等修饰符 |
+| `pageup`、`pagedown`、`home`、`end` | 翻页键、行首尾键；行为由绑定的命令决定 |
 
 组合修饰符如 `ctrl-alt-_`；也支持 `shift-`、`super-` 和 `fn-`。不支持平台相关的 `secondary-` 别名，不把文字标签 `C-f` 当作配置语法。系统保留键仍由平台处理。
 

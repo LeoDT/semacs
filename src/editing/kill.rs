@@ -5,7 +5,7 @@ use crate::command::Command;
 use crate::input::SessionToken;
 use crate::text::{ByteOffset, Point, Rope};
 
-use super::{CommandOutcome, EditTarget, RouteError};
+use super::{CommandOutcome, EditTarget, RouteError, motion};
 
 fn line_range(
     text: &Rope,
@@ -40,18 +40,24 @@ impl EditTarget {
     ) -> Result<CommandOutcome, RouteError> {
         let point = self.buffer.point();
         let copy = command == Command::KillRingSave;
-        let (range, prepend) = if command == Command::KillLine {
-            (
+        let (range, prepend) = match command {
+            Command::KillWord | Command::BackwardKillWord => {
+                let forward = command == Command::KillWord;
+                let end = motion::word(&self.buffer.text(), point, forward);
+                (point.min(end)..point.max(end), !forward)
+            }
+            Command::KillLine => (
                 line_range(&self.buffer.text(), point, self.field_range().end)?,
                 false,
-            )
-        } else {
-            let mark = self.buffer.mark().ok_or(if copy {
-                RouteError::MarkNotSet
-            } else {
-                RouteError::NoRegion
-            })?;
-            (point.min(mark)..point.max(mark), point < mark)
+            ),
+            _ => {
+                let mark = self.buffer.mark().ok_or(if copy {
+                    RouteError::MarkNotSet
+                } else {
+                    RouteError::NoRegion
+                })?;
+                (point.min(mark)..point.max(mark), point < mark)
+            }
         };
         let text = self.buffer.text().slice(range.start.0..range.end.0);
         let read_only = (!range.is_empty())
@@ -61,8 +67,10 @@ impl EditTarget {
             self.kill_ring.record(text, append, prepend, !copy);
             self.buffer.deactivate_mark();
             if let Some(error) = read_only.filter(|_| !copy) {
-                if command == Command::KillLine {
-                    self.buffer.set_point(range.end)?;
+                match command {
+                    Command::KillLine | Command::KillWord => self.buffer.set_point(range.end)?,
+                    Command::BackwardKillWord => self.buffer.set_point(range.start)?,
+                    _ => {}
                 }
                 return Err(error.into());
             }
