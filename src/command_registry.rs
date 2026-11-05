@@ -31,11 +31,16 @@ pub struct RegisteredCommand {
 
 pub struct CommandRegistry {
     commands: Vec<RegisteredCommand>,
+    mode_annotations: std::collections::HashMap<
+        crate::mode::ModeId,
+        std::collections::HashMap<CommandId, Vec<String>>,
+    >,
 }
 
 impl Default for CommandRegistry {
     fn default() -> Self {
         Self {
+            mode_annotations: Default::default(),
             commands: COMMANDS
                 .iter()
                 .filter(|spec| spec.scope != Scope::ReadSession)
@@ -83,6 +88,36 @@ impl CommandRegistry {
             .iter()
             .find(|command| command.name == name)
             .map(|command| command.id)
+    }
+
+    pub fn commands_for(
+        &self,
+        mode: crate::mode::ModeId,
+    ) -> impl Iterator<Item = RegisteredCommand> + '_ {
+        self.commands
+            .iter()
+            .filter(move |entry| match entry.id {
+                CommandId::Native(command) => command.available_in(mode),
+                CommandId::Script(_) => true,
+            })
+            .map(move |entry| {
+                let mut entry = entry.clone();
+                if let Some(annotations) = self.mode_annotations.get(&mode) {
+                    entry.annotation = annotations
+                        .get(&entry.id)
+                        .map(|keys| keys.join(" / "))
+                        .unwrap_or_default();
+                }
+                entry
+            })
+    }
+
+    pub(crate) fn annotate_mode(
+        &mut self,
+        mode: crate::mode::ModeId,
+        annotations: std::collections::HashMap<CommandId, Vec<String>>,
+    ) {
+        self.mode_annotations.insert(mode, annotations);
     }
 
     pub fn commands(&self) -> &[RegisteredCommand] {

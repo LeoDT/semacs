@@ -15,6 +15,7 @@ pub(super) struct TextStyle<'a> {
     pub marked: Option<Range<usize>>,
     pub prompt_end: usize,
     annotations: Option<&'a crate::buffer::Annotations>,
+    named: &'a [(Range<crate::text::ByteOffset>, StyleRole)],
 }
 
 impl<'a> TextStyle<'a> {
@@ -31,6 +32,7 @@ impl<'a> TextStyle<'a> {
             marked,
             prompt_end,
             annotations: None,
+            named: &[],
         }
     }
 
@@ -39,6 +41,14 @@ impl<'a> TextStyle<'a> {
         annotations: Option<&'a crate::buffer::Annotations>,
     ) -> Self {
         self.annotations = annotations;
+        self
+    }
+
+    pub(super) fn with_named_ranges(
+        mut self,
+        named: &'a [(Range<crate::text::ByteOffset>, StyleRole)],
+    ) -> Self {
+        self.named = named;
         self
     }
 
@@ -98,6 +108,17 @@ impl<'a> TextStyle<'a> {
                     } else {
                         end = end.min(span.range.start.0 + delta);
                     }
+                }
+            }
+            let index = self
+                .named
+                .partition_point(|(range, _)| range.end.0 <= position);
+            if let Some((range, role)) = self.named.get(index) {
+                if range.start.0 <= position {
+                    attributes.merge(self.styles[*role as usize]);
+                    end = end.min(range.end.0);
+                } else {
+                    end = end.min(range.start.0);
                 }
             }
             if position < self.prompt_end {

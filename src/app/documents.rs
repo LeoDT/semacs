@@ -16,6 +16,7 @@ pub(super) struct Opening {
     origin: Entity<BufferView>,
     view: Entity<BufferView>,
     viewport: Option<InitialViewport>,
+    location: Option<(usize, usize)>,
 }
 
 impl AppShell {
@@ -76,7 +77,13 @@ impl AppShell {
                                 && other.identity() == buffer.identity())
                     });
                     if let Some(index) = existing {
+                        let location = opening.location;
                         shell.activate(index, window, cx);
+                        if let Some((line, column)) = location {
+                            shell.active_view().clone().update(cx, |view, cx| {
+                                view.show_line_column(line, column, window, cx)
+                            });
+                        }
                         return;
                     }
                     if !view.update(cx, |view, cx| {
@@ -108,6 +115,17 @@ impl AppShell {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.visit_file_at(path, origin, None, window, cx);
+    }
+
+    pub(super) fn visit_file_at(
+        &mut self,
+        path: PathBuf,
+        origin: &Entity<BufferView>,
+        location: Option<(usize, usize)>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         self.cancel_file_open();
         let existing = self
             .buffers
@@ -115,6 +133,11 @@ impl AppShell {
             .position(|slot| slot.buffer.path().as_deref() == Some(path.as_path()));
         if let Some(index) = existing {
             self.activate(index, window, cx);
+            if let Some((line, column)) = location {
+                self.active_view().clone().update(cx, |view, cx| {
+                    view.show_line_column(line, column, window, cx)
+                });
+            }
             return;
         }
         let origin = origin.clone();
@@ -129,7 +152,9 @@ impl AppShell {
                             loaded.file.format,
                             loaded.stamp,
                         )),
-                        Err(ReadError::Io(error)) if error.kind() == io::ErrorKind::NotFound => {
+                        Err(ReadError::Io(error))
+                            if error.kind() == io::ErrorKind::NotFound && location.is_none() =>
+                        {
                             Ok((crate::text::Rope::new(), Default::default(), None))
                         }
                         Err(error) => Err(format!("{}: {error}", load_path.display())),
@@ -156,12 +181,23 @@ impl AppShell {
                             });
                             if let Some(index) = existing {
                                 shell.activate(index, window, cx);
+                                if let Some((line, column)) = location {
+                                    shell.active_view().clone().update(cx, |view, cx| {
+                                        view.show_line_column(line, column, window, cx)
+                                    });
+                                }
                             } else {
                                 let view = cx.new(|cx| BufferView::new(buffer, cx));
+                                if let Some((line, column)) = location {
+                                    view.update(cx, |view, cx| {
+                                        view.show_line_column(line, column, window, cx)
+                                    });
+                                }
                                 shell.opening = Some(Opening {
                                     origin: origin.clone(),
                                     view,
                                     viewport: None,
+                                    location,
                                 });
                                 cx.notify();
                             }

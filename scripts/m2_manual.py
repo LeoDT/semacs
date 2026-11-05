@@ -6,6 +6,8 @@ import hashlib
 import json
 from pathlib import Path
 
+import magit_fixture
+
 OBSERVATIONS = (
     "keyboard-file-loop", "body-ime", "minibuffer-ime",
     "os-close-cancel", "os-close-clean",
@@ -440,6 +442,7 @@ INSTRUCTIONS = {
     "messages": MESSAGES_INSTRUCTIONS, "themes": THEMES_INSTRUCTIONS,
     "syntax": SYNTAX_INSTRUCTIONS, "languages": LANGUAGES_INSTRUCTIONS,
     "flicker": FLICKER_INSTRUCTIONS, "styles": STYLES_INSTRUCTIONS,
+    "magit": magit_fixture.INSTRUCTIONS,
 }
 
 PROFILES = {
@@ -451,6 +454,7 @@ PROFILES = {
     "languages": (LANGUAGES_SEEDS, LANGUAGES_EXPECTED, LANGUAGES_OBSERVATIONS),
     "flicker": (FLICKER_SEEDS, FLICKER_SEEDS, FLICKER_OBSERVATIONS),
     "styles": (STYLES_SEEDS, STYLES_EXPECTED, STYLES_OBSERVATIONS),
+    "magit": (magit_fixture.SEEDS, magit_fixture.SEEDS, magit_fixture.OBSERVATIONS),
 }
 
 
@@ -461,6 +465,8 @@ def prepare(directory, profile="m2"):
         path = directory / name
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(data)
+    if profile == "magit":
+        magit_fixture.prepare_repository(directory)
     (directory / "fixture.json").write_text(json.dumps({
         "purpose": "disposable manual Wayland acceptance; NOT performance data",
         "profile": profile,
@@ -497,7 +503,7 @@ def verify(directory, profile="m2"):
         "errors": errors, "evidence": "user-observed real desktop plus independent disk bytes",
         "performance": "unmeasured",
     }
-    if profile in ("messages", "themes", "syntax", "languages", "flicker", "styles"):
+    if profile in ("messages", "themes", "syntax", "languages", "flicker", "styles", "magit"):
         result.update(ime="unmeasured", ime_latency="unmeasured", gpu="unmeasured", screenshots=False)
     if profile == "languages":
         confirmed = all(observations.get(name) == "yes" for name in
@@ -507,6 +513,13 @@ def verify(directory, profile="m2"):
         confirmed = all(observations.get(name) == "yes" for name in
                         ("styles-rust-ime", "styles-markdown-ime-save"))
         result["ime"] = "user-confirmed styled Rust/Markdown body preedit/cancel/commit" if confirmed else "unconfirmed"
+    if profile == "magit":
+        try:
+            result["git_state"] = magit_fixture.verify_repository(directory)
+            errors.extend(f"Git fixture mismatch: {name}" for name, passed in result["git_state"].items() if not passed)
+        except (OSError, ValueError, KeyError, RuntimeError) as error:
+            errors.append(f"Git fixture check failed: {error}")
+        result["completed"] = not errors
     (directory / "result.json").write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n")
     if errors:
         raise RuntimeError("; ".join(errors))

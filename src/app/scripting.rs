@@ -43,6 +43,7 @@ impl AppShell {
         self.config_generation = loaded.configuration.generation;
         self.commands = loaded.configuration.commands;
         self.body_keymap = loaded.configuration.body_keymap;
+        self.mode_keymaps = loaded.configuration.mode_keymaps;
         self.script_host = Some(loaded.host);
         cx.set_global(loaded.configuration.font);
         loaded.configuration.theme.install(cx);

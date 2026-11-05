@@ -337,6 +337,9 @@ impl EditTarget {
             return Err(InputError::CompositionActive.into());
         }
         match dispatch {
+            Dispatch::Command(command) if !command.available_in(self.buffer.mode()) => {
+                Err(RouteError::Unavailable(command))
+            }
             Dispatch::Command(command) => match command.scope() {
                 Scope::Edit => self
                     .execute_with_viewport(token, command, viewport)
@@ -389,7 +392,7 @@ impl EditTarget {
         command: Command,
         viewport: Option<&dyn CommandViewport>,
     ) -> Result<CommandOutcome, RouteError> {
-        if command.scope() != Scope::Edit {
+        if command.scope() != Scope::Edit || !command.available_in(self.buffer.mode()) {
             return Err(RouteError::Unavailable(command));
         }
         self.input.guard_command(&self.buffer, token)?;
@@ -480,7 +483,11 @@ impl EditTarget {
                     .goal_column
                     .get_or_insert_with(|| motion::goal(text, point));
                 let row = text.offset_to_point(point.0).row;
-                let destination = if command == Command::NextLine {
+                let destination = if let Some(sections) = self.buffer.sections() {
+                    sections
+                        .adjacent_line(point, command == Command::NextLine)
+                        .map(|offset| text.offset_to_point(offset.0).row)
+                } else if command == Command::NextLine {
                     (row < text.max_point().row).then_some(row + 1)
                 } else {
                     row.checked_sub(1)

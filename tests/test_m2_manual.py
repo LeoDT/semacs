@@ -3,11 +3,14 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
+import sys
 
 ROOT = Path(__file__).resolve().parent.parent
 SPEC = importlib.util.spec_from_file_location("m2_manual", ROOT / "scripts/m2_manual.py")
 manual = importlib.util.module_from_spec(SPEC)
-SPEC.loader.exec_module(manual)
+with patch.object(sys, "path", [str(ROOT / "scripts"), *sys.path]):
+    SPEC.loader.exec_module(manual)
 
 
 class ManualFixtureTests(unittest.TestCase):

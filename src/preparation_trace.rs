@@ -1,4 +1,4 @@
-//! Opt-in, bounded CPU wall-clock tracing for the single-open diagnostic.
+//! Opt-in, bounded CPU wall-clock tracing for preparation diagnostics.
 
 use std::cell::RefCell;
 use std::marker::PhantomData;

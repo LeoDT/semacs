@@ -23,6 +23,8 @@ pub struct Typography {
     marked: Option<Range<usize>>,
     roles: [(Option<bool>, Option<bool>); StyleRole::COUNT],
     overlays: Arc<[FontSpan]>,
+    named: Arc<[(Range<crate::text::ByteOffset>, StyleRole)]>,
+    named_roles: [FontEmphasis; StyleRole::COUNT],
 }
 
 impl std::fmt::Debug for Typography {
@@ -42,6 +44,8 @@ impl PartialEq for Typography {
             && self.prompt == other.prompt
             && self.prompt_end == other.prompt_end
             && self.roles == other.roles
+            && self.named_roles == other.named_roles
+            && (Arc::ptr_eq(&self.named, &other.named) || self.named == other.named)
             && self.marked == other.marked
             && match (&self.syntax, &other.syntax) {
                 (None, None) => true,
@@ -97,7 +101,22 @@ impl Typography {
             syntax,
             roles,
             overlays,
+            named: Arc::from([]),
+            named_roles: [FontEmphasis::default(); StyleRole::COUNT],
         }
+    }
+
+    pub(crate) fn with_named_ranges(
+        mut self,
+        named: Arc<[(Range<crate::text::ByteOffset>, StyleRole)]>,
+        theme: &ThemeSettings,
+    ) -> Self {
+        if !named.is_empty() {
+            self.named_roles =
+                StyleRole::ALL.map(|role| theme.attributes(role).emphasis(FontEmphasis::default()));
+            self.named = named;
+        }
+        self
     }
 
     pub(crate) fn compatible_after_edit(&self, other: &Self) -> bool {
@@ -107,6 +126,8 @@ impl Typography {
             && self.roles == other.roles
             && self.overlays.is_empty()
             && other.overlays.is_empty()
+            && self.named.is_empty()
+            && other.named.is_empty()
             && match (&self.syntax, &other.syntax) {
                 (None, None) => true,
                 (Some(a), Some(b)) => a.shares_source(b),
@@ -121,6 +142,7 @@ impl Typography {
     pub(crate) fn is_uniform(&self) -> bool {
         self.syntax.is_none()
             && self.overlays.is_empty()
+            && self.named.is_empty()
             && (self.prompt_end == 0 || self.prompt == self.base)
     }
 
@@ -168,6 +190,20 @@ impl Typography {
             emphasis = FontEmphasis {
                 bold: span.bold.or(emphasis.bold),
                 italic: span.italic.or(emphasis.italic),
+            };
+        }
+        let index = self
+            .named
+            .partition_point(|(range, _)| range.end.0 <= committed);
+        if let Some((_, role)) = self
+            .named
+            .get(index)
+            .filter(|(range, _)| range.contains(&crate::text::ByteOffset(committed)))
+        {
+            let named = self.named_roles[*role as usize];
+            emphasis = FontEmphasis {
+                bold: named.bold.or(emphasis.bold),
+                italic: named.italic.or(emphasis.italic),
             };
         }
         emphasis

@@ -15,6 +15,7 @@ mod annotation_tests;
 mod annotations;
 pub(crate) use annotations::Annotations;
 pub use annotations::{LineBackground, StyledRange};
+mod diff;
 mod history;
 mod selection;
 pub(crate) use history::EditGroup;
@@ -105,6 +106,7 @@ struct Document {
     mark: TrackedMark,
     read_only: bool,
     message_log: bool,
+    mode: crate::mode::ModeId,
     read_only_prefix: ByteOffset,
     path: Option<PathBuf>,
     identity: Option<FileIdentity>,
@@ -116,6 +118,9 @@ struct Document {
     history: history::History,
     syntax: crate::syntax::Syntax,
     annotations: Option<std::sync::Arc<Annotations>>,
+    sections: Option<std::sync::Arc<crate::section::Sections>>,
+    named_styles: std::sync::Arc<[(Range<ByteOffset>, crate::theme::StyleRole)]>,
+    diff: Option<diff::DiffSession>,
 }
 
 impl Document {
@@ -183,12 +188,16 @@ impl Buffer {
             snapshot,
             syntax,
             annotations: None,
+            sections: None,
+            named_styles: std::sync::Arc::from([]),
+            diff: None,
             revision: 0,
             last_edit: None,
             points,
             mark: TrackedMark::default(),
             read_only: false,
             message_log: false,
+            mode: crate::mode::ModeId::default(),
             read_only_prefix: ByteOffset(0),
             path,
             identity: None,
@@ -253,6 +262,26 @@ impl Buffer {
             doc.read_only = true;
         }
         buffer
+    }
+
+    pub fn sections(&self) -> Option<std::sync::Arc<crate::section::Sections>> {
+        self.document.borrow().sections.clone()
+    }
+
+    pub(crate) fn named_styles(
+        &self,
+    ) -> std::sync::Arc<[(Range<ByteOffset>, crate::theme::StyleRole)]> {
+        self.document.borrow().named_styles.clone()
+    }
+
+    pub fn mode(&self) -> crate::mode::ModeId {
+        self.document.borrow().mode
+    }
+
+    pub(crate) fn set_mode(&mut self, mode: crate::mode::ModeId) {
+        let mut doc = self.document.borrow_mut();
+        doc.mode = mode;
+        doc.touch();
     }
 
     pub fn is_message_log(&self) -> bool {
@@ -358,7 +387,7 @@ impl Buffer {
         }
     }
     pub fn text(&self) -> Rope {
-        self.document.borrow_mut().snapshot.text.clone()
+        self.document.borrow().snapshot.text.clone()
     }
     pub fn point(&self) -> ByteOffset {
         ByteOffset(self.point.get())
@@ -367,6 +396,9 @@ impl Buffer {
         if !self.text().is_char_boundary(point.0) {
             return Err(EditError::InvalidRange);
         }
+        let point = self.sections().map_or(point, |sections| {
+            sections.motion_point(point, point >= self.point())
+        });
         self.point.set(point.0);
         Ok(())
     }

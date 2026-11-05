@@ -20,6 +20,7 @@ mod appearance;
 mod buffer_commands;
 mod candidates;
 mod closing;
+mod diff;
 mod documents;
 mod messages;
 mod reads;
@@ -56,12 +57,14 @@ pub struct AppShell {
     body_panes: HashMap<u64, windows::BodyPane>,
     next_pane: u64,
     body_keymap: Keymap,
+    mode_keymaps: HashMap<crate::mode::ModeId, Keymap>,
     commands: CommandRegistry,
     script_host: Option<crate::scripting::ScriptHost>,
     config_generation: u64,
     config_path: Option<PathBuf>,
     reload_task: Option<Task<()>>,
     script_task: Option<Task<()>>,
+    git_task: Option<diff::GitWork>,
     startup_directory: PathBuf,
     minibuffer: Option<MinibufferMount>,
     session: Option<ReadSession>,
@@ -107,6 +110,7 @@ impl AppShell {
                 .unwrap_or(true)
         });
         view.update(cx, |view, cx| view.restore_input(window, cx));
+        let configuration = crate::scripting::Configuration::default();
         Self {
             buffers: BufferSet::new(BufferSlot::new(registry_buffer)),
             messages: crate::messages::Messages::default(),
@@ -114,13 +118,15 @@ impl AppShell {
             panes: crate::panes::Panes::new(0),
             body_panes: HashMap::from([(0, pane)]),
             next_pane: 1,
-            body_keymap: Keymap::for_body(),
-            commands: CommandRegistry::default(),
+            body_keymap: configuration.body_keymap,
+            mode_keymaps: configuration.mode_keymaps,
+            commands: configuration.commands,
             script_host: None,
             config_generation: 0,
             config_path: None,
             reload_task: None,
             script_task: None,
+            git_task: None,
             startup_directory: std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
             minibuffer: None,
             session: None,
@@ -186,6 +192,16 @@ impl AppShell {
             .is_some_and(|session| session.kind().is_single_key());
         let layers = if single_key {
             KeyLayers::Exclusive(outer.unwrap())
+        } else if self.session.is_none()
+            && self
+                .minibuffer
+                .as_ref()
+                .is_none_or(|mount| !mount.view.focus_handle(cx).is_focused(window))
+        {
+            KeyLayers::Body {
+                local: &self.mode_keymaps[&view.read(cx).buffer().mode()],
+                global: &self.body_keymap,
+            }
         } else {
             KeyLayers::Edit(outer)
         };
@@ -235,6 +251,17 @@ impl AppShell {
             Command::ExecuteExtendedCommand => {
                 self.begin_read(ReadKind::Command, origin, "", window, cx);
             }
+            Command::MagitDiffStaged
+            | Command::MagitDiffUnstaged
+            | Command::SectionToggle
+            | Command::SectionForward
+            | Command::SectionBackward
+            | Command::SectionUp
+            | Command::MagitDiffJump
+            | Command::MagitRefresh
+            | Command::MagitDiffVisit
+            | Command::ScrollLeft
+            | Command::ScrollRight => self.diff_command(command, origin, window, cx),
             Command::ViewEchoAreaMessages => self.view_messages(window, cx),
             Command::ReloadConfiguration => self.reload_configuration(origin, window, cx),
             Command::LoadTheme => {
@@ -297,6 +324,14 @@ impl AppShell {
                 return;
             }
         };
+        if !command.available_in(target.read(cx).buffer().mode()) {
+            self.show_message(
+                target,
+                format!("{} is unavailable in this mode", command.name()),
+                cx,
+            );
+            return;
+        }
         match command.scope() {
             Scope::Edit => target.update(cx, |view, cx| view.execute_command(command, window, cx)),
             Scope::Application => self.execute_application(command, target, window, cx),

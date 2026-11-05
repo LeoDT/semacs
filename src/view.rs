@@ -32,6 +32,7 @@ mod feedback;
 pub(crate) use feedback::Feedback;
 mod initial;
 mod motion;
+mod sections;
 
 pub(crate) use initial::InitialViewport;
 
@@ -52,6 +53,10 @@ fn visible_row_count(height: Pixels, line_height: Pixels) -> usize {
 
 pub(crate) enum KeyLayers<'a> {
     Edit(Option<&'a Keymap>),
+    Body {
+        local: &'a Keymap,
+        global: &'a Keymap,
+    },
     Exclusive(&'a Keymap),
 }
 
@@ -405,6 +410,7 @@ impl BufferView {
                 wrap_width: px(1.),
                 tab_size: TAB_WIDTH,
                 typography: Default::default(),
+                visible_lines: None,
             },
             metrics: None,
             index: None,
@@ -475,6 +481,11 @@ impl BufferView {
             self.invalidate_input_registration();
             self.input_geometry = None;
         }
+        self.settings.visible_lines = self
+            .buffer()
+            .sections()
+            .map(|sections| sections.visible_lines());
+        self.geometry = None;
         self.observed_snapshot = self.buffer().snapshot();
         self.observed_revision = revision;
         cx.notify();
@@ -831,8 +842,13 @@ impl BufferView {
 
     fn typography(&self, cx: &App) -> crate::display::Typography {
         let snapshot = self.display_snapshot();
+        let theme = ThemeSettings::global(cx);
+        let fonts = self
+            .buffer()
+            .annotations()
+            .map_or_else(|| Arc::from([]), |annotations| annotations.fonts.clone());
         crate::display::Typography::new(
-            ThemeSettings::global(cx),
+            theme,
             self.buffer().syntax_display(),
             snapshot
                 .marked_range()
@@ -842,16 +858,19 @@ impl BufferView {
             } else {
                 0
             },
-            self.buffer()
-                .annotations()
-                .map_or_else(|| Arc::from([]), |annotations| annotations.fonts.clone()),
+            fonts,
         )
+        .with_named_ranges(self.buffer().named_styles(), theme)
     }
 
     fn ensure_index(&mut self, bounds: Bounds<Pixels>, cx: &mut Context<Self>) {
         #[cfg(feature = "native-profiler")]
         let _trace = crate::preparation_trace::Span::new("ensure-index", 0);
         self.settings.wrap_width = bounds.size.width.max(px(1.));
+        self.settings.visible_lines = self
+            .buffer()
+            .sections()
+            .map(|sections| sections.visible_lines());
         let snapshot = self.display_snapshot();
         let typography = self.typography(cx);
         if typography != self.settings.typography
@@ -991,6 +1010,7 @@ impl BufferView {
             self.pending_recenter = None;
             self.reveal_caret = false;
         }
+        let reveal_horizontal = self.reveal_caret;
         if self.reveal_caret
             && let Some(row) = index.row_for_offset(self.display_snapshot().selected_range().end)
         {
@@ -1000,7 +1020,7 @@ impl BufferView {
                 .y
                 .min(top)
                 .max((top + self.settings.line_height - bounds.size.height).max(px(0.)));
-            self.reveal_caret = false;
+            self.reveal_caret = self.settings.visible_lines.is_some();
         }
         if index.is_complete() {
             let last_row = self.settings.line_height * index.row_count().saturating_sub(1) as f32;
@@ -1090,6 +1110,22 @@ impl BufferView {
                     cancelled,
                     _task: task,
                 });
+            }
+        }
+        if self.settings.visible_lines.is_some() && reveal_horizontal {
+            let caret = self.buffer().point();
+            if let Some(row) = rows.iter().find_map(|row| {
+                self.cache
+                    .get(&row.index)
+                    .filter(|row| row.x_for_offset(caret).is_some())
+            }) {
+                let x = row.x_for_offset(caret).unwrap();
+                self.scroll.x = self
+                    .scroll
+                    .x
+                    .min(x)
+                    .max((x + row.space_width - bounds.size.width).max(px(0.)));
+                self.reveal_caret = false;
             }
         }
         self.geometry = Some(ViewportLayout {
@@ -1218,6 +1254,15 @@ impl BufferView {
         let before_point = self.target.buffer().point();
         let token = self.target.token();
         let result = match layers {
+            KeyLayers::Body { local, global } => self.target.dispatch_keystroke(
+                token,
+                stroke,
+                prefer_character_input,
+                &[local, global, &self.keymap],
+                viewport
+                    .as_ref()
+                    .map(|viewport| viewport as &dyn CommandViewport),
+            ),
             KeyLayers::Edit(Some(outer)) => self.target.dispatch_keystroke(
                 token,
                 stroke,
@@ -1512,13 +1557,33 @@ impl Element for TextCanvas {
                 view.buffer().text(),
             )
         };
+        let (named_styles, current_section, collapsed_headings) = {
+            let view = self.view.read(cx);
+            let sections = view.buffer().sections();
+            let current = sections.as_ref().and_then(|sections| {
+                let index = sections.current(view.buffer().point());
+                (index != 0).then(|| sections.nodes()[index].range.clone())
+            });
+            let headings: Vec<_> = sections
+                .iter()
+                .flat_map(|sections| {
+                    sections
+                        .nodes()
+                        .iter()
+                        .filter(|node| node.collapsed)
+                        .map(|node| node.range.start)
+                })
+                .collect();
+            (view.buffer().named_styles(), current, headings)
+        };
         let style = decoration::TextStyle::new(
             ThemeSettings::global(cx),
             syntax.as_ref().map(|syntax| &***syntax),
             marked.as_ref().map(|range| range.start.0..range.end.0),
             prompt_end.0,
         )
-        .with_annotations(annotations.as_deref());
+        .with_annotations(annotations.as_deref())
+        .with_named_ranges(&named_styles);
         let cursor_colors = ThemeSettings::global(cx).style(StyleRole::Cursor);
         window.with_content_mask(
             Some(ContentMask {
@@ -1532,8 +1597,36 @@ impl Element for TextCanvas {
                         window.paint_quad(fill(bounds, color));
                     }
                 }
+                if let Some(section) = &current_section {
+                    for row in layout
+                        .rows
+                        .iter()
+                        .filter(|row| section.contains(&row.source.start))
+                    {
+                        window.paint_quad(fill(
+                            Bounds::new(
+                                point(layout.bounds.left(), layout.origin(row).y),
+                                size(layout.bounds.size.width, layout.key.settings.line_height),
+                            ),
+                            ThemeSettings::global(cx)
+                                .style(StyleRole::SectionCurrent)
+                                .background,
+                        ));
+                    }
+                }
                 for row in &layout.rows {
                     let origin = layout.origin(row);
+                    if collapsed_headings.contains(&row.source.start) {
+                        window.paint_quad(fill(
+                            Bounds::new(
+                                point(layout.bounds.left(), origin.y),
+                                size(px(3.), layout.key.settings.line_height),
+                            ),
+                            ThemeSettings::global(cx)
+                                .style(StyleRole::DiffHunk)
+                                .foreground,
+                        ));
+                    }
                     for part in &row.parts {
                         part.paint_background(
                             point(origin.x + part.x, origin.y),
@@ -1630,6 +1723,8 @@ mod motion_tests;
 mod region_tests;
 #[cfg(test)]
 mod routing_tests;
+#[cfg(test)]
+mod section_tests;
 #[cfg(test)]
 mod split_tests;
 #[cfg(test)]

@@ -124,6 +124,7 @@ struct Node {
 #[derive(Default)]
 pub struct Keymap {
     root: Node,
+    labels: HashMap<Vec<Key>, String>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -146,7 +147,10 @@ impl Keymap {
         sequence: &[Key],
         command: impl Into<CommandId>,
     ) -> Result<(), BindError> {
-        self.insert(sequence, Binding::Command(command.into()))
+        self.insert(sequence, Binding::Command(command.into()))?;
+        self.labels
+            .insert(Self::canonical_sequence(sequence), label(sequence));
+        Ok(())
     }
 
     pub fn define_prefix(&mut self, sequence: &[Key]) -> Result<(), BindError> {
@@ -213,13 +217,56 @@ impl Keymap {
 
     pub fn for_body() -> Self {
         let mut map = Self::for_scope(Scope::Application);
-        for spec in COMMANDS.iter().filter(|spec| spec.scope == Scope::Edit) {
+        for spec in COMMANDS
+            .iter()
+            .filter(|spec| spec.scope == Scope::Edit && spec.mode.is_none())
+        {
             for binding in spec.bindings {
                 map.bind(&parse_sequence(binding.keys).unwrap(), spec.command)
                     .unwrap();
+                map.labels.insert(
+                    Self::canonical_sequence(&parse_sequence(binding.keys).unwrap()),
+                    binding.reference.to_owned(),
+                );
             }
         }
         map
+    }
+
+    pub(crate) fn annotations(layers: &[&Self]) -> HashMap<CommandId, Vec<String>> {
+        fn sequences(node: &Node, prefix: &mut Vec<Key>, output: &mut Vec<Vec<Key>>) {
+            for (key, child) in &node.children {
+                prefix.push(key.clone());
+                if matches!(child.binding, Binding::Command(_)) {
+                    output.push(prefix.clone());
+                }
+                sequences(child, prefix, output);
+                prefix.pop();
+            }
+        }
+        let mut keys = Vec::new();
+        for layer in layers {
+            sequences(&layer.root, &mut Vec::new(), &mut keys);
+        }
+        let mut annotations: HashMap<CommandId, Vec<String>> = HashMap::new();
+        for keys in keys {
+            let command = match lookup(layers, &keys) {
+                Lookup::Command(command) => command.into(),
+                Lookup::Script(command) => CommandId::Script(command),
+                _ => continue,
+            };
+            let display = layers
+                .iter()
+                .find_map(|map| map.labels.get(&keys))
+                .cloned()
+                .unwrap_or_else(|| label(&keys));
+            annotations.entry(command).or_default().push(display);
+        }
+        for labels in annotations.values_mut() {
+            labels.sort();
+            labels.dedup();
+        }
+        annotations
     }
 
     fn canonical_sequence(sequence: &[Key]) -> Vec<Key> {
@@ -234,13 +281,20 @@ impl Keymap {
             map.define_prefix(&parse_sequence(prefix).expect("valid default prefix"))
                 .expect("nonconflicting default prefix");
         }
-        for spec in COMMANDS.iter().filter(|spec| spec.scope == scope) {
+        for spec in COMMANDS
+            .iter()
+            .filter(|spec| spec.scope == scope && spec.mode.is_none())
+        {
             for binding in spec.bindings {
                 map.bind(
                     &parse_sequence(binding.keys).expect("valid default binding"),
                     spec.command,
                 )
                 .expect("nonconflicting default binding");
+                map.labels.insert(
+                    Self::canonical_sequence(&parse_sequence(binding.keys).unwrap()),
+                    binding.reference.to_owned(),
+                );
             }
         }
         map

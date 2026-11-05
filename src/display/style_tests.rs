@@ -14,7 +14,64 @@ fn settings() -> LayoutSettings {
         wrap_width: px(90.),
         tab_size: 8,
         typography: Typography::default(),
+        visible_lines: None,
     }
+}
+
+#[test]
+fn projected_logical_rows_handle_unicode_eof_and_hidden_offsets_without_soft_wrapping() {
+    let buffer = Buffer::new(
+        None,
+        DecodedFile {
+            text: "head\nhidden\n中🙂".into(),
+            format: FileFormat::default(),
+        },
+    );
+    let snapshot = InputSession::new(&buffer)
+        .display_snapshot(&buffer)
+        .unwrap();
+    let mut settings = settings();
+    settings.visible_lines = Some(Arc::from([
+        ByteOffset(0)..ByteOffset(5),
+        ByteOffset(12)..ByteOffset(19),
+    ]));
+    let system = Arc::new(TextSystem::new(Arc::new(
+        crate::test_support::StyledTextSystem::default(),
+    )));
+    let mut metrics = FontMeasure::new(system, settings.clone());
+    let index = WrapJob::new(snapshot, settings, None, None)
+        .finish(&mut metrics, &AtomicBool::new(false))
+        .unwrap();
+    assert_eq!(index.row_count(), 2);
+    assert_eq!(index.row(1).unwrap().row.content_len, 7);
+    assert!(index.row_for_offset(ByteOffset(8)).is_none());
+    assert_eq!(index.row_for_offset(ByteOffset(19)).unwrap().index, 1);
+}
+
+#[test]
+fn named_range_fonts_follow_theme_without_recreating_the_range_table() {
+    let mut theme = ThemeSettings::default();
+    let named = Arc::from([(ByteOffset(0)..ByteOffset(4), StyleRole::DiffHunk)]);
+    let make = |theme: &ThemeSettings| {
+        Typography::new(theme, None, None, 0, Arc::from([]))
+            .with_named_ranges(Arc::clone(&named), theme)
+    };
+    let first = make(&theme);
+    assert_eq!(first.font_at(0).bold, Some(true));
+    theme.set_style(
+        StyleRole::DiffHunk,
+        StyleOverride::new(StyleRole::DiffHunk, Some("#123456"), None).unwrap(),
+    );
+    assert_eq!(first, make(&theme));
+    theme.set_style(
+        StyleRole::DiffHunk,
+        StyleOverride::default()
+            .with_text_attributes(StyleRole::DiffHunk, Some("normal"), None, None, None)
+            .unwrap(),
+    );
+    let changed = make(&theme);
+    assert_ne!(first, changed);
+    assert_eq!(changed.font_at(0).bold, Some(false));
 }
 
 #[test]

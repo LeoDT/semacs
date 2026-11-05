@@ -35,13 +35,17 @@
                 throw new TypeError("registerCommand expects a name and a function");
             commands.push({name, run});
         },
-        bindKey(keys, command) {
+        bindKey(keys, command, options) {
             check();
             if (bindings.length >= 1024) throw new Error("At most 1024 custom key bindings are allowed");
             if (typeof keys !== "string" || keys.length > 256 ||
                 (command !== null && (typeof command !== "string" || command.length > 128)))
                 throw new TypeError("bindKey expects a key sequence and a command name or null");
-            bindings.push({keys, command});
+            if (options !== undefined && (!object(options) ||
+                Object.keys(options).some(key => key !== "mode") ||
+                typeof options.mode !== "string" || options.mode.length > 64))
+                throw new TypeError("bindKey options must be {mode: string}");
+            bindings.push({keys, command, mode: options === undefined ? null : options.mode});
         },
         defineTheme(name, definition) {
             check();
@@ -49,7 +53,7 @@
             if (typeof name !== "string" || name.length > 64 || !object(definition) ||
                 Object.keys(definition).some(key => key !== "appearance" && key !== "styles") ||
                 (definition.appearance !== "light" && definition.appearance !== "dark") ||
-                !object(definition.styles) || Object.keys(definition.styles).length > 25)
+                !object(definition.styles) || Object.keys(definition.styles).length > 30)
                 throw new TypeError("defineTheme expects a name and {appearance, styles}");
             themes.push({name, appearance: definition.appearance,
                 styles: Object.entries(definition.styles).map(([name, value]) => copyStyle(name, value))});

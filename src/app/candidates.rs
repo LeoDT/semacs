@@ -128,8 +128,7 @@ impl AppShell {
                     .collect(),
                 ReadKind::Command => self
                     .commands
-                    .commands()
-                    .iter()
+                    .commands_for(origin.read(cx).buffer().mode())
                     .map(|command| {
                         Candidate::named(command.name.clone(), command.annotation.clone())
                     })

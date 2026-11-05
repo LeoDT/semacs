@@ -15,6 +15,10 @@ native-profiler = ["gpui-kit/profiler"]
 name = "perf_native"
 required-features = ["native-profiler"]
 
+[[example]]
+name = "perf_diff"
+required-features = ["native-profiler"]
+
 [dependencies]
 gpui-kit = "0.8.1"
 futures-channel = "0.3"

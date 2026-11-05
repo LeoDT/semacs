@@ -8,6 +8,8 @@ use crate::appearance::FontSettings;
 use crate::command_registry::{CommandRegistry, ScriptCommand};
 use crate::keymap::Keymap;
 
+#[cfg(test)]
+mod mode_tests;
 mod runtime;
 #[cfg(test)]
 mod tests;
@@ -25,16 +27,29 @@ pub struct Configuration {
     pub generation: u64,
     pub commands: CommandRegistry,
     pub body_keymap: Keymap,
+    pub mode_keymaps: std::collections::HashMap<crate::mode::ModeId, Keymap>,
     pub font: FontSettings,
     pub theme: crate::theme::ThemeSettings,
 }
 
 impl Default for Configuration {
     fn default() -> Self {
+        let mut commands = CommandRegistry::default();
+        let body_keymap = Keymap::for_body();
+        let mode_keymaps = crate::mode::MODES
+            .iter()
+            .map(|mode| {
+                let map = Keymap::configured_mode(&mut commands, Vec::new(), *mode)
+                    .expect("valid mode defaults");
+                commands.annotate_mode(*mode, Keymap::annotations(&[&map, &body_keymap]));
+                (*mode, map)
+            })
+            .collect();
         Self {
             generation: 0,
-            commands: CommandRegistry::default(),
-            body_keymap: Keymap::for_body(),
+            commands,
+            body_keymap,
+            mode_keymaps,
             font: FontSettings::default(),
             theme: crate::theme::ThemeSettings::default(),
         }

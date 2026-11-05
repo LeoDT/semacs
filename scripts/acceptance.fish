@@ -8,8 +8,8 @@ function fail
     exit 1
 end
 
-if test (count $argv) -ne 3; or not contains -- $argv[1] perf display-perf split-perf ime split-ime manual candidates scripting messages themes syntax languages flicker styles styles-perf syntax-perf open-diagnostic; or test "$argv[3]" != --consent
-    echo "Usage: fish scripts/acceptance.fish <perf|display-perf|split-perf|ime|split-ime|manual|candidates|scripting|messages|themes|syntax|languages|flicker|styles|styles-perf|syntax-perf|open-diagnostic> NEW_OUTPUT_DIRECTORY --consent" >&2
+if test (count $argv) -ne 3; or not contains -- $argv[1] perf display-perf split-perf ime split-ime manual candidates scripting messages themes syntax languages flicker styles magit diff-perf diff-diagnostic styles-perf syntax-perf open-diagnostic; or test "$argv[3]" != --consent
+    echo "Usage: fish scripts/acceptance.fish <perf|display-perf|split-perf|ime|split-ime|manual|candidates|scripting|messages|themes|syntax|languages|flicker|styles|magit|diff-perf|diff-diagnostic|styles-perf|syntax-perf|open-diagnostic> NEW_OUTPUT_DIRECTORY --consent" >&2
     exit 2
 end
 set -l mode $argv[1]
@@ -18,7 +18,7 @@ cd "$root"; or fail "cannot enter repository"
 set -l output (path resolve "$argv[2]")
 test -n "$WAYLAND_DISPLAY"; or fail "run from the actual Wayland host terminal"
 test -d /dev/dri; or fail "no /dev/dri; hardware acceptance cannot run here"
-for binary in cargo python3 fc-match sha256sum
+for binary in cargo python3 fc-match sha256sum git
     command -q $binary; or fail "missing $binary"
 end
 if test "$mode" = ime
@@ -47,8 +47,10 @@ for file in $untracked
     test $status -le 1; or fail "cannot capture untracked source: $file"
 end
 echo "Output: $output"
-echo "Build logs are saved; any failure stops the batch without retries."
-if contains -- "$mode" candidates scripting messages themes syntax languages flicker styles
+echo "Build logs are saved; hard failures stop without retries; explicit diagnostics record budget failures and continue."
+if contains -- "$mode" diff-perf diff-diagnostic
+    echo "The diff driver archives and builds its actual probe in the new diff subdirectory."
+else if contains -- "$mode" candidates scripting messages themes syntax languages flicker styles magit
     cargo build --release --bin semacs --target-dir "$root/target" > "$output/build.log" 2>&1
 else if test "$mode" = split-ime
     cargo build --release --bin semacs --example native_split_ime --target-dir "$root/target" > "$output/build.log" 2>&1
@@ -56,8 +58,10 @@ else
     cargo build --release --bin semacs --example perf_native --features native-profiler --target-dir "$root/target" > "$output/build.log" 2>&1
 end
 or fail "build failed; see $output/build.log"
-sha256sum "$root/target/release/semacs" > "$output/binary.sha256"
-or fail "cannot capture binary identity"
+if not contains -- "$mode" diff-perf diff-diagnostic
+    sha256sum "$root/target/release/semacs" > "$output/binary.sha256"
+    or fail "cannot capture binary identity"
+end
 
 if test "$mode" = open-diagnostic
     echo "Diagnostic only: one mixed-file open. No other shapes, editing or OS key injection."
@@ -67,6 +71,19 @@ if test "$mode" = open-diagnostic
     or fail "fixture generation failed"
     python3 -B scripts/perf_native.py "$output/sample.txt" "$output/open-diagnostic" --consent --m2-open-diagnostic --sample mixed --runs 1
     or fail "single-open diagnostic stopped; keep CSV / frames.csv / views.csv / preparation.csv / diagnostic.json and report this directory"
+else if test "$mode" = diff-diagnostic
+    echo "F1 complete diff diagnostic: ~256 KiB patch, staged/unstaged, three sequential windows with internal right split."
+    echo "Budget failures, including setup/draw/scroll/idle, are recorded; all remaining actions/windows continue."
+    echo "NOT acceptance. Correctness/identity errors, exceptions and safety timeouts still stop without retries."
+    echo "No OS key injection, IME changes or screenshots. Do not type in, resize or close probes."
+    python3 -B scripts/perf_diff.py "$output/diff" --native --diagnostic --consent
+    or fail "diff diagnostic stopped on a hard failure; keep the whole directory, do not rerun"
+else if test "$mode" = diff-perf
+    echo "F1 diff: ~256 KiB patch, staged/unstaged, three sequential windows with internal right split."
+    echo "Diff timings are baselines; existing CPU draw/scroll/idle checks retained."
+    echo "No OS key injection, IME changes or screenshots. Do not type in, resize or close probes."
+    python3 -B scripts/perf_diff.py "$output/diff" --native --consent
+    or fail "diff performance stopped; keep and report this directory, do not rerun"
 else if test "$mode" = split-perf
     echo "Shared-buffer dual-view performance: right/below × mixed/single-ascii × 3."
     echo "Selected-view budgets retained; all-view ready is a separate baseline with no new threshold."
@@ -170,7 +187,7 @@ else if test "$mode" = scripting
     echo "Any failure stops the batch and terminates only the child test app; all artifacts are kept."
     python3 -B scripts/scripting_manual.py "$output/scripting" --binary "$root/target/release/semacs" --consent
     or fail "scripting smoke stopped; keep and report $output, do not rerun"
-else if contains -- "$mode" themes syntax languages flicker styles
+else if contains -- "$mode" themes syntax languages flicker styles magit
     begin
         uname -a
         rustc --version
@@ -178,6 +195,9 @@ else if contains -- "$mode" themes syntax languages flicker styles
         fc-match monospace
         fc-match monospace:style=Bold
         fc-match monospace:style=Italic
+        if test "$mode" = magit
+            git --version
+        end
     end > "$output/environment.txt" 2>&1
     set -l body body.txt
     set -l checks theme-start-split theme-switch theme-cancel-unknown theme-minibuffer-messages theme-editing
@@ -193,6 +213,9 @@ else if contains -- "$mode" themes syntax languages flicker styles
     else if test "$mode" = styles
         set body body.rs
         set checks styles-fonts styles-layout-theme styles-rust-ime styles-markdown-ime-save
+    else if test "$mode" = magit
+        set body 00-main.txt
+        set checks magit-display-navigation magit-shared-refresh magit-horizontal magit-version-visits
     end
     python3 -B scripts/m2_manual.py prepare "$output/files" --profile "$mode"
     or fail "theme/syntax fixture generation failed"
@@ -204,8 +227,12 @@ else if contains -- "$mode" themes syntax languages flicker styles
         echo "No screenshots, OS key injection, IME changes or performance measurements."
     end
     echo "Follow the "(count $checks)" printed groups; stop on a problem, close the window and answer no."
-    env XDG_CONFIG_HOME="$output/files/config" "$root/target/release/semacs" "$output/files/$body" > "$output/$mode.stdout.log" 2> "$output/$mode.stderr.log"
-    or fail "theme/syntax session exited abnormally; keep this output directory"
+    if test "$mode" = magit
+        python3 -B scripts/magit_fixture.py "$output/files" --binary "$root/target/release/semacs" --consent > "$output/$mode.stdout.log" 2> "$output/$mode.stderr.log"
+    else
+        env XDG_CONFIG_HOME="$output/files/config" "$root/target/release/semacs" "$output/files/$body" > "$output/$mode.stdout.log" 2> "$output/$mode.stderr.log"
+    end
+    or fail "manual session exited abnormally; keep this output directory"
     for item in $checks
         read -l -P "$item: all corresponding observations passed? Type yes or no: " answer
         or set answer no
@@ -221,7 +248,9 @@ else if contains -- "$mode" themes syntax languages flicker styles
     printf '%s\n' "$geometry" >> "$output/notes.txt"
     python3 -B scripts/m2_manual.py verify "$output/files" --profile "$mode" > "$output/verification.log" 2>&1
     or fail "theme/syntax observations or independent disk/config bytes failed; see $output/verification.log"
-    if test "$mode" = styles
+    if test "$mode" = magit
+        echo "F1 user observations and independent worktree/config/HEAD/index bytes verified; performance/IME/GPU remain unmeasured."
+    else if test "$mode" = styles
         echo "E3 user-observed font/IME behavior and independent disk/config bytes verified; native performance/IME latency/GPU remain unmeasured."
     else if test "$mode" = languages
         echo "E2 user-observed body IME and independent disk/config bytes verified; native performance/IME latency/GPU remain unmeasured."

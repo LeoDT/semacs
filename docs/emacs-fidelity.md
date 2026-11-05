@@ -273,3 +273,26 @@
 - **文本变换**：只读取发起 view 的非空活动 region，JS 接收字符串并同步返回字符串；没有 region 时报错，不自动处理整个 buffer。JS 在专用 worker 执行，等待结果时原生编辑仍可使用；不支持 Promise / 异步脚本命令。成功结果通过唯一 Edit / 历史入口作为一次独立编辑应用，point 位于替换末尾、mark 按普通编辑规则调整并停用；共享 view、modified 和 undo / redo 沿用既有语义。
 - **结果隔离**：请求绑定原 view、buffer 文本版本、输入会话、region / point 及配置代次；文本、区域或输入会话变化，目标关闭 / 隐藏，或成功重载后，旧结果不得提交。提交时重新检查只读、IME 与 pending 前缀约束；不按返回时的焦点重新解释目标，不覆盖后续编辑。
 - **能力与资源**：不开放文件、网络、进程、定时器、脚本后台任务或任意模块加载 API；配置与命令有执行、运行时内存 / 栈、源码 / 文本大小和请求数量上限。异常、超限或非法返回值不修改正文；异步 job 不被执行。运行时中断是协作式的，不等于可强杀的独立进程，也不是处理恶意代码的安全沙箱。具体实现限额见[配置说明](scripting.md#资源边界)，不替代或放宽原生性能预算。
+
+## 阶段 F1：mode 与只读 Magit diff
+
+### Mode 与键位
+
+- 主要交互 mode 属于 buffer，多 view 共享；它独立于语言解析 / 高亮身份。首批身份为 `fundamental`、`magit-diff`；不提供 JS mode 注册、hook 或 minor-mode 体系，不承诺这些身份是永久封闭集合。
+- 正文查找按 mode 局部层、正文通用层排序，minibuffer / 查询会话不使用正文局部层。mode 默认键位与对应用户声明在配置阶段合成，热路径不执行 JS。Scope 仍表示执行所有者，不表示 mode。
+- 局部 `null` 在该 mode 内遮蔽通用绑定，不影响其他 mode；删除声明后恢复默认。局部前缀的缺失子键可回落到通用层；局部命令或禁用节点遮蔽低层整棵前缀。局部前缀可遮蔽通用叶子，但同一层把默认叶子改为前缀仍须显式取消旧叶子；取消仍有局部子绑定的前缀报错。重复检查按层进行，任一错误拒绝整份配置。
+- 按键与 M-x 都校验目标 buffer 的命令适用上下文；M-x 不列出当前 mode 不适用的命令，手输 / 通用绑定也不能绕过检查。键位注记按当前层叠结果显示。
+- 成功配置重载保留 diff 的比较身份、内容、折叠及 view 位置；失败保留旧配置。原有输入屏障、pending 清理及整体安装语义不变。
+
+### 独立 diff 查看
+
+- `M-x magit-diff-unstaged` 查看 index → worktree，`M-x magit-diff-staged` 查看 HEAD → index；未有首个 commit 时仍可查看 staged 新增文件。仓库从发起文件的目录发现；在 diff 中切换比较时沿用该仓库。比较针对磁盘 / index，不自动保存编辑 buffer，也不把未保存文本当作 worktree 内容。
+- 显示 diffstat、文件与 hunk heading 和 unified 正文；普通文件 / hunk 默认展开，删除文件默认折叠。binary、symlink / 文件类型及 submodule 变更只提供摘要；未合并 / combined 等不支持结构明确报错，不伪造逐行 hunk。
+- `TAB` / `C-i` 切换当前 section 正文，保留 heading；root 不能隐藏。父节点折叠不改写子节点自身状态；隐藏正文中的各 view point 移至折叠 heading。正文仍保留在只读 buffer 中，普通 region / 复制沿用文本语义，不提供 Magit 结构化选择语义。
+- `n` 到下一个可见 section heading；`p` 在正文先回当前 section 起点，在起点再到前一个可见 heading；`^` 到父节点。`j` 在 diffstat 文件项与对应文件间跳转，必要时打开目标祖先。SPC / DEL / S-SPC 及原通用翻页键按可见行翻页，普通文本移动跳过隐藏正文。
+- 当前 section 提供独立于 region 的背景反馈；折叠 heading 带指示。长行不软换行，M-右 / M-左（`scroll-left` / `scroll-right`）水平查看，point 移动到屏幕外列时跟随。普通编辑 buffer 的软换行不变。
+- `g` 重新读取相同比较。按 section 类型 / 路径 / 父链及 hunk heading 身份尽量保留折叠、各 view point 与顶部 section 相对行列；节点消失时回退到最近仍存在的祖先 heading，不能保证 hunk 内容变化后仍匹配。只读刷新没有文本 undo，也不标记 modified。
+- `RET` / `C-m` 在删除行访问旧侧，在新增 / 上下文行访问新侧并定位；heading 使用对应侧起始行。HEAD / index 使用本次 diff 的完整 blob 身份打开只读快照，不重解释为当前 index 或 worktree；unstaged 新侧复用普通文件 buffer，保留其未保存文本，行列超界时夹紧。不提供 C-RET 的跨版本行号映射。
+- Git 在后台以参数数组执行，关闭外部 diff / textconv，不运行 Git 写命令。每窗口最多一个 Git 读取，无请求队列；单次子进程 15 秒，stdout 16 MiB、stderr 64 KiB，diff 最多 4096 个文件 / 100000 行 patch，超限明确失败。禁止按需自动抓取缺失 blob；固定 worktree / git-dir，刷新不能意外回落到父仓库。刷新失败保留旧内容；结果校验目标及请求身份，不按完成时焦点重新定向。打开 / 版本访问期间焦点目标变化或进入读入会话时不抢回界面。
+
+首版不包含 status、transient、Git 写操作、任意 revision / range、patch 导入、untracked 浏览、结构化 / 部分 hunk 选择、词级差异、hunk 语法、递归折叠全套、兄弟导航、搜索自动展开、diff 参数修改或窗口恢复式 q；后续范围以计划为准。

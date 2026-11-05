@@ -1,0 +1,362 @@
+use super::*;
+use crate::buffer::Buffer;
+use crate::text::ByteOffset;
+use std::path::Path;
+use std::process::Command;
+use std::sync::atomic::{AtomicU64, Ordering};
+
+pub(crate) struct Repository(pub PathBuf);
+impl Repository {
+    pub fn new() -> Self {
+        static NEXT: AtomicU64 = AtomicU64::new(0);
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join(".pi/tmp")
+            .join(format!(
+                "diff-test-{}-{}-{}",
+                std::process::id(),
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_nanos(),
+                NEXT.fetch_add(1, Ordering::Relaxed)
+            ));
+        std::fs::create_dir(&root).unwrap();
+        let repo = Self(root);
+        repo.git(&["init", "-q"]);
+        repo.git(&["config", "user.name", "Fixture"]);
+        repo.git(&["config", "user.email", "fixture@example.invalid"]);
+        repo
+    }
+    pub fn git(&self, args: &[&str]) -> Vec<u8> {
+        let result = Command::new("git")
+            .arg("-C")
+            .arg(&self.0)
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(
+            result.status.success(),
+            "{:?}: {}",
+            args,
+            String::from_utf8_lossy(&result.stderr)
+        );
+        result.stdout
+    }
+    pub fn write(&self, path: impl AsRef<Path>, text: impl AsRef<[u8]>) {
+        std::fs::write(self.0.join(path), text).unwrap();
+    }
+    pub fn commit(&self) {
+        self.git(&["add", "--all"]);
+        self.git(&["commit", "-qm", "fixture"]);
+    }
+    pub fn load(&self, kind: DiffKind) -> Diff {
+        Diff::load(
+            Comparison {
+                root: self.0.clone(),
+                git_dir: self.0.join(".git"),
+                kind,
+            },
+            &AtomicBool::new(false),
+        )
+        .unwrap()
+    }
+}
+impl Drop for Repository {
+    fn drop(&mut self) {
+        std::fs::remove_dir_all(&self.0).unwrap();
+    }
+}
+
+#[test]
+fn real_staged_unstaged_and_line_versions_are_distinct() {
+    let repo = Repository::new();
+    repo.write("a.txt", "old\nkeep\n");
+    repo.commit();
+    repo.write("a.txt", "indexed\nkeep\n");
+    repo.git(&["add", "a.txt"]);
+    repo.write("a.txt", "worktree\nkeep\n");
+    let staged = repo.load(DiffKind::Staged);
+    let unstaged = repo.load(DiffKind::Unstaged);
+    assert_eq!(staged.files.len(), 1);
+    assert_eq!(unstaged.files.len(), 1);
+    assert_eq!(staged.files[0].new_oid, unstaged.files[0].old_oid);
+    let rendered = staged.render().unwrap();
+    for (needle, contents) in [("-old", "old\nkeep\n"), ("+indexed", "indexed\nkeep\n")] {
+        let offset = rendered.text.find(needle).unwrap();
+        let Visit::Blob {
+            oid, line, column, ..
+        } = rendered
+            .navigation
+            .visit(&staged, ByteOffset(offset + 2))
+            .unwrap()
+        else {
+            panic!()
+        };
+        assert_eq!(line, 1);
+        assert_eq!(column, 1);
+        assert_eq!(
+            crate::git::blob(&repo.0, &repo.0.join(".git"), &oid, &AtomicBool::new(false)).unwrap(),
+            contents
+        );
+    }
+    let rendered = unstaged.render().unwrap();
+    let offset = rendered.text.find("+worktree").unwrap();
+    assert!(matches!(
+        rendered.navigation.visit(&unstaged, ByteOffset(offset)),
+        Ok(Visit::Worktree { line: 1, .. })
+    ));
+    let offset = rendered.text.find("-indexed").unwrap();
+    assert!(matches!(
+        rendered.navigation.visit(&unstaged, ByteOffset(offset)),
+        Ok(Visit::Blob { line: 1, .. })
+    ));
+}
+
+#[test]
+fn raw_paths_rename_modes_binary_and_no_newline_are_not_guessed_from_headers() {
+    let repo = Repository::new();
+    for name in ["old name", "delete", "binary", "mode", "empty"] {
+        repo.write(
+            name,
+            if name == "binary" {
+                b"old\0binary".as_slice()
+            } else if name == "old name" {
+                b"unique rename source".as_slice()
+            } else if name == "empty" {
+                b"".as_slice()
+            } else {
+                b"old".as_slice()
+            },
+        );
+    }
+    repo.commit();
+    repo.git(&["mv", "old name", "new\tname\n\"x"]);
+    repo.git(&["rm", "delete"]);
+    repo.write("binary", b"new\0binary");
+    repo.write("added", "new");
+    repo.git(&["add", "--all"]);
+    repo.git(&["update-index", "--chmod=+x", "mode"]);
+    let diff = repo.load(DiffKind::Staged);
+    let renamed = diff.files.iter().find(|file| file.status == 'R').unwrap();
+    assert_eq!(renamed.old_path, PathBuf::from("old name"));
+    assert_eq!(renamed.new_path, PathBuf::from("new\tname\n\"x"));
+    assert!(
+        diff.files
+            .iter()
+            .find(|file| file.new_path == Path::new("binary"))
+            .unwrap()
+            .summary
+            .is_some()
+    );
+    let mode = diff
+        .files
+        .iter()
+        .find(|file| file.new_path == Path::new("mode"))
+        .unwrap();
+    assert_eq!(mode.new_mode, "100755");
+    assert!(mode.hunks.is_empty());
+    let rendered = diff.render().unwrap();
+    assert!(rendered.text.contains("new\\tname\\n"));
+    let deleted = rendered
+        .sections
+        .nodes()
+        .iter()
+        .find(|node| node.key == "file/\"delete\"")
+        .unwrap();
+    assert!(deleted.collapsed);
+    assert!(
+        diff.files
+            .iter()
+            .flat_map(|file| &file.hunks)
+            .flat_map(|hunk| &hunk.lines)
+            .any(|line| line.text.starts_with("\\ No newline"))
+    );
+}
+
+#[test]
+fn unborn_repository_and_no_changes_are_supported() {
+    let repo = Repository::new();
+    repo.write("first", "a\n");
+    repo.git(&["add", "."]);
+    assert_eq!(repo.load(DiffKind::Staged).files[0].status, 'A');
+    assert!(repo.load(DiffKind::Unstaged).files.is_empty());
+    repo.commit();
+    assert!(
+        repo.load(DiffKind::Staged)
+            .render()
+            .unwrap()
+            .text
+            .contains("No changes")
+    );
+}
+
+#[test]
+fn diff_refresh_rejects_old_requests_and_restores_shared_folding_and_independent_points() {
+    let repo = Repository::new();
+    repo.write("a", "old\n");
+    repo.commit();
+    repo.write("a", "new\n");
+    let data = repo.load(DiffKind::Unstaged);
+    let mut buffer = Buffer::diff(data.comparison.clone());
+    let first = buffer.begin_diff_request().unwrap().1;
+    let request = buffer.begin_diff_request().unwrap().1;
+    assert!(
+        !buffer
+            .install_diff(first, data.clone(), data.render().unwrap())
+            .unwrap()
+    );
+    assert!(
+        buffer
+            .install_diff(request, data.clone(), data.render().unwrap())
+            .unwrap()
+    );
+    assert!(buffer.is_read_only());
+    assert!(!buffer.is_modified());
+    assert_eq!(buffer.mode(), crate::mode::ModeId::MAGIT_DIFF);
+    let hunk = buffer
+        .sections()
+        .unwrap()
+        .nodes()
+        .iter()
+        .position(|node| node.key.contains("/@@"))
+        .unwrap();
+    let body = buffer.sections().unwrap().nodes()[hunk].body;
+    buffer.set_point(body).unwrap();
+    let mut second = buffer.new_view();
+    let root_point = ByteOffset(0);
+    second.set_point(root_point).unwrap();
+    buffer.toggle_section().unwrap();
+    assert_eq!(
+        buffer.point(),
+        buffer.sections().unwrap().nodes()[hunk].range.start
+    );
+    assert_eq!(second.point(), root_point);
+    let file = buffer.sections().unwrap().nodes()[hunk].parent.unwrap();
+    buffer
+        .set_point(buffer.sections().unwrap().nodes()[file].range.start)
+        .unwrap();
+    buffer.toggle_section().unwrap();
+    buffer.toggle_section().unwrap();
+    assert!(buffer.sections().unwrap().nodes()[hunk].collapsed);
+    let request = buffer.begin_diff_request().unwrap().1;
+    buffer
+        .install_diff(request, data.clone(), data.render().unwrap())
+        .unwrap();
+    assert!(second.sections().unwrap().nodes()[hunk].collapsed);
+    assert_eq!(second.point(), root_point);
+}
+
+#[test]
+fn worktree_gitdir_is_pinned_and_user_diff_drivers_cannot_execute() {
+    let repo = Repository::new();
+    repo.write("a", "old\n\ncontext\n");
+    repo.commit();
+    let linked = repo.0.join("linked");
+    repo.git(&[
+        "worktree",
+        "add",
+        "--detach",
+        linked.to_str().unwrap(),
+        "HEAD",
+    ]);
+    std::fs::write(linked.join("a"), "new\n\ncontext\n").unwrap();
+    let (root, git_dir) = crate::git::discover(&linked, &AtomicBool::new(false)).unwrap();
+    assert_eq!(root, linked);
+    assert!(git_dir.is_dir());
+    assert_ne!(git_dir, linked.join(".git"));
+    repo.git(&["config", "diff.suppressBlankEmpty", "true"]);
+    repo.git(&["config", "diff.outputIndicatorNew", "!"]);
+    repo.git(&[
+        "config",
+        "diff.evil.command",
+        "sh -c 'touch SHOULD_NOT_EXIST; exit 1'",
+    ]);
+    repo.git(&[
+        "config",
+        "diff.evil.textconv",
+        "sh -c 'touch SHOULD_NOT_EXIST; exit 1'",
+    ]);
+    std::fs::write(linked.join(".gitattributes"), "a diff=evil\n").unwrap();
+    let diff = Diff::load(
+        Comparison {
+            root,
+            git_dir,
+            kind: DiffKind::Unstaged,
+        },
+        &AtomicBool::new(false),
+    )
+    .unwrap();
+    assert_eq!(diff.files.len(), 1);
+    assert!(diff.render().unwrap().text.contains("+new"));
+    assert!(!linked.join("SHOULD_NOT_EXIST").exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn file_type_split_patches_and_non_utf8_paths_are_explicitly_supported() {
+    use std::os::unix::ffi::OsStringExt;
+    use std::os::unix::fs::symlink;
+    let repo = Repository::new();
+    repo.write("a", "old\n");
+    repo.commit();
+    std::fs::remove_file(repo.0.join("a")).unwrap();
+    symlink("target", repo.0.join("a")).unwrap();
+    for kind in [DiffKind::Unstaged, DiffKind::Staged] {
+        if kind == DiffKind::Staged {
+            repo.git(&["add", "a"]);
+        }
+        let diff = repo.load(kind);
+        assert_eq!(diff.files[0].status, 'T');
+        assert!(diff.files[0].hunks.is_empty());
+        assert!(diff.files[0].summary.is_some());
+        assert!(diff.render().unwrap().text.contains("File-type change"));
+    }
+    repo.commit();
+    std::fs::remove_file(repo.0.join("a")).unwrap();
+    repo.write("a", "regular\n");
+    repo.git(&["add", "a"]);
+    let diff = repo.load(DiffKind::Staged);
+    assert_eq!(diff.files[0].status, 'T');
+    assert!(diff.files[0].summary.is_some());
+    repo.commit();
+    let name = PathBuf::from(std::ffi::OsString::from_vec(b"path-\xff".to_vec()));
+    repo.write(&name, "old\n");
+    repo.commit();
+    repo.write(&name, "new\n");
+    repo.git(&["config", "core.quotePath", "false"]);
+    let diff = repo.load(DiffKind::Unstaged);
+    assert_eq!(diff.files[0].new_path, name);
+    assert!(diff.render().unwrap().text.contains("+new"));
+}
+
+#[test]
+fn malformed_protocol_and_unsafe_paths_fail_closed() {
+    for bytes in [b":bad\0".as_slice(), b"random", b"\0diff --cc conflict\n"] {
+        assert!(super::parse::parse(bytes).is_err());
+    }
+    assert!(
+        crate::git::blob(
+            Path::new("."),
+            Path::new(".git"),
+            "--help",
+            &AtomicBool::new(false)
+        )
+        .is_err()
+    );
+    let repo = Repository::new();
+    let cancelled = AtomicBool::new(true);
+    assert!(
+        Diff::load(
+            Comparison {
+                root: repo.0.clone(),
+                git_dir: repo.0.join(".git"),
+                kind: DiffKind::Unstaged
+            },
+            &cancelled
+        )
+        .unwrap_err()
+        .contains("cancelled")
+    );
+}

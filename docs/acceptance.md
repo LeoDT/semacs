@@ -23,7 +23,7 @@
 2. 每批真实环境测试都须先获得用户对具体范围的同意，提前说明窗口、OS 注键、输入法状态变动及截图范围。历史授权不延续到下一批，脚本的 `--consent` 参数不能代替实际同意。
 3. 助手准备或检查入口，用户在仓库根目录的正常 fish / Wayland 宿主终端运行。没有 `/dev/dri` 时不绕过检查或用软件渲染冒充硬件通过。
 4. 使用尚不存在的新输出目录和可丢弃 fixture，不操作日常工作文件。人工模式只给测试子进程设置独立 `XDG_CONFIG_HOME`，不读写日常配置；`manual` / `candidates` 的空配置也参与字节核对。
-5. 任一超限、断言失败、异常或未观察项立即停止后续测试，保留日志和产物，不修复 fixture、自动重试、调宽阈值或自行调优重测；先回报。人工模式按提示结束测试窗口，对失败 / 未观察项答 no，不把正常退出当成通过。
+5. 默认验收遇超限、断言失败、异常或未观察项立即停止后续测试，保留日志和产物，不修复 fixture、自动重试、调宽阈值或自行调优重测；先回报。另行获准的完整显示 / diff 诊断只改变性能超限的停止策略：记录超限后继续该批后续动作及获准窗口，始终标记非验收；正文 / 投影 / 几何 / 身份错误、异常和安全超时仍硬停止。人工模式按提示结束测试窗口，对失败 / 未观察项答 no，不把正常退出当成通过。
 6. 用户回传整个目录，失败也保留。助手离线核对源码 / 二进制 / 驱动 / fixture 身份、覆盖范围、环境 / 字体 / 实际尺寸、原始数据和适用预算；只对实际覆盖内容下结论，人工观察不冒充助手独立复现。
 
 输出保留构建日志、版本 / 源码差异、环境、fixture、报告及停止原因，不覆盖旧目录。结论按需进入 `docs/records/`，完成状态只在计划维护；未测项明确保留，代表性复测不外推为完整验收。环境、样本或构建不同，先说明可比性再判预算。
@@ -35,7 +35,7 @@
 | 影响范围 | 离线检查 |
 |---|---|
 | profiler / 性能驱动 | `cargo test --all-targets --features native-profiler`、对应 feature 的 Clippy，以及 `python3 -B -m unittest discover -s tests -p 'test_*.py'` |
-| 人工 fixture / 字节核对工具 | `python3 -B -m unittest discover -s scripts -p 'test_m2_manual.py' -v` |
+| 人工 fixture / 字节核对工具 | `python3 -B -m unittest discover -s scripts -p 'test_m2_manual.py' -v`；Magit profile 另跑 `python3 -B -m unittest discover -s scripts -p 'test_magit_fixture.py' -v` |
 | 脚本配置冒烟驱动 | `python3 -B -m unittest discover -s scripts -p 'test_scripting_manual.py' -v` |
 | split IME 驱动 | `python3 -B -m unittest discover -s scripts -p 'test_split_ime.py' -v`，不访问桌面 |
 | fish 入口 | `fish --no-execute scripts/acceptance.fish` |
@@ -56,6 +56,7 @@ RUNS=3 target/release/examples/perf_m1 .pi/tmp/NEW-sample.txt
 
 | 入口 | 范围与解释 |
 |---|---|
+| `python3 -B scripts/perf_diff.py .pi/tmp/NEW-diff-perf` | 构建 profiler release `perf_diff`，真实 Git patch 约 256 KiB / 2 MiB，各三轮 staged / unstaged 的 headless 专项；独立正文 / 折叠投影 oracle、同场景双 view 与分段基线，不测原生 idle |
 | `perf_view` / `perf_m1` | 基础布局 / 绘制与命令输入；M1 未等待输入段的 ready 只是末键恢复，不是逐键 ready 或原生持续输入 |
 | `RUNS=3 target/release/examples/perf_split .pi/tmp/NEW-sample.txt` | 共享 buffer 双 view；聚合 ready 与选中 view 分开记录，不给聚合擅加旧单 view 门限 |
 | `target/release/examples/perf_candidates .pi/tmp/NEW-candidate-fixture` | 候选过滤 / 导航基线，无新增门限，fixture 目录必须不存在 |
@@ -91,10 +92,30 @@ fish scripts/acceptance.fish MODE NEW_OUTPUT_DIRECTORY --consent
 | `languages` | 一个窗口，Markdown / HTML 嵌入高亮、分屏 / 主题、两处正文真实 IME 取消 / 提交、历史及保存；fixture 工具打印五组步骤，独立核对两个“你”和配置字节 |
 | `flicker` | 一个窗口，Markdown / HTML 各约 256 KiB，ASCII 连续输入 / 删除及共享显示 / 历史的配色稳定性；三组目视步骤，独立核对正文恢复及空配置，不复测 IME |
 | `syntax-perf` | Markdown（含 HTML→JS/CSS）/ HTML 各约 256 KiB、各三轮原生 CPU 输入 / 绘制；布局与语法 ready 分开记录，不外推大文件全矩阵 |
+| `diff-perf` / `diff-diagnostic` | F1 diff 原生 CPU / 提交专项，约 256 KiB patch 三轮，每轮一个窗口及内部左右分屏；前者超限即停，后者显式完整诊断、记录性能超限后继续，见 [专项说明](#f1-diff-专项性能) |
+| `magit` | 一个窗口，隔离配置与临时 Git 仓库；四组 diff 显示 / 折叠导航、分屏刷新、长行水平查看、旧侧 / index / worktree 访问，见 [fixture 说明](../scripts/magit_fixture.py) |
 | `styles` | 一个窗口，隔离 rich / plain 主题下的 Rust / Markdown 字体、装饰、背景与换行，用户手动做两处 IME 取消 / 提交；四组观察及独立字节核对 |
 | `styles-perf` | mixed 约 8 MiB 三轮，再 Markdown 约 256 KiB 三轮；至多六个顺序窗口，复用原生 CPU 驱动，不展开全矩阵 |
 
-人工模式先读终端提示；`scripting` / `messages` / `themes` / `syntax` / `flicker` 使用英文输入，不自动注键、不改变 IME、不截图，不测原生性能。`languages` / `styles` 由用户在指定两处手动使用日常中文输入法；脚本不注键、不切换输入法、不截图，其 IME 结论来自用户观察及保存字节，不是自动状态断言或时延测量。详细键序列只在驱动中维护，不在本文再复制。不要直接照抄历史批次目录名。
+人工模式先读终端提示；`scripting` / `messages` / `themes` / `syntax` / `flicker` / `magit` 使用英文输入，不自动注键、不改变 IME、不截图，不测原生性能。`languages` / `styles` 由用户在指定两处手动使用日常中文输入法；脚本不注键、不切换输入法、不截图，其 IME 结论来自用户观察及保存字节，不是自动状态断言或时延测量。详细键序列只在驱动中维护，不在本文再复制。不要直接照抄历史批次目录名。
+
+### F1 最小定向验证
+
+`magit` 使用一个窗口及其内部分屏，检查样式 / 折叠指示、导航、共享刷新、截断长行与 RET 的适当版本访问；详细键序列只在 `scripts/magit_fixture.py` 维护。驱动为测试子进程设置独立 `XDG_CONFIG_HOME`，清除继承的 `GIT_*` 覆盖并禁用全局 / 系统 Git 配置；不修改父终端环境、日常配置或仓库。
+
+fixture 准备只在新输出目录建立两份 tracked 文件及确定的 HEAD / index / worktree 差异。结束后独立核对正文 / init.js 字节、HEAD 身份、index / Git 配置字节及两侧 blob；不把人工回答 yes 代替字节检查。任一失败停止，不修复 fixture 或自动重试。没有截图、自动注键、输入法变动或原生性能测量；原生颜色 / 字体 / 几何来自人工观察，不记作 GPU / 呈现时延或完整性能矩阵通过。
+
+### F1 diff 专项性能
+
+先完成本地专项工具自检，再对具体原生批次征求同意。`diff-perf` 顺序打开三个窗口；每轮复用同一临时仓库，按 staged / unstaged 覆盖打开、首 hunk 定位与折叠 / 展开、长改动行导航、垂直滚动、左右分屏、共享折叠 / 刷新 / 展开，以及两段各 30 个无主动 invalidation tick。刷新重读不变的磁盘 patch；不测改宽、字体、输入、真实 IME 或 OS 键盘。运行期间不要键入、改宽或关闭 probe。
+
+仅使用合成 GPUI 动作，不自动注入 OS 按键、不修改输入法、不截图。驱动给子进程设置空的独立 `XDG_CONFIG_HOME`，隔离 Git 全局 / 系统配置与继承的 `GIT_*`，不操作日常仓库。全部 fixture / HEAD / index / Git 配置、独立正文及投影 oracle 和 manifest 在测试前冻结；每轮前后检查源码 / 二进制 / fixture / 配置。构建强制使用仓库 target 目录，摘要实际受测 example；输出保存 HEAD 相对的全部 tracked 差异及 untracked 源码。
+
+逐帧核对真实目标 buffer / 正文版本、当前折叠投影、兼容布局及同场景双 view 就绪，不能用旧正文提交代替刷新完成；计时后另核对完整正文及独立投影 oracle。原生保留实际适用的 draw / 垂直滚动 / idle 门限，其余 diff 时延无新增门限，只作基线。30 秒阶段观察上限及父进程 watchdog 是资源保护，不是放宽后的性能预算。默认 `diff-perf` 任何超限、正文 / 投影 / 身份错误或异常立即停批，不重试或修复 fixture。
+
+用户另行批准的 `diff-diagnostic` 沿用相同 small 三轮和动作，不在 setup 超限时提前结束：窗口启动、命令准备及动作的实际帧全部写入 `*.frames.csv`，记录 draw、request-layout / prepaint / paint / other、CPU submit、同帧正文几何与 display 身份；setup 不冒充动作时延。性能超限逐帧 / 逐动作标记并继续本批剩余动作和窗口，idle 产生 draw 也保留原预算失败，不填造 idle 时延。报告 / 环境明确 `diagnostic=true`、`acceptance=false`；`completed=true` 只表示采集完成，`budget_passed` 按全部适用证据独立判定，普通读取入口拒绝诊断报告。驱动交叉核对逐帧数据、动作统计和提交边界，setup 超限也不能漏记到总体判定外。
+
+两种模式的正文 / 投影 / 几何 / 身份错误、异常、观测丢失与安全超时仍停止后续动作 / 窗口，保留部分 CSV / frames / spans、stdout / stderr 及停止原因，不重试或修复 fixture。父进程按窗口启动、阶段准备与实际动作的进度刷新 watchdog，不因 UI 卡住而无限等待，也不把安全超时当成放宽后的预算。CPU 提交仍不证明 GPU / 屏幕呈现。
 
 ### E3 最小定向验证
 

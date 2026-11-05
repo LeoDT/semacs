@@ -32,10 +32,20 @@ pub struct CommandSpec {
     pub name: &'static str,
     pub scope: Scope,
     pub bindings: &'static [DefaultBinding],
+    pub mode: Option<&'static str>,
+}
+
+macro_rules! command_mode {
+    () => {
+        None
+    };
+    ($mode:literal) => {
+        Some($mode)
+    };
 }
 
 macro_rules! commands {
-    ($($id:ident => $name:literal, $scope:ident, [$($keys:literal => $reference:literal),*];)*) => {
+    ($($id:ident => $name:literal, $scope:ident $(($mode:literal))?, [$($keys:literal => $reference:literal),*];)*) => {
         #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
         pub enum Command {
             $($id,)*
@@ -46,6 +56,7 @@ macro_rules! commands {
                 command: Command::$id,
                 name: $name,
                 scope: Scope::$scope,
+                mode: command_mode!($($mode)?),
                 bindings: &[$(DefaultBinding { keys: $keys, reference: $reference },)*],
             },)*
         ];
@@ -61,6 +72,11 @@ macro_rules! commands {
                 match self {
                     $(Self::$id => Scope::$scope,)*
                 }
+            }
+
+            pub fn available_in(self, mode: crate::mode::ModeId) -> bool {
+                COMMANDS.iter().find(|spec| spec.command == self).unwrap()
+                    .mode.is_none_or(|required| required == mode.name())
             }
 
             pub fn named(name: &str) -> Option<Self> {
@@ -107,6 +123,17 @@ commands! {
     ExecuteExtendedCommand => "execute-extended-command", Application, ["alt-x" => "M-x"];
     ViewEchoAreaMessages => "view-echo-area-messages", Application, ["ctrl-h e" => "C-h e"];
     ReloadConfiguration => "reload-configuration", Application, [];
+    MagitDiffUnstaged => "magit-diff-unstaged", Application, [];
+    MagitDiffStaged => "magit-diff-staged", Application, [];
+    SectionToggle => "section-toggle", Application("magit-diff"), ["tab" => "TAB", "ctrl-i" => "C-i"];
+    SectionForward => "section-forward", Application("magit-diff"), ["n" => "n"];
+    SectionBackward => "section-backward", Application("magit-diff"), ["p" => "p"];
+    SectionUp => "section-up", Application("magit-diff"), ["^" => "^"];
+    MagitDiffJump => "magit-diff-jump", Application("magit-diff"), ["j" => "j"];
+    MagitRefresh => "magit-refresh", Application("magit-diff"), ["g" => "g"];
+    MagitDiffVisit => "magit-diff-visit-file", Application("magit-diff"), ["enter" => "RET", "ctrl-m" => "C-m"];
+    ScrollLeft => "scroll-left", Application("magit-diff"), ["alt-right" => "M-<right>"];
+    ScrollRight => "scroll-right", Application("magit-diff"), ["alt-left" => "M-<left>"];
     LoadTheme => "load-theme", Application, [];
     SetFontFamily => "set-font-family", Application, [];
     IncreaseFontSize => "increase-font-size", Application, [];

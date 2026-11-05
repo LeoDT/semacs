@@ -46,6 +46,7 @@ fn setup(
                     origin: origin.clone(),
                     view: target.clone(),
                     viewport: None,
+                    location: None,
                 });
                 cx.notify();
             });

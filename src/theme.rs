@@ -30,10 +30,15 @@ pub enum StyleRole {
     MarkupHeading,
     MarkupStrong,
     MarkupEmphasis,
+    DiffFile,
+    DiffHunk,
+    DiffAdded,
+    DiffRemoved,
+    SectionCurrent,
 }
 
 impl StyleRole {
-    pub const COUNT: usize = 25;
+    pub const COUNT: usize = 30;
     pub const ALL: [Self; Self::COUNT] = [
         Self::Default,
         Self::Cursor,
@@ -60,6 +65,11 @@ impl StyleRole {
         Self::MarkupHeading,
         Self::MarkupStrong,
         Self::MarkupEmphasis,
+        Self::DiffFile,
+        Self::DiffHunk,
+        Self::DiffAdded,
+        Self::DiffRemoved,
+        Self::SectionCurrent,
     ];
 
     pub fn name(self) -> &'static str {
@@ -89,6 +99,11 @@ impl StyleRole {
             Self::MarkupHeading => "markup.heading",
             Self::MarkupStrong => "markup.strong",
             Self::MarkupEmphasis => "markup.emphasis",
+            Self::DiffFile => "diff.file",
+            Self::DiffHunk => "diff.hunk",
+            Self::DiffAdded => "diff.added",
+            Self::DiffRemoved => "diff.removed",
+            Self::SectionCurrent => "section.current",
         }
     }
 
@@ -100,7 +115,7 @@ impl StyleRole {
     }
 
     fn supports_foreground(self) -> bool {
-        self != Self::Region
+        !matches!(self, Self::Region | Self::SectionCurrent)
     }
 
     fn supports_background(self) -> bool {
@@ -110,6 +125,7 @@ impl StyleRole {
                 Self::Default
                     | Self::Cursor
                     | Self::Region
+                    | Self::SectionCurrent
                     | Self::ModeLine
                     | Self::ModeLineInactive
                     | Self::EchoArea
@@ -119,7 +135,9 @@ impl StyleRole {
     }
 
     pub fn supports_text_attributes(self) -> bool {
-        self == Self::Default || self == Self::MinibufferPrompt || self >= Self::SyntaxKeyword
+        self == Self::Default
+            || self == Self::MinibufferPrompt
+            || (self >= Self::SyntaxKeyword && self != Self::SectionCurrent)
     }
 }
 
@@ -281,7 +299,7 @@ impl Default for ThemeSettings {
             active: "light".into(),
             overrides: BTreeMap::new(),
             resolved: builtin_colors(ThemeMode::Light),
-            attributes: builtin_attributes(),
+            attributes: builtin_attributes(ThemeMode::Light),
         }
     }
 }
@@ -367,7 +385,7 @@ impl ThemeSettings {
     fn resolve(&mut self) {
         let definition = &self.themes[&self.active];
         self.resolved = builtin_colors(definition.mode);
-        self.attributes = builtin_attributes();
+        self.attributes = builtin_attributes(definition.mode);
         for styles in [&definition.styles, &self.overrides] {
             for (role, colors) in styles {
                 colors.apply(&mut self.resolved[*role as usize]);
@@ -447,13 +465,44 @@ fn builtin_colors(mode: ThemeMode) -> [StyleColors; StyleRole::COUNT] {
         pair(type_color, background),
         pair(type_color, background),
         pair(foreground, background),
+        pair(type_color, background),
+        pair(function, background),
+        pair(
+            string,
+            if mode == ThemeMode::Dark {
+                0x20372a
+            } else {
+                0xe5f4e8
+            },
+        ),
+        pair(
+            constant,
+            if mode == ThemeMode::Dark {
+                0x42292d
+            } else {
+                0xfce8e6
+            },
+        ),
+        pair(
+            foreground,
+            if mode == ThemeMode::Dark {
+                0x303a4a
+            } else {
+                0xeaf0f8
+            },
+        ),
     ]
 }
 
-fn builtin_attributes() -> [StyleOverride; StyleRole::COUNT] {
+fn builtin_attributes(mode: ThemeMode) -> [StyleOverride; StyleRole::COUNT] {
     let mut attributes = [StyleOverride::default(); StyleRole::COUNT];
     attributes[StyleRole::MarkupHeading as usize].bold = Some(true);
     attributes[StyleRole::MarkupStrong as usize].bold = Some(true);
+    attributes[StyleRole::DiffFile as usize].bold = Some(true);
+    attributes[StyleRole::DiffHunk as usize].bold = Some(true);
+    for role in [StyleRole::DiffAdded, StyleRole::DiffRemoved] {
+        attributes[role as usize].background = Some(builtin_colors(mode)[role as usize].background);
+    }
     attributes[StyleRole::MarkupEmphasis as usize].italic = Some(true);
     attributes
 }

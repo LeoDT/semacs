@@ -25,6 +25,8 @@ mod samples;
 
 #[path = "support/native_diagnostic.rs"]
 mod diagnostic;
+#[path = "support/native_diff.rs"]
+mod diff;
 #[path = "support/native_m1.rs"]
 mod m1;
 #[path = "support/native_m2.rs"]
@@ -832,6 +834,22 @@ fn schedule(run: Rc<RefCell<Run>>, window: &Window) {
 }
 
 fn main() {
+    if std::env::args_os()
+        .nth(1)
+        .is_some_and(|arg| arg == "--diff")
+    {
+        let args: Vec<_> = std::env::args_os().skip(2).collect();
+        assert!(
+            args.len() == 2 || (args.len() == 3 && args[2] == "--diagnostic"),
+            "perf_native --diff FIXTURE NEW_REPORT [--diagnostic]"
+        );
+        diff::run(
+            PathBuf::from(&args[0]),
+            PathBuf::from(&args[1]),
+            args.len() == 3,
+        );
+        return;
+    }
     let mut args = std::env::args_os().skip(1);
     let input =
         PathBuf::from(args.next().expect(

@@ -140,16 +140,42 @@ impl Engine {
             .iter::<Object>()
             .map(|binding| {
                 let binding = binding?;
-                Ok((binding.get("keys")?, binding.get("command")?))
+                Ok((
+                    binding.get::<_, String>("keys")?,
+                    binding.get::<_, Option<String>>("command")?,
+                    binding.get::<_, Option<String>>("mode")?,
+                ))
             })
             .collect::<rquickjs::Result<Vec<_>>>()
             .map_err(|error| js_error(ctx, error))?;
-        let body_keymap = Keymap::configured_body(&mut registry, bindings)?;
+        let mut body = Vec::new();
+        let mut local = std::collections::HashMap::<_, Vec<_>>::new();
+        for (keys, command, mode) in bindings {
+            if let Some(name) = mode {
+                let mode = crate::mode::ModeId::named(&name)
+                    .ok_or_else(|| format!("Unknown mode: {name}"))?;
+                local.entry(mode).or_default().push((keys, command));
+            } else {
+                body.push((keys, command));
+            }
+        }
+        let body_keymap = Keymap::configured_body(&mut registry, body)?;
+        let mut mode_keymaps = std::collections::HashMap::new();
+        for mode in crate::mode::MODES {
+            let map = Keymap::configured_mode(
+                &mut registry,
+                local.remove(mode).unwrap_or_default(),
+                *mode,
+            )?;
+            registry.annotate_mode(*mode, Keymap::annotations(&[&map, &body_keymap]));
+            mode_keymaps.insert(*mode, map);
+        }
         let theme = Self::theme(ctx, &manifest)?;
         Ok(Configuration {
             generation,
             commands: registry,
             body_keymap,
+            mode_keymaps,
             font,
             theme,
         })

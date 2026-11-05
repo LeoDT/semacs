@@ -5,7 +5,7 @@ use crate::command::Command;
 use crate::command_registry::{CommandId, ScriptCommand};
 use crate::keymap::{Lookup, lookup, parse_sequence};
 
-fn load(source: &str) -> Result<(Engine, Configuration), String> {
+pub(super) fn load(source: &str) -> Result<(Engine, Configuration), String> {
     Engine::new(source, Path::new("test-init.js"), 42)
 }
 
@@ -170,7 +170,7 @@ fn a_theme_accepts_every_named_interface_and_syntax_style() {
             format!(
                 "\"{}\":{{{}:\"#123456\"}}",
                 role.name(),
-                if role == StyleRole::Region {
+                if matches!(role, StyleRole::Region | StyleRole::SectionCurrent) {
                     "background"
                 } else {
                     "foreground"
@@ -183,7 +183,7 @@ fn a_theme_accepts_every_named_interface_and_syntax_style() {
     for role in StyleRole::ALL {
         let style = config.theme.style(role);
         assert_eq!(
-            if role == StyleRole::Region {
+            if matches!(role, StyleRole::Region | StyleRole::SectionCurrent) {
                 style.background
             } else {
                 style.foreground

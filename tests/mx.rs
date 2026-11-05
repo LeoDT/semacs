@@ -260,7 +260,7 @@ fn mx_candidates_cover_the_body_layers_but_not_session_commands(cx: &mut TestApp
     let editor = mx(&mut visual, &shell);
     let count = COMMANDS
         .iter()
-        .filter(|spec| spec.scope != Scope::ReadSession)
+        .filter(|spec| spec.scope != Scope::ReadSession && spec.mode.is_none())
         .count();
     visual.read(|cx| {
         let candidates = shell.read(cx).session().unwrap().candidates().unwrap();

@@ -10,7 +10,8 @@ type SemacsStyleName =
     | "syntax.keyword" | "syntax.comment" | "syntax.string" | "syntax.number"
     | "syntax.type" | "syntax.function" | "syntax.variable" | "syntax.constant"
     | "syntax.operator" | "syntax.punctuation"
-    | "markup.heading" | "markup.strong" | "markup.emphasis";
+    | "markup.heading" | "markup.strong" | "markup.emphasis"
+    | "diff.file" | "diff.hunk" | "diff.added" | "diff.removed" | "section.current";
 
 interface SemacsTextStyle {
     foreground?: string;
@@ -22,8 +23,8 @@ interface SemacsTextStyle {
 }
 
 type SemacsStyleColors<N extends SemacsStyleName> =
-    N extends "region" ? { background?: string } :
-    N extends "default" | "minibuffer-prompt" | `syntax.${string}` | `markup.${string}` ? SemacsTextStyle :
+    N extends "region" | "section.current" ? { background?: string } :
+    N extends "default" | "minibuffer-prompt" | `syntax.${string}` | `markup.${string}` | `diff.${string}` ? SemacsTextStyle :
     N extends "completion-match" | "completion-annotation" | "separator" ? { foreground?: string } :
     { foreground?: string; background?: string };
 
@@ -40,7 +41,7 @@ interface SemacsConfigurationApi {
     setStyle<N extends SemacsStyleName>(name: N, colors: SemacsStyleColors<N>): void;
     setFont(settings: SemacsFontSettings): void;
     registerCommand(name: string, transform: (text: string) => string): void;
-    bindKey(keys: string, commandName: string | null): void;
+    bindKey(keys: string, commandName: string | null, options?: {mode: string}): void;
 }
 
 declare const semacs: Readonly<SemacsConfigurationApi>;

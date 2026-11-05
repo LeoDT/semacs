@@ -42,6 +42,8 @@
 | `syntax.type` / `syntax.function` / `syntax.variable` / `syntax.constant` | 前景 / 背景及全部文字属性，语法类型 / 函数 / 变量 / 常量 |
 | `syntax.operator` / `syntax.punctuation` | 前景 / 背景及全部文字属性，语法运算符 / 标点 |
 | `markup.heading` / `markup.strong` / `markup.emphasis` | 前景 / 背景及全部文字属性，Markdown 标题 / 强强调 / 强调；内置分别为加粗 / 加粗 / 斜体 |
+| `diff.file` / `diff.hunk` / `diff.added` / `diff.removed` | 前景 / 背景及全部文字属性，diff heading 与增删行；heading 默认加粗 |
+| `section.current` | 仅 `background`，当前 section 整行背景；该反馈独立于 region |
 
 未知样式、未支持的属性及非法颜色均拒绝整份配置。不支持逐段字体族 / 字号、任意继承、多个启用主题叠加或自动跟随系统。字体实际效果依赖平台字体及回退，不保证所请求字形一定存在。语法启用见 [E1 契约](emacs-fidelity.md#阶段-e1rust-tree-sitter)，字体与背景合成见 [E3 契约](emacs-fidelity.md#阶段-e3文本样式与高亮合成)。
 
@@ -66,9 +68,16 @@ semacs.setStyle("syntax.comment", { italic: true });
 
 命令从 `M-x` 或自定义键位调用；读取活动 region，不获得 buffer、view、point 的可变引用，也不能直接调用原生命令或发起 I/O。必须返回字符串，不能返回 Promise。错误只显示诊断，不提交部分替换。
 
-### `semacs.bindKey(keys, commandName | null)`
+### `semacs.bindKey(keys, commandName | null, options?)`
 
-绑定或取消一个正文键序列；可多次绑定不同键到同一命令。命令名可以是本份配置注册的命令或可通过 `M-x` 使用的原生命令，不要求先注册后引用。
+绑定或取消一个正文键序列；可多次绑定不同键到同一命令。不传 `options` 保持正文通用绑定；传 `{ mode: "magit-diff" }` 或 `{ mode: "fundamental" }` 仅配置对应 mode 的局部层。未知 mode / 选项拒绝整份配置，当前没有 JS mode 注册 API。局部层优先于通用层；局部 `null` 屏蔽该 mode 内的低层回落，删除声明恢复默认。跨层前缀与上下文规则见 [F1 契约](emacs-fidelity.md#mode-与键位)。
+
+```js
+semacs.bindKey("tab", "section-toggle", { mode: "magit-diff" });
+semacs.bindKey("alt-right", null, { mode: "magit-diff" });
+```
+
+命令名可以是本份配置注册的命令或可通过 `M-x` 使用的原生命令，不要求先注册后引用。
 
 键格式采用显式修饰符和键名，空白分隔连续按键：
 
@@ -113,7 +122,7 @@ rquickjs 只执行 JavaScript。不内置 TypeScript 转译器或类型检查器
 | QuickJS 内存 / 栈 | 每个运行时 32 MiB / 256 KiB，不等于整个进程 RSS 上限 |
 | region 输入 / 返回文本 | 各最多 256 KiB UTF-8 字节 |
 | 脚本命令 / 自定义键位 | 每份配置最多 256 / 1024 条 |
-| 自定义主题 / 样式覆盖调用 | 每份配置最多 32 个 / 128 次；每个主题最多 22 个界面 / 语法样式 |
+| 自定义主题 / 样式覆盖调用 | 每份配置最多 32 个 / 128 次；每个主题最多 30 个命名样式 |
 | 正文请求 | 每个窗口最多一个未完成的脚本命令及一个配置重载；重复请求立即报告忙，不累计 |
 | worker 请求队列 | 容量 1，发送不等待空位 |
 

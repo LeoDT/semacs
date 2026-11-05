@@ -2,11 +2,11 @@
 
 里程碑按可验收行为划分，不按工期估算。本文是跨会话工作的统一入口；维护与归档规则见 [文档说明](README.md#维护规则)。范围见 [需求](requirements.md)，行为见 [保真度契约](emacs-fidelity.md)。
 
-## 当前状态：E3 已按用户确认范围收尾，F 未启动
+## 当前状态：F1 及 diff 性能专项已按用户确认范围收尾
 
-E3 文本样式、随包字体、换行性能修复及诊断工具已完成；用户接受当前速度与已知问题暂缓，并要求本轮收尾提交。已完成摘要与证据见下文，延期问题继续保留，不把单轮诊断或已接受的超限记作全部性能验收通过。
+mode 与只读 Magit diff、两档 headless 基线、small 三轮原生完整诊断及首次命令准备峰值的静态排查均已完成，摘要与证据见[已完成阶段](#阶段-f1mode-与只读-magit-diff)。用户接受当前首次命令准备峰值为非阻塞观察，要求记录后收尾提交；不实施优化或追加宿主批次，不将接受超限解释为总体性能预算通过。
 
-当前没有进行中的实施阶段。后续 F 仍须用户另行确认，不自动开始，也不展开其实施规格；此前各阶段未测边界不因本次收尾补记通过。
+当前没有已批准的下一实施项。后续 Git 工作流的优先级与范围须另行确认，不自动进入 Git 写操作或完整 Magit；E3 暂缓项及其余未测边界保持不变。长期 mode / 脚本扩展边界见 [D28](decisions.md#d28-buffer-mode-与结构化显示)与 D26；固定上游行为参考见 [Magit 源码调查](work/f-magit-reference.md)。
 
 ## 后续阶段
 
@@ -14,10 +14,11 @@ E3 文本样式、随包字体、换行性能修复及诊断工具已完成；�
 
 | 阶段 | 交付边界与前置条件 |
 |---|---|
-| **F：diff → magit** | 前置 E3 已按确认范围完成，当前暂不启动。待另行确认后，先确认 diff 的最小行为与范围，复用 E3 的前景 / 背景、范围与行背景及字体强调能力，再推进 git 工作流；按实际需求增加进程、section 与 transient 原语，不预建通用 UI 框架。 |
+| **F：后续 Git 工作流** | F1 只读首版已完成；下一切片的优先级、Git 写操作 / transient 等范围须用户另行确认，不预建通用 UI 框架。 |
 
 ## 已知问题与未排期事项
 
+- **首次命令准备 draw 峰值（用户接受，非阻塞观察）**：small 三轮首次命令准备 draw 35.408–37.827 ms >16 ms，其中 prepaint 34.355–36.640 ms；后续 diff 动作没有相应超限。[静态调查](records/f1-command-prepaint-inspection.md)指向首次粗体候选的字体全库匹配冷路径，精确根因 / 占比未证实。用户接受当前表现并要求收尾，保留为以后性能测试的解释线索，不自动重开：同进程此前使用相同字体族 / 字重 / 样式可能已建立匹配缓存，纯文本浏览不保证如此；重启不能沿用进程内缓存。后续测量按[冷 / 热路径规则](performance.md#适用原则)记录，不静默预热、跳过首次峰值或记作已修复 / 总体预算通过。若实际影响使用，再确认最小定向采样；不与 E3 字体切换暂缓项合并。实测见 [宿主诊断](records/f1-diff-diagnostic-host-01.md)。
 - **字体切换时的 draw 峰值（用户接受暂缓）**：单 mixed 原生完整诊断中，字体阶段单次 draw 50.328 ms >16 ms，首场景 50.664 ms >50 ms；完整 ready 为 229.014 ms，常规滚动 / 输入表现正常。用户确认当前速度可接受，本轮不再追逐该峰值、不自动追加矩阵；保留实际超限和原预算，不记作已修复或全部性能通过。若后续字体切换实际影响使用，再确认最小定向定位范围。证据见 [完整诊断](records/e3-display-diagnostic-host-01.md)。
 - **中文输入时的轻微视觉跳动（非阻塞）**：E3 宿主人工复核中，用户报告中文输入时同行英文约向下跳 1–2 px，并接受本轮不解决；证据见 [人工记录](records/e3-host-manual-02.md)。尚未量化实际行高 / 基线变化或确认根因，保留为观察而非已修复；后续若影响使用，再确认定向诊断与修复范围，不自动补测。
 - **自定义缺失字体族的 fallback**：当前 GPUI 固定 fallback 丢失请求字重 / 斜体；通用族名 `monospace` 也未作为系统别名解析。用户已选择随包 Lilex 解决默认字体路径，不在本次扩展跨平台通用族名或修补依赖；显式指定上述名称仍可能回退普通字体。证据见 [解析诊断](records/e3-font-resolution-host-01.md)。涉及解析策略或依赖修复时另行确认，不将默认字体修复记作此问题已解决。
@@ -105,6 +106,18 @@ D 验收时遗留的错误信息与 mode line 重叠缺陷已由下节 D1 处理
 ### 日常编辑增强：段落移动与导航键
 
 已按用户确认的空白行分段规则补充 `forward-paragraph` / `backward-paragraph`，已按用户反馈修正为双向停在分隔空行的行首，连续空白行作为一组处理；边界与停点规则见 [F2 motion 契约](emacs-fidelity.md#已登记的-f2-motion-差异)。用户配置增加 Ctrl+方向键、PageUp / PageDown、Home / End 与 Ctrl+Home / End，应用默认键位不变。新增 7 项测试，并消除候选交互测试对固定命令数量 / 名称排序的依赖；`cargo test --lib --tests` 共 502 项通过。按用户要求不追加宿主、性能或真实配置运行验证，不进入 F。
+
+### 阶段 F1：mode 与只读 Magit diff
+
+共享 buffer mode、配置期局部键位与命令上下文、section 可见行 / 折叠显示、真实 staged / unstaged、diffstat / 导航 / 刷新及 RET 适当版本访问已完成。默认 **560 项**、native-profiler **609 项**全目标 Rust 测试、两套 Clippy、**145 项 Python**、JS / TypeScript、fish / 格式 / 差异检查及 release 构建通过；六类约 8 MiB、各三轮普通布局 / 输入 / 双方向分屏 headless 回归通过。一次 reviewer 的 5 项 P2 已修复并加入回归，证据见 [本地记录](records/f1-magit-diff-local.md)。
+
+[宿主定向验收](records/f1-magit-diff-host-01.md)的四组用户观察、源码 / 二进制身份、正文 / 配置及 HEAD / index 状态独立核对通过；用户确认“看着都没问题”，只读功能按确认范围完成。该批实际窗口尺寸未记录，未测原生性能；后续性能证据单独如下，不改写旧批次。
+
+专项补充：约 264 KiB / 2.06 MiB 真实 patch 的各三轮 headless、完整正文 / 独立折叠投影 oracle 和同场景双 view ready 检查通过，见[专项本地基线](records/f1-diff-performance-local.md)。首批原生 Probe 初始化失败及修复见 [host-01](records/f1-diff-performance-host-01.md)，第二批 setup draw 超限停止、无 diff 动作数据见 [host-02](records/f1-diff-performance-host-02.md)；两批失败产物保留。后续显式完整诊断工具完成一次集中审查修复，默认 **560 项** / profiler **631 项** Rust、**103 项**驱动 Python、两套 Clippy / fmt / diff / fish 及 release 构建通过，见[工具记录](records/f1-diff-diagnostic-local.md)。
+
+[small 三轮宿主完整诊断](records/f1-diff-diagnostic-host-01.md)共 78 行动作、93 个实际 draw 帧，源码 / 二进制 / fixture / 配置、正文 / 投影及提交证据核对通过，无空白 / 缺失，适用 diff 动作 draw / 垂直滚动 / idle 预算满足；新增 diff 时延只作基线。唯一重复超限为首次命令准备 draw 35–38 ms，静态排查后的用户接受决定见[定向记录](records/f1-command-prepaint-inspection.md#用户确认与收尾)。诊断 `acceptance=false; budget_passed=false` 保持，不冒充总体性能通过。
+
+用户要求记录该观察后收尾提交；无剩余必修项，不追加优化、宿主或 reviewer。原始目录全部保留；真实 IME 时延、GPU / 实际呈现、超大 diff、patch 变化刷新及其他未测矩阵不补记通过，E3 暂缓项保持不变。不外推为完整 Magit 或 Git 写工作流交付。
 
 ## 完成标准
 

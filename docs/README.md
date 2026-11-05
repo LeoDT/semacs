@@ -22,6 +22,8 @@ semacs 将 Emacs 的操作模型带到现代 GPU UI，不复刻 Emacs 外观或 
 
 | 材料 | 用途 |
 |---|---|
+| [F1 diff 专项本地基线](records/f1-diff-performance-local.md) / [首批启动失败与修复](records/f1-diff-performance-host-01.md) / [第二批 setup 超限](records/f1-diff-performance-host-02.md) / [完整诊断工具](records/f1-diff-diagnostic-local.md) / [三轮宿主完整数据](records/f1-diff-diagnostic-host-01.md) | 两档 headless、small 三轮原生诊断。78 行动作及正文 / 投影 / 帧核对通过，适用 diff 动作预算满足；首次命令准备 prepaint 导致 draw 35–38 ms 超限，总预算未通过；[静态定向排查](records/f1-command-prepaint-inspection.md)发现首次粗体候选的字体匹配冷路径嫌疑，用户接受为非阻塞观察并确认专项收尾，未优化 / 扩测；后续测试保留冷 / 热路径区别 |
+| [F1 mode 与 Magit diff 本地验证](records/f1-magit-diff-local.md) / [宿主定向验收](records/f1-magit-diff-host-01.md) | mode / 局部键位、只读 diff、一次审查修复与 headless 回归；用户四组功能观察及正文 / 配置 / HEAD / index 核对通过，F1 按确认范围完成 |
 | [E2 多语言本地验证](records/e2-languages-local.md) / [宿主工具准备](records/e2-host-tools-local.md) / [首批宿主回传](records/e2-languages-host-01.md) / [反馈修复本地验证](records/e2-flicker-fix-local.md) / [第二批宿主复核](records/e2-flicker-host-02.md) | 多语言实现、工具与宿主证据；RET / 闪烁修复及定向复核通过，用户已确认 E2 收尾 |
 | [E3 本地实现与性能回归](records/e3-styles-local.md) / [首版性能失败](records/e3-typography-probe.md) | 字体 / 装饰、范围 / 行背景、同环境对照与首版性能修复、一次集中审查及几何测试；初期本地证据，最终范围与收尾见 [实施计划](plan.md#阶段-e3文本样式与高亮合成) |
 | [E3 首批宿主字体失败](records/e3-host-manual-01.md) / [离线 fallback 诊断](records/e3-font-fallback-local.md) / [系统字体解析诊断](records/e3-font-resolution-host-01.md) | 宿主粗体 / 斜体不可见；确认原默认 monospace 解析失败、四种强调均落普通 fallback，保留失败与诊断证据 |
