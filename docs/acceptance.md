@@ -1,6 +1,6 @@
 # 验收流程
 
-本文维护验证范围的选择、本地 / 宿主分工、可执行入口与安全规则。行为见 [保真度契约](emacs-fidelity.md)，预算与指标见 [性能预算](performance.md)，阶段进度及历史证据从 [计划](plan.md) 和 [文档导航](README.md#按需参考与冻结记录) 查阅，不在本文逐阶段累积覆盖清单或批次结论。
+本文维护验证范围的选择、本地 / 宿主分工、可执行入口与安全规则。行为见 [保真度契约](emacs-fidelity.md)，预算与指标见 [性能预算](performance.md)，当前工作从 [计划](plan.md) 查阅，历史结论见 [阶段归档](archive/completed-through-f1.md)和 [冻结记录索引](records/README.md)，不在本文逐阶段累积覆盖清单或批次结论。
 
 ## 宿主验证的适用条件
 
@@ -83,8 +83,8 @@ fish scripts/acceptance.fish MODE NEW_OUTPUT_DIRECTORY --consent
 | `open-diagnostic` | [单次打开诊断](#单次打开诊断)，不是完整验收 |
 | `ime` | wtype / fcitx5 真实正文 IME 测量；需 Hyprland，不替代完整 minibuffer IME 观察 |
 | `split-ime` | 用户按窗口提示完成正文 / minibuffer IME；需 Hyprland、grim，见下节隐私说明 |
-| `manual` | 两窗口文件 / IME / OS 关闭；完整步骤见[人工文件与关闭流程](#manual人工文件与关闭流程) |
-| `candidates` | 候选、路径、buffer、字体及正文 / minibuffer IME；完整步骤见[定向人工验证](#候选式-minibuffer定向人工验证) |
+| `manual` | 两窗口文件 / IME / OS 关闭；完整步骤见[人工文件与关闭流程](acceptance/manual.md#manual人工文件与关闭流程) |
+| `candidates` | 候选、路径、buffer、字体及正文 / minibuffer IME；完整步骤见[定向人工验证](acceptance/manual.md#候选式-minibuffer定向人工验证) |
 | `scripting` | 启动、脚本命令、成功 / 失败重载和默认回退；[驱动](../scripts/scripting_manual.py)分阶段打印步骤 |
 | `messages` | 长 / 多行消息、读入注记、历史与编辑恢复；[fixture 工具](../scripts/m2_manual.py)打印五组步骤 |
 | `themes` | 配色 / 用户覆盖、分屏、取消、读入与编辑恢复；fixture 工具打印五组步骤 |
@@ -92,7 +92,7 @@ fish scripts/acceptance.fish MODE NEW_OUTPUT_DIRECTORY --consent
 | `languages` | 一个窗口，Markdown / HTML 嵌入高亮、分屏 / 主题、两处正文真实 IME 取消 / 提交、历史及保存；fixture 工具打印五组步骤，独立核对两个“你”和配置字节 |
 | `flicker` | 一个窗口，Markdown / HTML 各约 256 KiB，ASCII 连续输入 / 删除及共享显示 / 历史的配色稳定性；三组目视步骤，独立核对正文恢复及空配置，不复测 IME |
 | `syntax-perf` | Markdown（含 HTML→JS/CSS）/ HTML 各约 256 KiB、各三轮原生 CPU 输入 / 绘制；布局与语法 ready 分开记录，不外推大文件全矩阵 |
-| `diff-perf` / `diff-diagnostic` | F1 diff 原生 CPU / 提交专项，约 256 KiB patch 三轮，每轮一个窗口及内部左右分屏；前者超限即停，后者显式完整诊断、记录性能超限后继续，见 [专项说明](#f1-diff-专项性能) |
+| `diff-perf` / `diff-diagnostic` | F1 diff 原生 CPU / 提交专项，约 256 KiB patch 三轮，每轮一个窗口及内部左右分屏；前者超限即停，后者显式完整诊断、记录性能超限后继续，见 [专项说明](acceptance/profiles.md#f1-diff-专项性能) |
 | `magit` | 一个窗口，隔离配置与临时 Git 仓库；四组 diff 显示 / 折叠导航、分屏刷新、长行水平查看、旧侧 / index / worktree 访问，见 [fixture 说明](../scripts/magit_fixture.py) |
 | `styles` | 一个窗口，隔离 rich / plain 主题下的 Rust / Markdown 字体、装饰、背景与换行，用户手动做两处 IME 取消 / 提交；四组观察及独立字节核对 |
 | `styles-perf` | mixed 约 8 MiB 三轮，再 Markdown 约 256 KiB 三轮；至多六个顺序窗口，复用原生 CPU 驱动，不展开全矩阵 |
@@ -101,37 +101,19 @@ fish scripts/acceptance.fish MODE NEW_OUTPUT_DIRECTORY --consent
 
 ### F1 最小定向验证
 
-`magit` 使用一个窗口及其内部分屏，检查样式 / 折叠指示、导航、共享刷新、截断长行与 RET 的适当版本访问；详细键序列只在 `scripts/magit_fixture.py` 维护。驱动为测试子进程设置独立 `XDG_CONFIG_HOME`，清除继承的 `GIT_*` 覆盖并禁用全局 / 系统 Git 配置；不修改父终端环境、日常配置或仓库。
-
-fixture 准备只在新输出目录建立两份 tracked 文件及确定的 HEAD / index / worktree 差异。结束后独立核对正文 / init.js 字节、HEAD 身份、index / Git 配置字节及两侧 blob；不把人工回答 yes 代替字节检查。任一失败停止，不修复 fixture 或自动重试。没有截图、自动注键、输入法变动或原生性能测量；原生颜色 / 字体 / 几何来自人工观察，不记作 GPU / 呈现时延或完整性能矩阵通过。
+`magit` 的隔离范围、操作与独立字节核对见 [F1 定向流程](acceptance/profiles.md#f1-最小定向验证)。
 
 ### F1 diff 专项性能
 
-先完成本地专项工具自检，再对具体原生批次征求同意。`diff-perf` 顺序打开三个窗口；每轮复用同一临时仓库，按 staged / unstaged 覆盖打开、首 hunk 定位与折叠 / 展开、长改动行导航、垂直滚动、左右分屏、共享折叠 / 刷新 / 展开，以及两段各 30 个无主动 invalidation tick。刷新重读不变的磁盘 patch；不测改宽、字体、输入、真实 IME 或 OS 键盘。运行期间不要键入、改宽或关闭 probe。
-
-仅使用合成 GPUI 动作，不自动注入 OS 按键、不修改输入法、不截图。驱动给子进程设置空的独立 `XDG_CONFIG_HOME`，隔离 Git 全局 / 系统配置与继承的 `GIT_*`，不操作日常仓库。全部 fixture / HEAD / index / Git 配置、独立正文及投影 oracle 和 manifest 在测试前冻结；每轮前后检查源码 / 二进制 / fixture / 配置。构建强制使用仓库 target 目录，摘要实际受测 example；输出保存 HEAD 相对的全部 tracked 差异及 untracked 源码。
-
-逐帧核对真实目标 buffer / 正文版本、当前折叠投影、兼容布局及同场景双 view 就绪，不能用旧正文提交代替刷新完成；计时后另核对完整正文及独立投影 oracle。原生保留实际适用的 draw / 垂直滚动 / idle 门限，其余 diff 时延无新增门限，只作基线。30 秒阶段观察上限及父进程 watchdog 是资源保护，不是放宽后的性能预算。默认 `diff-perf` 任何超限、正文 / 投影 / 身份错误或异常立即停批，不重试或修复 fixture。
-
-用户另行批准的 `diff-diagnostic` 沿用相同 small 三轮和动作，不在 setup 超限时提前结束：窗口启动、命令准备及动作的实际帧全部写入 `*.frames.csv`，记录 draw、request-layout / prepaint / paint / other、CPU submit、同帧正文几何与 display 身份；setup 不冒充动作时延。性能超限逐帧 / 逐动作标记并继续本批剩余动作和窗口，idle 产生 draw 也保留原预算失败，不填造 idle 时延。报告 / 环境明确 `diagnostic=true`、`acceptance=false`；`completed=true` 只表示采集完成，`budget_passed` 按全部适用证据独立判定，普通读取入口拒绝诊断报告。驱动交叉核对逐帧数据、动作统计和提交边界，setup 超限也不能漏记到总体判定外。
-
-两种模式的正文 / 投影 / 几何 / 身份错误、异常、观测丢失与安全超时仍停止后续动作 / 窗口，保留部分 CSV / frames / spans、stdout / stderr 及停止原因，不重试或修复 fixture。父进程按窗口启动、阶段准备与实际动作的进度刷新 watchdog，不因 UI 卡住而无限等待，也不把安全超时当成放宽后的预算。CPU 提交仍不证明 GPU / 屏幕呈现。
+`diff-perf` / `diff-diagnostic` 的动作、逐帧证据、停止策略与非验收边界见 [diff 专项流程](acceptance/profiles.md#f1-diff-专项性能)。
 
 ### E3 最小定向验证
 
-先运行 `styles`，全部人工观察与磁盘字节检查通过后，才运行独立新目录的 `styles-perf`。详细操作仅由 fixture 工具打印，不在这里重复维护。
-
-`styles` 只打开一个窗口，用可丢弃 Rust / Markdown 和隔离配置检查随包默认 Lilex 的粗斜体 / 装饰、范围背景、选区 / 光标、换行与候选坐标。用户手动切换输入法并在两份正文首行各提交一个“你”，Rust 还执行 undo / redo；工具核对最终字节与配置不变。记录窗口尺寸、字体效果和输入法名称；看不出变体时先记录并停止，不自行改字体重试。没有截图、OS 注键或自动输入法切换，不测 IME 时延。整行背景原语仍以本地几何回归为证据，不把文字范围背景的目视检查说成整行背景宿主验收。
-
-`styles-perf` 先用约 8 MiB mixed 覆盖普通文本的完整字体测量 / 换行，再用带真实 Markdown 语言身份的约 256 KiB 样本覆盖强调字体与嵌入高亮，各三轮；并未测试 HTML 窗口、全部 8 MiB 形状或持续输入。最多六个窗口顺序运行，期间不要输入、改宽或关闭 probe。两段均使用隔离空配置；普通 mixed 在当前阶段检查既有首场景 / 当前正文 / 完整 ready 与 draw 预算；超限即保存含失败阶段的部分报告并非零退出，不推进下一动作或后续窗口。未观察到的提交边界留空，已提交的时刻不因回调迟到而改成观察时间；Markdown 段沿用下节逐阶段检查、冻结 fixture 和 pending 输入覆盖校验。布局与语法整体就绪继续分开，不新增或放宽预算，不冒充 GPU / 实际呈现测量。
+`styles` / `styles-perf` 的先后顺序、字体 / IME 观察与代表性性能范围见 [E3 定向流程](acceptance/profiles.md#e3-最小定向验证)。
 
 ### E2 定向原生 CPU 批次
 
-`syntax-perf` 使用隔离空配置和带 `.md` / `.html` 路径的 buffer，六个窗口依次运行；不接受无语法路径的普通文本作为 E2 证据。两份样本生成时写入统一 SHA-256 manifest，fish 将同一 manifest 摘要交给两种样本的驱动；每轮启动前 / 完成后核对整批两份文件及 manifest，不能在后一个样本启动时重新建立变更后的基线。输入位置由完整 script marker（Markdown 还包含围栏上下文）定位到嵌入 JavaScript 的 `call(42)` 前，测插入 / 删除、换行 / 合行、同回调 32 键插入 / 删除，随后 30 次稳定强制重绘及 30 个无主动失效 tick。只使用合成 GPUI 输入；运行期间不要键入、改变窗口或关闭 probe。
-
-逐帧核对精确 display 目标、当前 committed 语法快照、正文可见和索引覆盖；报告单列首次提交、布局 ready、观察到的语法 + 布局 ready。中间版本可在布局就绪后被下一次编辑取代，未观察到的语法 ready 留空，不填 0；最后一次编辑须等待当前快照语法完成后才进入稳定绘制 / idle。报告记录动作前语法 pending 状态；若整轮没有在前一版本语法仍 pending 时输入，按覆盖缺失停止，不冒充测到实际 worker 线程并行或自动调整样本重测。
-
-已适用的输入 / CPU 提交 / draw / idle 门限不变，语法整体就绪没有新增数值门限，也不套旧纯布局门限。超限、帧 / 身份缺失、字节错误、未取得 pending 输入覆盖或配置 / fixture 变化均停止后续窗口并保留失败报告。此代表性批次不替代 8 MiB 六类矩阵、持续输入、真实 IME 时延或 GPU / 实际呈现证明。
+`syntax-perf` 的样本冻结、pending 输入覆盖和逐阶段校验见 [E2 定向流程](acceptance/profiles.md#e2-定向原生-cpu-批次)。
 
 ## 原生性能与诊断
 
@@ -171,86 +153,11 @@ python3 -B scripts/perf_native.py .pi/tmp/NEW-mixed.txt .pi/tmp/NEW-display-diag
 
 ## manual：人工文件与关闭流程
 
-两个窗口均使用本批独立空配置和默认键位，不读取日常 `init.js`。
-
-### 第一个窗口
-
-脚本打印本轮文件目录，下文的路径均指该目录中的可丢弃文件。不要在自己的工作文件上操作。遇到任一步异常，记录现象并答 no，停止，不通过修改期望字节掩盖问题。
-
-1. 初始打开 `alpha.txt`，显示两行 alpha / second，初始 clean。
-2. `C-x C-f` 输入 **完整 beta.txt 路径**并 RET。正文开头输入大写 `Y`；`M-x` 输入 `save-buffer` 并 RET。应显示 Ybeta，保存后 clean。
-   - 可在输入命令名前用 C-a / DEL 检查 prompt 不会被删除，随后正常输入命令名。
-3. `C-x b` 输入 `alpha.txt` 并 RET，正文开头输入大写 `X`。
-4. 再 `C-x b`，在 minibuffer 开启中文输入法，输入 ni，观察候选位置正常，选择“你”；确认文字只进入 minibuffer，随后 `C-g`。正文仍为 Xalpha / second，point 应恢复到 X 后，焦点在正文。关闭中文输入状态。
-5. 正文开启中文输入法，ni 后选择“你”；再输入 ni，观察预编辑 / 候选，然后用输入法消费的 Escape 取消预编辑。关闭中文输入状态。正文最终应为 **X你alpha / second**，无残留 ni、不重复提交。
-   - 如果候选首项不是“你”，明确选择“你”，不要把不同候选结果记为程序缺陷。
-6. `C-x C-s` 保存 alpha，等待 clean；`C-x C-w` 输入 **完整 overwrite.txt 路径**并 RET。应出现覆盖查询；只按 `y`，不加 RET，即可保存。文件身份变为 overwrite.txt，焦点恢复正文；用 C-f / C-b 检查运动即可，不再插入额外正文。
-7. `C-x b` 切到 beta.txt，确认仍为 Ybeta；`C-x k RET` 关闭该 clean buffer。回到 overwrite.txt 后 `M-x C-g` 应取消并回显 Quit，随后 `C-x C-c` 正常退出。
-
-在终端分别确认键盘文件闭环、正文 IME、minibuffer IME。脚本最后检查 alpha / overwrite 的 BOM、CRLF、无末尾换行及精确文字，beta 保持 LF 与末尾换行。UI 状态和候选位置仍以你的观察为证。
-
-### 第二个窗口
-
-1. 初始打开 close.txt，在开头输入大写 `Z`；`M-x` 输入未完成的命令名 `for`。
-2. 使用平时合成器的 **关闭窗口快捷键 / 标题栏关闭按钮**，不要用 `C-x C-c` 代替 OS 关闭。当前实现应取消读命令会话并出现保存询问，而不是立即丢数据。
-3. 按 RET，不能默认同意或关闭；再 `C-g` 取消。窗口必须保留，Zclose 仍在，焦点恢复正文。用 C-f / C-b 检查即可。
-4. 再触发 OS 关闭，在保存询问按单键 `n`。应继续询问是否放弃仍修改的 buffer；输入完整 `no RET`，取消退出，文字仍保留。
-5. `C-x C-s`，等待 clean，然后再触发 OS 关闭，应直接退出。脚本独立检查 close.txt 为 `Zclose\n`。
-
-若平台只能走已批准的窗口级确认例外，记录实际流程、安全默认取消与焦点情况，先回报，不直接把不符上述预期的步骤勾成通过。
+两个隔离窗口的文件闭环、正文 / minibuffer IME 与 OS 关闭步骤见 [人工文件与关闭流程](acceptance/manual.md#manual人工文件与关闭流程)。
 
 ## 候选式 minibuffer：定向人工验证
 
-本项使用 `candidates` 模式及本批独立空配置，初始默认键位、字号 16px；不自动注键，不测性能。不将既有 `manual` 模式的结果当作本项通过。
-
-脚本打印的 `files` 目录为本轮全部测试文件所在位置。窗口初始打开 `source.txt`，内容为两行 `alpha second` / `next line`，clean。只操作这些文件，不使用自己的工作文件。以下各组按顺序操作；脚本在窗口退出后逐组询问，不必在终端与窗口间来回切换。建议另开本文对照。
-
-**任何一步异常即停止，不继续后面的组、不修复 fixture 或重试。** 记录现象，必要时自行保留截图；关闭测试窗口后对失败或未观察的组答 no。若有 dirty buffer，可在退出查询明确选择不保存以结束本轮；这些只是测试文件。脚本保留失败报告和 STOP 原因，之后回传整个输出目录。
-
-### 1. 命令、选择与取消（candidate-command）
-
-- 初始正文按 `C-f C-f C-t C-f`，point 在 `alp` 后，mark 在 `al` 后。`M-x` 应立即展示候选、位置 / 总数及键位注释，最多 8 行，窗口不足时可更少。
-- 输入 `fwd`，观察有序字符命中高亮。用方向键及 C-n / C-p 移动，输入仍为 `fwd`，边界不循环；从首候选向上可选中输入行。不要假设完整评分顺序。
-- 选择 `forward-char` 后 TAB，输入变为完整命令名但未执行。C-a / DEL 不能删掉 prompt。C-g 取消后应恢复正文焦点、point、mark / active 与原滚动。
-- 正文 C-g 停用 region，M-< 回到开头。再 M-x 输入 `fwd`，选择 `forward-word` 后 RET，应退出会话并把 point 移到 `alpha` 后，正文不变。
-- 再 M-x 输入 `fwd`，M-RET 应提示无匹配并保留会话，不把缩写当精确命令名；C-g 取消。
-
-### 2. 文件、目录、新名称与覆盖（candidate-files）
-
-- C-x C-f 无输入即列出 source 所在目录，输入行被选中。输入 `su`，选中 `sub/` 后 RET 进入，输入为 `sub/`，显示子项并预选输入行；再次 RET 不应误开首文件。
-- 选择 `child-document.txt` 后 TAB，应仅填入 `sub/child-document.txt`；RET 打开。C-x b 输入 `source.txt` 后 RET 返回原 buffer。
-- C-x C-f 输入 `alpha`，应匹配已有的 `alpha-existing.txt`；用 M-RET 接受原始新名称，打开空的新文件 buffer。输入 **NEW-A**，C-x C-s 保存，等待 clean；C-x b 输入 `source.txt` 后 RET。
-- C-x C-f 输入 `al`，从首候选向上选择输入行后 RET，打开原始新名称 `al`，不是已有候选。输入 **NEW-B**，C-x C-s 保存；再切回 source。
-- source 中 M-< 后输入大写 **X**。C-x C-w 输入 `ovr`，选择 `overwrite.txt` 后 RET，应进入覆盖查询。只按 RET 不能默认同意，随后 C-g 取消，source 仍 dirty。
-- 再 C-x C-w 输入 `ovr`，选择 overwrite 后 RET，再按单键 `y`。保存后身份变为 `overwrite.txt`、clean，正文为 `Xalpha second` / `next line`。原 source 文件的磁盘内容仍不变。
-
-### 3. buffer 默认项、注释与安全确认（candidate-buffers）
-
-- C-x b 输入 `alpha` 后 RET，进入刚创建的文件；point 到结尾 C-e，输入 **!**，使内容为 `NEW-A!`。
-- 再 C-x b，候选中其他 buffer 的路径可见；C-g 取消后仍在 alpha。C-x k 应默认选中 alpha，自身候选注释为 dirty（**）及路径；RET 后出现 dirty 确认，不能按 RET 默认关闭。C-g 取消后文字 / 焦点保留；C-x C-s 保存 alpha。
-- C-x b 输入 `missing-buffer` 后 M-RET，应拒绝且留在会话，不创建新 buffer。C-g 取消。
-- 无输入 C-x b，核对默认项与 prompt 的默认名称相符；RET 切换到该默认 buffer。
-
-### 4. 字体、字号、窄窗口与长名称（candidate-layout-font）
-
-- M-x `set-font-family` RET，输入本机已安装的一个具体字体族名后 RET（不使用 `monospace` / `sans-serif` 通用别名）。按实际显示观察字体变化；系统字体回退不算字体实际命中的证明。脚本另保存 fc-match 环境信息，但它不代表随包默认字体或 GPUI 的实际命中。
-- M-x `increase-font-size` RET，重复共四次，从 16px 增至 20px。
-- 正常窗口以及约 480px 宽的窄窗口中，分别检查 M-x 的候选列表。连续向下到末项、向上到输入行时，选中项始终可见、不循环；输入行、计数与列表不裁切，输入行选择标识可辨。C-g 取消。
-- C-x C-f 输入 `sub/`，检查多个 long-candidate 长名称的截断和选择高亮。选择一个长名称 RET 打开，再 C-x b 输入 `overwrite.txt` 后 RET；再次 C-x b 检查长名称 buffer 的文件路径注释截断。C-g 取消。
-- 保留 20px 与当前字体继续下面的 IME 检查；不要求保持窄窗口，但需记下观察时的大致窗口尺寸。
-
-### 5. minibuffer IME（candidate-minibuffer-ime）
-
-- C-x b 开启中文输入法，输入 ni，观察预编辑及输入法候选窗位置。编辑器的候选列表应冻结，不把未提交拼音拿去过滤；IME 自己消费的上下选择等操作应正常，不与编辑器候选混淆。
-- 明确选择“你”提交，应只在 minibuffer 出现一次，提交后编辑器过滤恢复（无匹配是正常的）。关闭中文输入状态，C-g 取消；正文 / 焦点恢复且没有拼音或“你”进入正文。
-- 再 C-x b 输入 ni，用输入法自己消费的 Escape 取消预编辑；应无残留拼音。关闭中文输入状态，C-g 取消读入，正文输入仍正常。
-
-### 6. 正文 IME 与收尾（candidate-body-ime）
-
-- C-x b 输入 `overwrite.txt` 后 RET，M-< 回到开头。开启中文输入法，ni 后明确选择“你”提交；再输入 ni，观察预编辑 / 候选窗，然后用输入法自己消费的 Escape 取消。
-- 关闭中文输入状态。正文应为 **你Xalpha second** / **next line**，不重复、不残留 ni；C-x C-s 保存并等待 clean。
-- 可用 M-x `reset-font-size` 恢复 16px，再 `set-font-family` 恢复 `Lilex`；这些设置仅本次运行有效。
-- C-x C-c 退出。全部测试 buffer 应 clean；不要额外改字。脚本询问上面六组观察以及窗口尺寸 / 字体说明，并独立核对新文件、未覆盖的原文件和所有子目录 fixture 的字节。任何未观察项目均答 no。
+`candidates` 的候选 / 路径 / buffer、字体与窄窗口、正文 / minibuffer IME 六组操作见 [候选式读入流程](acceptance/manual.md#候选式-minibuffer定向人工验证)。
 
 ## 结论与证据边界
 

@@ -1,12 +1,13 @@
-# JS 脚本扩展与热重载调研（待确认）
+# JS 脚本扩展与热重载调研
 
-> 本文是调研记录，**不是已批准的架构决策、实施规格或行为契约**。文中的分层、不变量与建议均待用户确认；现有有效边界仍以 [D26](../decisions.md#d26-rust-核心与脚本扩展)、[D28](../decisions.md#d28-buffer-mode-与结构化显示) 和[阶段 D 契约](../emacs-fidelity.md#阶段-djs-配置与文本变换)为准。本文不表示开始实现，也不改变当前阶段顺序。
+> 本文整理静态调研及后续讨论，**不是已批准的架构决策、实施规格或行为契约**。第 8 节记录用户认同的 Job / 恢复方向，不代表接口、存储方案或实现排期已批准；其他分层、不变量与 API 建议仍待确认。现有有效边界仍以 [D26](../decisions.md#d26-rust-核心与脚本扩展)、[D28](../decisions.md#d28-buffer-mode-与结构化显示) 和[阶段 D 契约](../emacs-fidelity.md#阶段-djs-配置与文本变换)为准，当前工作只见 [实施计划](../plan.md)。
 
 ## 摘要
 
 - semacs 现有「配置快照 + 代次运行时 + 原子替换」已经覆盖纯声明与同步纯变换；扩展的难点是**谁拥有比一次命令活得更久的东西**。
 - LSP / 编译任务是**深 L2 / L3** 场景，验证长期服务、事件流与任务所有权；Magit 是**宽 L1 + 轻 L2** 场景，验证 buffer 投影、section、mode 与工作流组合。两者不能互相替代验证。
 - 共同原则：**JS 决策，core 执行**。数据、纯函数与 handler 引用可以进 reload 快照；会话、进程、任务、不可逆效果由 Rust 拥有。
+- 后续讨论认可**核心 Job → 按需持久化 Job → 真实需求驱动的 Durable workflow**方向；先区分脚本代次与核心会话所有权，不把完整持久工作流作为 Magit 前置条件。详见第 8 节。
 
 ## 调研范围与证据边界
 
@@ -44,34 +45,34 @@
 |---|---|---|---|
 | **L0 声明式** | 命令名、键位、主题、字体、server 配置、任务定义 | 全量校验后整体替换；失败保留旧 | 现有模型 |
 | **L1 有界同步编辑 / 查询** | 读 point / region / 行、message、受限插入删除、创建只读 buffer、构造 section | 单次事务；写带目标与文本版本围栏；旧代结果不提交 | host-call + effect fence + 批量投影 API |
-| **L2 异步与外部资源** | 文件、进程、网络、定时器、长任务、LSP 请求 | 资源属于代次；重载时取消 / 有界 drain / 确定性关闭；迟到结果三重围栏 | generation abort、资源注册表、异步命令状态机、core-owned job |
+| **L2 异步与外部资源** | 文件、进程、网络、定时器、长任务、LSP 请求 | 脚本续体 / 租约随代次失效；核心任务 / 会话按其 owner 生命周期保留或关闭；迟到脚本结果受围栏约束 | generation abort、明确资源 owner、有界 drain、异步命令状态机、core-owned job |
 | **L3 事件 / 贡献** | on-save、after-edit、mode hook、补全源、装饰、自定义 LSP handler | 贡献是 registry 条目，随 contributor 存活；commit 后旧回调不再调用；缺失可 fallback | core-owned registry + 贡献 lease + 逐回调隔离 |
-| **L4 持久状态 / 多来源** | 跨 reload 状态、版本迁移、多脚本源、第三方包 | 状态归 core，按 namespace / version 持久化与迁移；按来源独立重载 | 版本化文档、来源身份、信任边界 |
+| **L4 通用持久状态 / 多来源** | 扩展状态持久化、版本迁移、多脚本源、第三方包 | 状态归 core，按 namespace / version 持久化与迁移；按来源独立重载 | 版本化文档、来源身份、信任边界 |
 
-一个功能会组合多层。例如 LSP 主体是 L2 服务 + L3 事件面 + L1 效果面 + L0 声明；Magit 主体是宽 L1 + 轻 L2。不能因为功能复杂就新造一层。
+一个功能会组合多层。例如 LSP 主体是 L2 服务 + L3 事件面 + L1 效果面 + L0 声明；Magit 主体是宽 L1 + 轻 L2。不能因为功能复杂就新造一层。核心 Job 跨 reload 存活不等于持久化；为某类 Job 保存记录，也不要求先实现完整 L4 扩展状态体系。
 
 ## 3. 建议的 reload 不变量（待确认）
 
 以下是把现有语义推广到扩展场景的最小集合，不是新增产品承诺：
 
 1. **声明与激活分离**：配置阶段只声明；资源由 core 在 commit 后创建。配置脚本不产生外部副作用。
-2. **generation 所有权**：脚本可见的句柄、任务、订阅都属于某一代；重载时由 core 确定性回收，不依赖 GC / finalizer。
+2. **两类所有权**：脚本函数、订阅、续体与代次绑定的句柄属于该代，重载时确定性失效，不依赖 GC / finalizer；核心 Job / 会话有独立 owner，不能因发起脚本换代而自动销毁。脚本句柄失效不等于底层任务被取消。
 3. **快照进、请求出**：脚本不持有可变核心状态；读取拿快照或句柄，写入提交 effect 描述，由 core 校验并应用。**JS 是决策层，不是执行层。**
 4. **commit 是主线程的短临界区**：不可失败、不可阻塞、不可 `await`；昂贵与可失败工作全部在 worker 中预先完成。
 5. **错误四分类**：
    - 构建 / 校验失败 → 保留旧配置；
    - commit 后激活失败 → 停用该贡献并报告，不让整次重载回滚；
    - 运行期失败 → 只影响本次调用，隔离并报告；
-   - 旧代在途结果 → 按 generation + 目标 + 版本丢弃。
-6. **贡献必须有 fallback**：脚本 handler / renderer 缺失、失败、超时或正在 reload 时，core 能退回原生行为。
-7. **不可逆效果必须由 core 拥有**：任务、进程、workspace edit、文件写入不能只存在于 JS continuation 中；JS 消失后，已开始的 core 工作仍能完成或被明确取消。
+   - 旧代在途脚本结果 → 按 generation + 目标 + 版本拒绝应用；核心已接受工作的实际结果仍须记录。
+6. **贡献必须能安全降级**：脚本 handler / renderer 缺失、失败或超时时，退回原生行为、保留可读投影或停用并报告；不要求为每个自定义扩展复制一份原生实现。
+7. **不可逆效果必须由 core 拥有**：任务、进程、workspace edit、文件写入不能只存在于 JS continuation 中。核心负责记录成功、失败或中断；取消只是请求，不等于撤销已发生的外部效果，也不保证操作成功。
 
 ### 3.1 重载事务顺序（建议）
 
 1. 标记 reload 进行中（同一时刻至多一个）；旧配置继续服务。
 2. worker 构建新代，完成全部声明与可预先完成的校验。
 3. 主线程 commit：先摘旧贡献，再挂新贡献；更新声明、handler、键位、字体、主题；清 pending 前缀。
-4. commit 后：只为声明发生变化的长期服务重启；旧代资源确定性关闭；旧代 continuation 丢弃。
+4. commit 后：只为声明发生变化的长期服务重启；回收旧代专属资源和 continuation，核心拥有的任务 / 会话按其生命周期继续或关闭。
 5. 报告：失败原因、被停用的贡献、被重启的服务。
 
 ### 3.2 必须显式回答的问题
@@ -87,8 +88,8 @@
 | facet 只声明，host 激活 | 配置阶段只声明，core commit 后建资源 | 现在采用 |
 | staging → commit → 对象 fate | reload 构建 → 原子替换 → 每个对象明确 fate | 现在采用 |
 | 贡献在 contributor 存活期间存在，重载整体替换 | command / keymap / mode / handler registry | L3 之前采用 |
-| 使用点隔离异常并 fallback | 每个脚本调用点 catch、限时、退回原生 | 扩展时采用 |
-| native 资源不跨代迁移，必须重启 | 进程 / 连接 / 句柄属于代次 | L2 采用 |
+| 使用点隔离异常并 fallback | 每个脚本调用点 catch、限时、安全降级 | 扩展时采用 |
+| 实现拥有的 native 不跨实现代次迁移 | 脚本专属资源换代回收；核心会话不因脚本 reload 一律重启 | L2 按 owner 区分 |
 | 需要跨 reload 的状态放在插件之外 | point / scroll / folding / 诊断缓存归 core | 现在采用 |
 | 显式 reload，watcher 只标记不应用 | `M-x reload-configuration` | 已一致 |
 | ctx 取消 + owned jobs + 有界输出 | 异步请求、编译任务、输出流 | L2 采用 |
@@ -96,7 +97,8 @@
 
 ### 4.2 不借鉴
 
-- 多 host、link、principal、wire、Durable、对象引用图谱、compose 图：semacs 没有这些失效面。
+- 多 host、link、principal、wire、对象引用图谱、compose 图：semacs 没有这些失效面。
+- 整套 Durable harness / 持久工作流引擎不直接照搬；不排除借鉴持久化 Job 和恢复策略，二者区别见第 8 节。
 - 完整 `documents` / `watchable` / `derive` 体系：编辑器状态由 Rust 核心直接提供原语即可。
 - per-plugin loader 与 per-plugin keep-old + closure rule：当前单文件配置继续「整份成功或整份保留旧配置」，更简单可预测；只有出现多来源时才需要重新评估。
 - async-everywhere：code action 过滤、inlay hint 开关等需要同步快路径，不能所有 API 都变 Promise。
@@ -122,7 +124,7 @@
 
 - `declare`：server 配置、任务定义、设置。纯数据，可比较 / 可 diff。
 - `decide`：状态文本、code action 过滤、自定义输出解析。纯函数，限时，失败 fallback。
-- `request`：发起 LSP 请求 / 启动任务。返回 effect 描述或 job id；**continuation 与效果归 core**。
+- `request`：发起 LSP 请求 / 启动任务。返回 effect 描述或 job id；核心持有请求、任务和结果，JS continuation 仍随脚本代次失效。
 
 ### 5.3 关键结论
 
@@ -131,7 +133,7 @@
 - handler registry 需要 `method / command → generation-tagged fn`，每个来源至多一条，冲突报告，原生 fallback。
 - 高频诊断 / 进度不能逐事件进 JS 队列；应使用 latest-value 快照，日志 / 任务输出使用有界流。
 - 声明需要等价性判断（如配置 digest），避免每次 reload 都重启所有 server。
-- 在途请求：core 请求可继续；JS continuation 随代次消失；已提交的 effect 由 core 保证完成。
+- 在途请求：core 请求可继续；JS continuation 随代次消失；核心已接受的 effect 继续跟踪到成功、失败或明确中断，不丢弃真实结果。
 - 运行中的编译任务默认不应因 reload 被杀；完成回调不是唯一结果通道，core 记录结果供新代读取。
 
 ### 5.4 当前缺口
@@ -177,7 +179,7 @@ Magit 是**宽 L1 + 轻 L2**：
 - L1：只读 buffer、批量写入、section 构造、刷新替换、结构化选区。
 - L2：短命的 git 进程与异步刷新。
 - L3：mode / 命令 / 动作注册与 fallback。
-- 基本不需要 L4：Git 是唯一真源。
+- 仓库状态以 Git 为唯一真源，不需要通用 L4 状态体系；这不排除以后持久化 commit message 草稿或任务历史。
 
 ### 6.4 当前缺口
 
@@ -185,7 +187,7 @@ Magit 是**宽 L1 + 轻 L2**：
 2. 命令模型只有 region transform，没有「命令 → effect」模型，也没有异步。
 3. 没有 buffer 创建 / 批量写入 / 只读 buffer API；`Buffer::named`、`from_text`、`set_mode` 均为 `pub(crate)`。
 4. `Sections::new` 已有批量构造与校验，但无脚本入口。
-5. 没有通用 process API；`git::read` 是 crate 内部且专用。
+5. 没有脚本可用的 Git 请求接口；`git::read` 是 crate 内部且专用。是否开放通用 process API 应另定，不是 status 首版的必然前置。
 6. 没有 transient / suffix UI；minibuffer 只能覆盖单值读入。
 7. 没有 JS 范围样式 / 装饰 API（E3 已明确未开放）。
 8. 脚本运行时异步即隔离，无法承载 git 调用。
@@ -193,7 +195,7 @@ Magit 是**宽 L1 + 轻 L2**：
 ### 6.5 适合作为「完整 JS 扩展」的驱动场景吗
 
 - **适合作为广度 / 集成验收场景**：外部真源、可重建、无长会话、有真实价值、可增量切片。
-- **不适合作为第一个驱动场景**：一次性需要 mode、buffer、section、process、async、transient 五六类原语；API 面过宽；性能敏感；与 F1 已有实现重叠；且不验证最难的服务生命周期问题。
+- **不适合把完整 Magit 当作第一个驱动场景**：它横跨 mode、buffer、section、进程请求、async、transient 等能力；API 面过宽、性能敏感且与 F1 重叠，也不验证最难的服务生命周期问题。最小只读 status 可以只验证其中必要子集，不要求一次开放所有原语。
 - 若目标是尽快交付 Magit：native 引擎 + JS 工作流风险最低，符合 D26。
 - 若目标是验证脚本能力：Magit 适合在 L1 / L2 原语就位后作为集成场景，而不是用来定义架构。
 
@@ -217,20 +219,61 @@ Magit 是**宽 L1 + 轻 L2**：
 - 不把 `ScriptCommand { generation, index }` 的索引身份泄漏到未来 API；多来源前改为 source id + 稳定名字。
 - 不逐个 API 打补丁；L2 需要一次性设计 generation 所有权、取消与回收。
 
-## 8. 待确认事项
+## 8. Job 与可恢复任务：讨论共识及实施边界
 
-以下问题会直接改变架构，本文只记录，不替用户决定：
+用户认同的方向是：先由核心拥有任务、使其不依赖发起脚本存活，再按实际需求增加持久化；完整 Durable workflow 不作为 Magit 前置条件。这不是任务 API、存储方案、恢复策略或实现排期的批准，不改变当前无脚本后台任务 API 的事实。
+
+### 8.1 三种恢复与进程托管的区别
+
+| 能力 | 含义与方向 |
+|---|---|
+| 跨配置 reload | 核心任务继续运行，参数、输出、结果不只存在于旧 JS 回调中；新代可查询 |
+| 跨编辑器重启恢复记录 | 找回任务身份、参数、有界输出和已知结果；运行中断要明确显示，不假定进程仍活着 |
+| 从检查点继续工作流 | 恢复显式保存的阶段和数据，由任务定义决定下一步；不是序列化任意 JS closure / 调用栈 |
+| 退出后进程继续运行并重新连接 | 需要独立进程托管与通信机制；不由任务持久化自动提供，不纳入当前方向 |
+
+### 8.2 借鉴 intent → run → finish
+
+Chord §15 的 Job 是有所有权的一次后台工作，可选持久化；Durable task 进一步承载多步骤、等待和子任务等工作流。semacs 可以先借前者，不引入 Chord 的整套对象 / 文档体系：
+
+1. **Intent**：先记录稳定任务身份、类型 / 版本、owner、参数与必要目标 / 输入身份，再开始执行。
+2. **Run**：核心管理外部执行、取消、有界输出和进度；等待者取消不等于任务取消。
+3. **Finish**：核心记录实际结果并更新相关状态。将来持久化时，已记录 outcome 的任务只需完成收尾，不重复外部执行；未确定的外部结果不能冒充成功或失败。
+
+配置重载应使旧脚本失去控制权，而不是使已接受的工作失忆。任务记录不依赖旧代 JS，关闭 view 后也不应仅因无人等待就丢失结果；项目、窗口和应用关闭时的具体生命周期仍需另定。
+
+### 8.3 恢复不等于自动重跑
+
+外部操作可能已经生效，但进程在写入成功记录前崩溃。持久化本地记录无法单独提供跨外部系统的 exactly-once 保证；任务 id 也不是外部系统自动支持的幂等键。恢复需要任务类型明确选择策略：
+
+- **重新查询 / 计算**：status、diff 可重新读取，不必为每次查询建持久任务。
+- **标记中断，允许重跑**：编译 / 测试先恢复记录；重跑须说明源码可能已改变，不恢复旧进程调用栈。
+- **核对外部状态后再决定**：Git 写操作不得盲目重放；取消不是回滚，无法确认结果时保留不确定状态并报告。
+- **从检查点续行**：只有任务明确支持且可安全重复相关步骤时采用；恢复后重新校验目标和输入条件。
+- **等待用户处理**：无法安全判断时不猜测，也不因恢复记录而重新执行破坏性动作。
+
+Magit 的 rebase / merge 等流程以 Git 自身的恢复状态为真源，编辑器读取并呈现，不维护竞争状态机。commit message 草稿、失败操作输出和任务历史可另行考虑持久化。LSP 连接通常重建并同步当前文档，不恢复旧连接或请求栈。
+
+### 8.4 递增范围
+
+- 近期设计核心 Job 时明确 owner、稳定身份、参数 / 结果、取消和 reload 行为，不让任务仅由 JS closure 描述。
+- 真正需要跨重启恢复时再确定存储、版本、输出保留和逐任务恢复策略；不把预留接口当作已经实现持久化。
+- 只有真实多阶段任务提出检查点、等待或子任务需求时，再评估 Durable workflow；不先实现通用任务图。
+
+## 9. 待确认事项
+
+以下细节仍需在对应场景实施前确认，工作顺序和跨会话待办只在 [计划](../plan.md) 维护：
 
 - LSP 会话归属：app 级、window 级还是 project 级。
-- 编译任务是否跨 reload 存活；默认建议是。
+- 核心任务在关闭项目 / 窗口、退出应用时的取消、回收与结果保留策略；何时需要跨重启记录和恢复。
 - 诊断 / 任务输出由 core 原生处理，还是允许脚本可插拔解析。
 - 是否准备支持多脚本来源 / 多文件配置；决定 registry 与 per-source 重载时机。
 - transient / suffix 是否进入产品范围；它属于核心 UI，不是脚本能力。
-- Magit 引擎是否确定留在 Rust，只把工作流交给 JS。
-- 是否采用「effect 描述 + core 应用」的统一协议，还是为每类能力单独设计接口。
+- Magit 引擎与 JS 工作流的具体边界，以及首个切片是否采用最小 JS 工作流加只读 status；必要 API 与投影粒度如何划分，避免大 patch 在 Rust / JS 间重复传输。
+- 是否采用「effect 描述 + core 应用」的协议，还是类型化领域接口；可以统一所有权、目标围栏和错误规则，不必先造通用 effect DSL。
 
-## 9. 参考
+## 10. 参考
 
 - semacs：`src/scripting.rs`、`src/scripting/runtime.rs`、`src/scripting/bootstrap.js`、`src/app/scripting.rs`、`src/command_registry.rs`、`src/keymap.rs`、`src/mode.rs`、`src/buffer.rs`、`src/section.rs`、`src/diff.rs`、`src/git.rs`、`src/editing/transform.rs`。
 - semacs 文档：[D26](../decisions.md#d26-rust-核心与脚本扩展)、[D28](../decisions.md#d28-buffer-mode-与结构化显示)、[JS 配置](../scripting.md)、[阶段 D 契约](../emacs-fidelity.md#阶段-djs-配置与文本变换)、[F1 契约](../emacs-fidelity.md#阶段-f1mode-与只读-magit-diff)、[Magit 源码调查](f-magit-reference.md)。
-- Chord：`packages/chord/docs/design.md` 的 §16 facet、§17 registries、§21 reload and rollout、§15 jobs、§21 插件模型；`packages/chord/README.md`。
+- Chord：`packages/chord/docs/design.md` 的 §15 jobs（intent / run / finish、持久化与恢复）、§16 facet、§17 registries、§21 reload and rollout、§24 Durable integration；`packages/chord/README.md`。

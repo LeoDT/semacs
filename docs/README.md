@@ -15,34 +15,16 @@ semacs 将 Emacs 的操作模型带到现代 GPU UI，不复刻 Emacs 外观或 
 | [技术决策](decisions.md) | 关键技术选择、理由与长期边界，不维护待办或进度 |
 | [性能预算](performance.md) | 量化预算、指标定义及适用条件，不记录当前通过状态 |
 | [验收流程](acceptance.md) | 本地 / 宿主分工、可执行入口、人工步骤和安全要求，不记录历史批次结论 |
-| [实施计划](plan.md) | 当前工作、后续依赖、待决 / 未排期事项与已完成摘要 |
+| [实施计划](plan.md) | 当前工作、后续依赖、待决 / 未排期事项；历史完成情况只链接归档 |
 | [JS 配置](scripting.md) | 配置入口、宿主 API 使用与实现资源限额；行为契约仍见保真度文档 |
 
 ## 按需参考与冻结记录
 
-| 材料 | 用途 |
-|---|---|
-| [F1 diff 专项本地基线](records/f1-diff-performance-local.md) / [首批启动失败与修复](records/f1-diff-performance-host-01.md) / [第二批 setup 超限](records/f1-diff-performance-host-02.md) / [完整诊断工具](records/f1-diff-diagnostic-local.md) / [三轮宿主完整数据](records/f1-diff-diagnostic-host-01.md) | 两档 headless、small 三轮原生诊断。78 行动作及正文 / 投影 / 帧核对通过，适用 diff 动作预算满足；首次命令准备 prepaint 导致 draw 35–38 ms 超限，总预算未通过；[静态定向排查](records/f1-command-prepaint-inspection.md)发现首次粗体候选的字体匹配冷路径嫌疑，用户接受为非阻塞观察并确认专项收尾，未优化 / 扩测；后续测试保留冷 / 热路径区别 |
-| [F1 mode 与 Magit diff 本地验证](records/f1-magit-diff-local.md) / [宿主定向验收](records/f1-magit-diff-host-01.md) | mode / 局部键位、只读 diff、一次审查修复与 headless 回归；用户四组功能观察及正文 / 配置 / HEAD / index 核对通过，F1 按确认范围完成 |
-| [E2 多语言本地验证](records/e2-languages-local.md) / [宿主工具准备](records/e2-host-tools-local.md) / [首批宿主回传](records/e2-languages-host-01.md) / [反馈修复本地验证](records/e2-flicker-fix-local.md) / [第二批宿主复核](records/e2-flicker-host-02.md) | 多语言实现、工具与宿主证据；RET / 闪烁修复及定向复核通过，用户已确认 E2 收尾 |
-| [E3 本地实现与性能回归](records/e3-styles-local.md) / [首版性能失败](records/e3-typography-probe.md) | 字体 / 装饰、范围 / 行背景、同环境对照与首版性能修复、一次集中审查及几何测试；初期本地证据，最终范围与收尾见 [实施计划](plan.md#阶段-e3文本样式与高亮合成) |
-| [E3 首批宿主字体失败](records/e3-host-manual-01.md) / [离线 fallback 诊断](records/e3-font-fallback-local.md) / [系统字体解析诊断](records/e3-font-resolution-host-01.md) | 宿主粗体 / 斜体不可见；确认原默认 monospace 解析失败、四种强调均落普通 fallback，保留失败与诊断证据 |
-| [E3 随包 Lilex 本地修复](records/e3-bundled-font-local.md) / [第二批宿主人工复核](records/e3-host-manual-02.md) | 本地完整检查、四组人工观察及正文 / 配置字节通过；用户接受中文输入轻微视觉跳动暂不修复，未关闭自定义缺失字体的 fallback 问题 |
-| [E3 随包字体首批原生性能失败](records/e3-native-perf-host-01.md) / [离线换行成本分解](records/e3-wrap-cost-local.md) / [换行与及时停止本地修复](records/e3-wrap-fix-local.md) / [单窗口原生复测](records/e3-native-perf-host-02.md) | 原完整布局约 20 秒；字体敏感字素换行与停止修复本地通过。新单窗口首屏 260.085 ms 超限后即停止，完整 ready 未测；用户选择先看完整诊断数据，预算不变 |
-| [单窗口完整显示诊断工具](records/e3-display-diagnostic-local.md) / [宿主完整数据](records/e3-display-diagnostic-host-01.md) | 单轮完整 ready / 滚动 / 输入明显改善、无空白和 idle draw；字体切换单次 draw 约 50 ms 仍超限，用户已接受当前速度及暂缓该峰值；单轮诊断不冒充完整验收 |
-| [M2 profiler 生命周期工具修复](records/profiler-lifecycle-local.md) | E1 后对齐 D1 消息历史、精确身份 / 分类校验与完整 feature 回归；未运行原生矩阵 |
-| [Rust 语法本地验证](records/e1-syntax-local.md) / [宿主定向验收](records/e1-syntax-host.md) | E1 增量解析 / 绘制高亮、审查修复、headless 回归、新语法就绪基线与五项宿主功能确认；尺寸及原生性能 / IME / GPU 边界按记录保留 |
-| [基础主题本地验证](records/e0-themes-local.md) / [宿主定向验收](records/e0-themes-host.md) | E0 配置 / 配色切换、审查修复、headless 回归及五项宿主功能确认；尺寸、原生性能 / IME / GPU 与旧 profiler 工具失败的边界按记录保留 |
-| [消息显示与历史本地验证](records/d1-messages-local.md) / [宿主定向验收](records/d1-messages-host.md) | 阶段 D1 本地回归、Emacs 参照、审查修复、headless 性能及五项宿主人工确认；尺寸、原生性能 / IME / GPU 边界按记录保留 |
-| [最小脚本接入本地验证](records/d-scripting-local.md) / [宿主冒烟](records/d-scripting-host.md) | 阶段 D 配置 / 命令 / 键位 / 变换隔离、静态检查、headless 回归及宿主主功能确认；宿主另有消息重叠反馈，按记录保留 |
-| [候选式 minibuffer 本地验证](records/b-minibuffer-local.md) / [宿主验收](records/b-minibuffer-host.md) | 阶段 B 本地检查、headless 基线、用户人工确认及证据边界 |
-| [buffer / view 与 split 本地验证](records/c-split-local.md) / [验收自动化与多 view 基线](records/c-automation-local.md) / [真实 IME 宿主验收](records/c-split-host.md) | 阶段 C 本地回归、headless 基线及定向宿主证据与边界 |
-| [多 view 原生性能工具本地验证](records/c-native-performance-local.md) / [宿主验证](records/c-native-performance-host.md) | 阶段 C 定向原生自动测量的工具身份、离线检查、代表性性能结果及聚合基线边界 |
-| [显示设置验收](records/a-display-local.md) | 阶段 A 的固定证据及未测边界 |
-| [M2 / M3 验收](records/m2-m3-local.md) | 文件 / buffer 阶段验收、首屏诊断及修复的固定证据 |
-| [M1 性能验收](records/m1-performance.md) / [R1 验收](records/r1.md) | 已批准结论、当时环境、实测与限制 |
-| [Emacs 对照入口](../tests/emacs/README.md) / [观察记录](../tests/emacs/RESULTS.md) | 外部行为参照；不是 semacs 通过记录 |
-| [第三方来源](../THIRD_PARTY.md) / [许可](../LICENSE) | 来源、归属与分发义务，不随阶段结束归档停更 |
+- [已完成阶段归档（R0–F1）](archive/completed-through-f1.md)：交付摘要及当时的验收边界，不是当前待办。
+- [冻结记录索引](records/README.md)：本地 / 宿主验收、诊断、历史失败和修复证据，按需查阅。
+- 阶段调研和未确认方案只从 [当前计划](plan.md) 按需进入，不默认通读 `work/`。
+- [Emacs 对照入口](../tests/emacs/README.md) / [观察记录](../tests/emacs/RESULTS.md)：外部行为参照，不是 semacs 通过记录。
+- [第三方来源](../THIRD_PARTY.md) / [许可](../LICENSE)：持续维护的来源与分发义务，不随阶段结束归档停更。
 
 ## 维护规则
 
@@ -50,7 +32,7 @@ semacs 将 Emacs 的操作模型带到现代 GPU UI，不复刻 Emacs 外观或 
 
 - 每项约定只保留一份正文，其他位置引用；不维护跨文档的能力清单，不镜像模块结构、算法细节或测试清单。
 - 只有范围、用户行为、技术边界或验收约定变化时才更新对应文档，不要求每次代码修改都改文档。未确认的提案不能写成已生效契约；需求或验收标准也不表示实现已完成。
-- `plan.md` 是没有 issue 系统时的统一工作入口。当前阶段写目标、边界、验收条件及待决问题，后续阶段只写顺序与依赖，已完成阶段只留摘要和证据链接。
+- `plan.md` 是没有 issue 系统时的统一工作入口。当前阶段写目标、边界、验收条件及待决问题，后续阶段只写顺序与依赖；已完成阶段只留总体摘要和归档链接，不累积批次经过或历史测试数量。
 - 跨会话必须保留的缺陷、待决或延期事项进入计划，至少说明问题、保留原因及下一步；不分散到决策、性能文档或聊天中，也不为普通待办强制增加编号、日期、负责人或复杂状态。
 - 发现指令、代码与文档冲突时先确认，不擅自改变产品范围、保真度差异、平台依赖、输入策略或性能预算。
 
@@ -58,12 +40,12 @@ semacs 将 Emacs 的操作模型带到现代 GPU UI，不复刻 Emacs 外观或 
 
 - `.pi/tasks/` 是当期实现的本地执行清单，`.pi/tmp/` 放临时验证产物；二者均被 Git 忽略，不能成为重要待办、有效契约或正式测试实现的唯一存放处。
 - 简单阶段直接在计划里说明。只有设计确需跨会话展开时，才按需建立入 Git 的 `docs/work/<stage>.md` 阶段工作稿，并从当前计划链接；提案必须标明待确认，不提前创建空目录或一整套设计稿模板。
-- 阶段结束先提炼：有效契约和关键决策进入长期文档，未完成的重要事项进入计划，必要验收证据进入 `docs/records/`。其余过时工作稿可删除，由 Git 保留历史；本地清单完成后停止维护，可清理但不必复制归档。
-- 不把所有勾选清单、讨论过程或旧实施设想搬进 records；清理临时材料不能顺带删除仍需核对的失败报告或唯一证据。
+- 阶段结束先提炼：有效契约和关键决策进入长期文档，未完成的重要事项进入计划，必要验收证据进入 `docs/records/`。已完成阶段摘要积累过多时迁入 `docs/archive/`，保留交付结论、证据和未测边界，不把重要未完成事项仅留在归档；归档摘要不追随当前代码更新。其余过时工作稿可删除，由 Git 保留历史；本地清单完成后停止维护，可清理但不必复制归档。
+- 不把所有勾选清单、讨论过程或旧实施设想搬进 records；清理临时材料不能顺带删除仍需核对的失败报告或唯一证据。有效契约、仍可执行的验收流程、下一阶段仍需使用的调研和许可材料不因所属阶段完成而归档；过长的操作说明可按需拆分并从主入口引用。
 
 ### 冻结证据
 
-- `docs/records/` 保存值得追溯的验收或诊断：版本 / 源码身份、环境、范围、关键结果、结论与未测边界。不要求每个小改动新增记录，不入库完整原始日志，不将记录写成实现说明或过程流水账。
+- `docs/records/` 保存值得追溯的验收或诊断：版本 / 源码身份、环境、范围、关键结果、结论与未测边界；导航集中在 `docs/records/README.md`，阶段归档链接对应证据，不另建平行记录集。不要求每个小改动新增记录，不入库完整原始日志，不将记录写成实现说明或过程流水账。
 - 记录定稿后不追随当前代码更新；旧版本的环境、测试数量和当时未测项保持原样，后续复测另记，不覆盖旧结果。事实错误须明确注明更正，链接可修复，不悄悄重写历史。
 - 外部参照观察同样按固定环境解释，不能随产品进度改成产品通过证据；参照工具入口仍随工具维护。许可与来源材料按实际引入 / 修改持续维护。
 

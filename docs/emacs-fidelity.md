@@ -176,7 +176,7 @@
 
 ## 7. 显示设置
 
-本节定义阶段 A 的产品行为，不追求 Emacs 外观或 text-scale-mode 的完整兼容；实现与验收状态只在 [实施计划](plan.md#阶段-a显示设置) 维护。
+本节定义阶段 A 的产品行为，不追求 Emacs 外观或 text-scale-mode 的完整兼容；当前工作只在 [实施计划](plan.md) 维护，阶段结论见 [显示设置归档](archive/completed-through-f1.md#阶段-a显示设置)。
 
 ### 字体与字号
 

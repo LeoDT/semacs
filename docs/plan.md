@@ -1,125 +1,46 @@
 # 实施计划
 
-里程碑按可验收行为划分，不按工期估算。本文是跨会话工作的统一入口；维护与归档规则见 [文档说明](README.md#维护规则)。范围见 [需求](requirements.md)，行为见 [保真度契约](emacs-fidelity.md)。
+本文是当前工作和跨会话待办的唯一入口；维护与归档规则见 [文档说明](README.md#维护规则)。范围见 [需求](requirements.md)，行为见 [保真度契约](emacs-fidelity.md)。里程碑按可验收行为划分，不按工期估算。
 
-## 当前状态：F1 及 diff 性能专项已按用户确认范围收尾
+## 当前状态：基础阶段已归档，下一实现范围待确认
 
-mode 与只读 Magit diff、两档 headless 基线、small 三轮原生完整诊断及首次命令准备峰值的静态排查均已完成，摘要与证据见[已完成阶段](#阶段-f1mode-与只读-magit-diff)。用户接受当前首次命令准备峰值为非阻塞观察，要求记录后收尾提交；不实施优化或追加宿主批次，不将接受超限解释为总体性能预算通过。
+R0–M3、A–E3、日常编辑增强及 F1 只读 Magit diff 已按各自确认范围完成；详细结论和历史测试数量见 [已完成阶段归档](archive/completed-through-f1.md)，批次证据见 [冻结记录索引](records/README.md)。归档不表示所有性能预算、真实 IME 或 GPU / 实际呈现均已通过；下列暂缓项和原预算保持不变。
 
-当前没有已批准的下一实施项。后续 Git 工作流的优先级与范围须另行确认，不自动进入 Git 写操作或完整 Magit；E3 暂缓项及其余未测边界保持不变。长期 mode / 脚本扩展边界见 [D28](decisions.md#d28-buffer-mode-与结构化显示)与 D26；固定上游行为参考见 [Magit 源码调查](work/f-magit-reference.md)。
+本轮文档整理已完成，未开始 Magit、脚本 API 或任务系统实现。下一步先确认脚本扩展边界与首个 Magit 切片，再形成实施规格；不自动进入 Git 写操作、完整 Magit、LSP 或完整 Durable workflow。
 
-## 后续阶段
+## 下一步：脚本扩展边界与 Magit 切片
 
-以下只维护顺序与依赖，不是已经展开的实施规格；核心 / 脚本边界见 [D26](decisions.md#d26-rust-核心与脚本扩展)。
+现有有效边界仍见 [D26](decisions.md#d26-rust-核心与脚本扩展)、[D28](decisions.md#d28-buffer-mode-与结构化显示)及 [JS 配置](scripting.md)。后续设计材料：
 
-| 阶段 | 交付边界与前置条件 |
-|---|---|
-| **F：后续 Git 工作流** | F1 只读首版已完成；下一切片的优先级、Git 写操作 / transient 等范围须用户另行确认，不预建通用 UI 框架。 |
+- [脚本扩展与热重载调研](work/scripting-extension-research.md)：现状、Chord 参照、Magit / LSP 能力分析，以及 [Job 与恢复的讨论共识](work/scripting-extension-research.md#8-job-与可恢复任务讨论共识及实施边界)。方向已讨论，具体 API、会话归属、重载行为矩阵及实施范围仍需确认。
+- [Magit 上游行为参考](work/f-magit-reference.md)：固定外部参照，不是已批准的 semacs 规格。
+
+建议下一次定范围时依次确认：
+
+1. **脚本与核心边界**：哪些状态随脚本代次失效、哪些任务 / 会话由核心持有；必要查询、操作请求、取消、限额与迟到结果规则。
+2. **首个可验收切片**：候选为最小 JS 工作流能力加只读 status，复用已有 diff / section；尚未批准具体功能清单，不先开放所有扩展原语。
+3. **后续依赖**：Git 写操作与 transient 另定范围；核心 Job 按实际异步工作需求引入，跨重启持久化和完整 Durable workflow 不作为 Magit 前置条件。
+
+以上是后续设计入口，不是实现排期或测试授权。
 
 ## 已知问题与未排期事项
 
-- **首次命令准备 draw 峰值（用户接受，非阻塞观察）**：small 三轮首次命令准备 draw 35.408–37.827 ms >16 ms，其中 prepaint 34.355–36.640 ms；后续 diff 动作没有相应超限。[静态调查](records/f1-command-prepaint-inspection.md)指向首次粗体候选的字体全库匹配冷路径，精确根因 / 占比未证实。用户接受当前表现并要求收尾，保留为以后性能测试的解释线索，不自动重开：同进程此前使用相同字体族 / 字重 / 样式可能已建立匹配缓存，纯文本浏览不保证如此；重启不能沿用进程内缓存。后续测量按[冷 / 热路径规则](performance.md#适用原则)记录，不静默预热、跳过首次峰值或记作已修复 / 总体预算通过。若实际影响使用，再确认最小定向采样；不与 E3 字体切换暂缓项合并。实测见 [宿主诊断](records/f1-diff-diagnostic-host-01.md)。
-- **字体切换时的 draw 峰值（用户接受暂缓）**：单 mixed 原生完整诊断中，字体阶段单次 draw 50.328 ms >16 ms，首场景 50.664 ms >50 ms；完整 ready 为 229.014 ms，常规滚动 / 输入表现正常。用户确认当前速度可接受，本轮不再追逐该峰值、不自动追加矩阵；保留实际超限和原预算，不记作已修复或全部性能通过。若后续字体切换实际影响使用，再确认最小定向定位范围。证据见 [完整诊断](records/e3-display-diagnostic-host-01.md)。
-- **中文输入时的轻微视觉跳动（非阻塞）**：E3 宿主人工复核中，用户报告中文输入时同行英文约向下跳 1–2 px，并接受本轮不解决；证据见 [人工记录](records/e3-host-manual-02.md)。尚未量化实际行高 / 基线变化或确认根因，保留为观察而非已修复；后续若影响使用，再确认定向诊断与修复范围，不自动补测。
-- **自定义缺失字体族的 fallback**：当前 GPUI 固定 fallback 丢失请求字重 / 斜体；通用族名 `monospace` 也未作为系统别名解析。用户已选择随包 Lilex 解决默认字体路径，不在本次扩展跨平台通用族名或修补依赖；显式指定上述名称仍可能回退普通字体。证据见 [解析诊断](records/e3-font-resolution-host-01.md)。涉及解析策略或依赖修复时另行确认，不将默认字体修复记作此问题已解决。
-- **多 view 聚合性能观察（非阻塞）**：六类 headless 双 view 全部 ready 曾约 350 ms；它与旧单 view / 选中 view 的 300 ms 指标不同，聚合没有另定数值门限，不能判作预算超限或自动产生补测任务。用户已接受保留该观察并收尾阶段 C。后续仅在出现实际响应问题或确认新预算时再考虑定向分析；不外推两个原生代表样本为六类全覆盖，也不安排追加测试。
-- **脚本扩展与热重载架构（待确认，未排期）**：已完成对现有脚本模型、Chord 插件架构及 LSP / 编译任务、Magit 两个场景的静态调研，记录原语分层、重载不变量、各场景缺口与待确认事项，见 [JS 脚本扩展与热重载调研](work/scripting-extension-research.md)。均为待确认提案，不改变 D26 / D28 现有边界，不表示开始实现或排期。
-- **日常编辑增强**：isearch、`M-y`、`C-u`、occur 等未排期，实际需要时再确认优先级与范围。
-- **自动保存与备份**：保留为数据安全增强需求，尚未明确策略且不属当前范围；排期前先确认触发、写入位置与恢复行为。
+### 已接受的暂缓项与观察
 
-## 已完成阶段
+这些事项尚未修复，不自动重开或追加宿主矩阵；若实际影响使用，再确认最小定向范围。
 
-- **R0**：产品范围、组件选择、许可边界、应用外壳与文件读取基础。
-- **R1**：最小正式编辑切片及输入 / 显示性能基线，见 [验收记录](records/r1.md)。
-- **M1**：键位、共享编辑语义与历史，见 [验收记录](records/m1-performance.md)。
-- **M2 / M3**：minibuffer、文件 / buffer 管理及既定 v1 保真度 / 性能收尾，见 [验收记录](records/m2-m3-local.md#阶段最终结论)。
+- **首次命令准备 draw 峰值**：small 三轮首次命令准备 draw 35.408–37.827 ms >16 ms，其中 prepaint 34.355–36.640 ms；后续 diff 动作没有相应超限。[静态调查](records/f1-command-prepaint-inspection.md)指向首次粗体候选的字体匹配冷路径，精确根因 / 占比未证实。用户接受为非阻塞观察；不与 E3 字体切换问题合并，不记作总体预算通过。以后测量遵循[冷 / 热路径规则](performance.md#适用原则)：同进程相关字体使用可能建立缓存，纯文本浏览不保证如此，重启不能沿用进程内缓存；不能静默预热或跳过首次峰值。[宿主证据](records/f1-diff-diagnostic-host-01.md)保留非验收、预算未通过的结论。
+- **字体切换 draw 峰值**：单 mixed 完整诊断的字体阶段 draw 50.328 ms >16 ms、首场景 50.664 ms >50 ms；完整 ready 229.014 ms，常规滚动 / 输入正常。用户接受当前速度并暂缓定位；原预算及超限结论不变，不视为全部性能通过。见 [完整诊断](records/e3-display-diagnostic-host-01.md)。
+- **中文输入轻微视觉跳动**：E3 宿主复核中同行英文约向下跳 1–2 px，用户接受暂不修复；尚未量化行高 / 基线变化或确认根因。见 [人工记录](records/e3-host-manual-02.md)。
+- **自定义缺失字体族 fallback**：GPUI 固定 fallback 丢失请求字重 / 斜体，通用名 `monospace` 未作为系统别名解析。随包 Lilex 只解决默认字体路径，显式指定上述名称仍可能回退普通字体；跨平台别名或依赖修复另行确认。见 [解析诊断](records/e3-font-resolution-host-01.md)。
+- **多 view 聚合性能观察**：六类 headless 双 view 全部 ready 曾约 350 ms；聚合没有独立数值门限，不能套用旧单 view / 选中 view 的 300 ms 预算判作超限。用户已接受该非阻塞观察；不外推两个原生代表样本为六类全覆盖。只有出现实际响应问题或确认新预算时再分析；历史边界见 [阶段 C 归档](archive/completed-through-f1.md#阶段-cbuffer--view-与-split)。
 
-### 阶段 A：显示设置
+### 未排期需求
 
-字体 / 字号设置与方块光标已完成，按既定范围验收通过；固定证据及未测边界见 [验收记录](records/a-display-local.md)。
-
-### 阶段 B：候选式 minibuffer
-
-已确认的候选交互与评分匹配范围已完成，本地回归及用户宿主定向人工验收通过。证据见 [本地验证](records/b-minibuffer-local.md) 与 [宿主验收](records/b-minibuffer-host.md)；后者包含测试前 mark 键位调整及其回归。本轮未复测原生性能，保留记录中的字体 / 尺寸等证据边界，不将功能确认外推为未测矩阵。
-
-后续候选刷新跳动修复已包含于 `738e744`：349 项 Rust 测试及默认 / profiler Clippy 通过，用户已目视确认修复正常。此补充不改写先前冻结验收记录，也不增加原生性能通过结论。
-
-### 阶段 C：buffer / view 与 split
-
-共享 buffer 与独立 view 的状态归属、分屏 / 选择 / 关闭、共享编辑及输入路由已完成，用户确认按已批准范围验收收尾。行为见[保真度契约](emacs-fidelity.md#阶段-cbuffer-与-view)，本地回归与基线见[初次验证](records/c-split-local.md)、[自动化 / 多 view 基线](records/c-automation-local.md)及[原生工具验证](records/c-native-performance-local.md)；宿主证据见[真实 IME](records/c-split-host.md)与[定向原生性能](records/c-native-performance-host.md)。
-
-本轮已覆盖的选中 view 预算及 draw / idle 要求满足；聚合基线与未测范围按记录解释，不扩大为全样本、所有尺寸、持续输入或 GPU / 实际呈现通过。headless 聚合观察按上节非阻塞边界保留，无剩余必测性能项，不因该观察继续扩测。
-
-### 阶段 D：最小脚本接入
-
-JS 配置、自定义正文键位、统一命令注册与 region 文本变换已完成，用户确认按本轮范围收尾。行为见[阶段 D 契约](emacs-fidelity.md#阶段-djs-配置与文本变换)，验证及未测边界见[本地记录](records/d-scripting-local.md)与[宿主冒烟](records/d-scripting-host.md)。
-
-D 验收时遗留的错误信息与 mode line 重叠缺陷已由下节 D1 处理；不改写 D 的修复前记录，也不扩大为未测性能、真实 IME 或 GPU 通过。
-
-### 阶段 D1：消息显示与历史
-
-窗口级消息状态、有界多行 echo、读入末尾临时注记，以及只读 `*Messages*` / `C-h e` 已完成；本地回归、审查后修复及用户宿主定向验收通过，用户确认按本轮范围收尾。行为见 [D1 契约](emacs-fidelity.md#阶段-d1消息显示与历史)，证据见[本地验证](records/d1-messages-local.md)和[宿主验收](records/d1-messages-host.md)。
-
-本轮已确认长 / 多行错误重叠修复、读入提示及恢复、历史回看 / 复制与正文编辑恢复。精确窗口尺寸未提供，原生性能、真实 IME 和 GPU 测量仍未覆盖，按记录保留；无剩余必测项，不自动追加补测。
-
-### 阶段 E0：基础主题与命名样式
-
-应用级单一主题、用户颜色覆盖、JS 主题配置及 `M-x load-theme` 候选切换已完成，用户确认按本轮范围收尾。正文及外围界面统一使用命名样式；换色只重绘，超长字形行的布局和输入坐标保持可用，不引入 Emacs font-lock / 完整 face 机制。行为见 [E0 契约](emacs-fidelity.md#阶段-e0基础主题与命名样式)，配置 API 见 [JS 配置](scripting.md#主题与命名样式)，证据见 [本地验证](records/e0-themes-local.md)及[宿主定向验收](records/e0-themes-host.md)。
-
-默认 453 项 Rust 测试、静态检查、受影响的 headless 性能回归及五项宿主功能观察通过。具体窗口尺寸未提供，原生性能、真实 IME 和 GPU 未测，按记录保留，不自动追加补测。E0 收尾时既有 profiler 生命周期自检仍失败，当时不宣称完整 feature 测试通过；后续独立修复见下节工具维护，不改写 E0 冻结证据。E0 收尾轮未启动 E1。
-
-### 阶段 E1：Rust tree-sitter
-
-`.rs` 自动启用的共享后台增量解析、中性主题语法前景色与 paint-only 高亮已完成，本地回归 / 一次集中审查修复及用户五项宿主定向观察通过。行为见 [E1 契约](emacs-fidelity.md#阶段-e1rust-tree-sitter)，证据见 [本地验证](records/e1-syntax-local.md)与[宿主验收](records/e1-syntax-host.md)。
-
-本地 470 项 Rust 测试及静态 / 工具检查通过；既有 headless 指标满足预算，新语法加布局就绪仅作独立基线，不套用旧纯布局 ready 门限。宿主额外 `.ts` 文件已确认为名称笔误；具体窗口尺寸未记录，原生性能、真实 IME 与 GPU 未测，按记录保留，不自动追加补测。旧 profiler 工具失败没有记作 E1 交付解决，而是在下节后续工具维护中单独处理。
-
-### 后续工具维护：M2 profiler 生命周期
-
-已确认旧失败由 D1 的真实只读 `*Messages*` 使“一份 scratch”旧假设失效引起；工具现逐步骤核对 scratch、fixture 与消息历史的身份 / 状态，并同步 Rust CSV 分类和 Python 校验，未知 buffer 与关闭 view 释放检查保持 fail-closed，产品生命周期与性能预算不变。
-
-完整默认 470 项、`native-profiler` 501 项 Rust 测试均通过且未跳过；两套 Clippy、51 项 Python、16 项 fixture 工具、fish / 格式 / 差异检查及 release profiler 构建通过，单次集中审查无待修项。证据见 [本地修复验证](records/profiler-lifecycle-local.md)。旧失败已从当前问题中移除，历史失败日志继续保留；没有运行原生窗口或性能矩阵，不扩大为原生性能 / IME / GPU 通过。
-
-### 阶段 E2：多语言语法支持
-
-内置语言注册表、通用后台增量解析、JS / JSX / TS / TSX / Markdown / HTML / CSS 支持及 Markdown 围栏、HTML script / style 嵌入高亮已完成，Rust 行为保留。用户确认按批准范围验收收尾；行为见 [E2 契约](emacs-fidelity.md#阶段-e2多语言-tree-sitter)，技术边界见 [D27](decisions.md#d27-内置语言与通用语法机制)，实现与 headless 证据见 [本地验证](records/e2-languages-local.md)。
-
-宿主工具见 [准备记录](records/e2-host-tools-local.md)。[首批宿主回传](records/e2-languages-host-01.md) 的原始 RET 工具失败及着色闪烁均保留历史记录；后续已修正独立 workload / 文本 / point 预期，并实现编辑期间按映射保留未改动字节的临时配色，不改产品 newline 或语法 ready 口径。修复阶段默认 493 项 / profiler 533 项、两套 Clippy、受影响 headless 及一次集中审查通过，证据见 [反馈修复本地验证](records/e2-flicker-fix-local.md)；最终人工工具 25 项、Python 68 项及 fish / 差异检查通过。
-
-[第二批宿主复核](records/e2-flicker-host-02.md) 的三组闪烁观察、独立正文 / 配置字节检查，以及 Markdown / HTML 各约 256 KiB、各三轮代表性原生 CPU 测试均通过。原生报告共 228 行，身份、文本 / point、pending 输入覆盖及适用门限通过，无缺失 / 空白帧，180 个 idle tick 无 draw；语法整体就绪继续独立于纯布局门限。
-
-人工窗口尺寸未记录；首批 IME 观察不冒充时延测量，8 MiB 多语言全矩阵、长期持续输入、真实 IME 时延、GPU / 实际呈现等未测边界按记录保留。无剩余必修项，不自动追加补测；用户要求本轮仅收尾提交，不进入 F。
-
-### 阶段 E3：文本样式与高亮合成
-
-命名样式的字体强调 / 装饰、Markdown 强调合成、独立范围样式与整行背景、字体敏感布局和输入几何已完成；默认随包 Lilex 四个真实变体及 OFL。全文换行采用按有效字体样式缓存的字素宽度，可见行与输入坐标仍精确 shaping；批准的精度边界见 [E3 契约](emacs-fidelity.md#阶段-e3文本样式与高亮合成)，配置见 [主题 API](scripting.md#主题与命名样式)。原始实现 / 一次集中审查及两项修复见 [本地实现](records/e3-styles-local.md)，字体修复见 [随包字体记录](records/e3-bundled-font-local.md)。
-
-最终本地检查：默认 **533 项**、native-profiler **582 项**全目标 Rust 测试、两套 Clippy、**135 项 Python**（81 项驱动、30 项 fixture、16 项脚本工具、8 项 split IME 工具）、JS / TypeScript、fish、格式 / 差异与字体许可来源核对通过，无跳过。最终字素换行修复的六类约 8 MiB、各三轮 headless 布局 / 输入与无系统字体真实后端成本证据见 [换行修复](records/e3-wrap-fix-local.md)；完整显示诊断的工具回归见 [本地工具记录](records/e3-display-diagnostic-local.md)。此次收尾不追加性能、宿主运行或 reviewer。
-
-[第二批宿主人工复核](records/e3-host-manual-02.md) 的四组字体 / 样式观察及正文 / 配置字节检查通过。[单 mixed 窗口完整诊断](records/e3-display-diagnostic-host-01.md) 取得 71 行：open / resize / font ready 为 417.739 / 186.353 / 229.014 ms，滚动最大 2.424 ms，单键提交最大 7.936 ms，32 键约 25–27 ms，无空白帧或 idle draw。用户接受当前速度及暂缓字体切换峰值，并明确要求收尾提交；本阶段按该确认范围完成，不继续性能优化，不进入 F。
-
-此前 [默认字体失败](records/e3-host-manual-01.md)、[字体解析诊断](records/e3-font-resolution-host-01.md)、[原生完整布局约 20 秒失败](records/e3-native-perf-host-01.md) 和 [修复后首屏超限](records/e3-native-perf-host-02.md) 的证据保持不变，不以新结果覆盖旧失败。字体阶段 draw / 首场景仍超原门限，作为用户接受的暂缓项；中文轻微跳动、自定义缺失字体 fallback 也保留在已知问题。单轮诊断不替代三轮正式验收、未执行的 Markdown 性能批次或其余 8 MiB 矩阵；长期持续输入、真实 IME 时延、GPU / 实际呈现等仍未测，不宣称全部性能预算通过。无剩余必修收尾项，不自动追加测试。
-
-### 日常编辑增强：双向 word kill
-
-已按用户要求补充 `kill-word` / `backward-kill-word`，默认 `M-d` / `M-DEL`；沿用既有词边界、共享 kill ring 与独立撤销组，行为见[编辑契约](emacs-fidelity.md#kill-ring)。新增 9 项测试，`cargo test --lib --tests` 共 495 项通过。按用户要求仅做单元 / 集成测试，不追加宿主、性能或用户配置运行验证，不进入 F。
-
-### 日常编辑增强：段落移动与导航键
-
-已按用户确认的空白行分段规则补充 `forward-paragraph` / `backward-paragraph`，已按用户反馈修正为双向停在分隔空行的行首，连续空白行作为一组处理；边界与停点规则见 [F2 motion 契约](emacs-fidelity.md#已登记的-f2-motion-差异)。用户配置增加 Ctrl+方向键、PageUp / PageDown、Home / End 与 Ctrl+Home / End，应用默认键位不变。新增 7 项测试，并消除候选交互测试对固定命令数量 / 名称排序的依赖；`cargo test --lib --tests` 共 502 项通过。按用户要求不追加宿主、性能或真实配置运行验证，不进入 F。
-
-### 阶段 F1：mode 与只读 Magit diff
-
-共享 buffer mode、配置期局部键位与命令上下文、section 可见行 / 折叠显示、真实 staged / unstaged、diffstat / 导航 / 刷新及 RET 适当版本访问已完成。默认 **560 项**、native-profiler **609 项**全目标 Rust 测试、两套 Clippy、**145 项 Python**、JS / TypeScript、fish / 格式 / 差异检查及 release 构建通过；六类约 8 MiB、各三轮普通布局 / 输入 / 双方向分屏 headless 回归通过。一次 reviewer 的 5 项 P2 已修复并加入回归，证据见 [本地记录](records/f1-magit-diff-local.md)。
-
-[宿主定向验收](records/f1-magit-diff-host-01.md)的四组用户观察、源码 / 二进制身份、正文 / 配置及 HEAD / index 状态独立核对通过；用户确认“看着都没问题”，只读功能按确认范围完成。该批实际窗口尺寸未记录，未测原生性能；后续性能证据单独如下，不改写旧批次。
-
-专项补充：约 264 KiB / 2.06 MiB 真实 patch 的各三轮 headless、完整正文 / 独立折叠投影 oracle 和同场景双 view ready 检查通过，见[专项本地基线](records/f1-diff-performance-local.md)。首批原生 Probe 初始化失败及修复见 [host-01](records/f1-diff-performance-host-01.md)，第二批 setup draw 超限停止、无 diff 动作数据见 [host-02](records/f1-diff-performance-host-02.md)；两批失败产物保留。后续显式完整诊断工具完成一次集中审查修复，默认 **560 项** / profiler **631 项** Rust、**103 项**驱动 Python、两套 Clippy / fmt / diff / fish 及 release 构建通过，见[工具记录](records/f1-diff-diagnostic-local.md)。
-
-[small 三轮宿主完整诊断](records/f1-diff-diagnostic-host-01.md)共 78 行动作、93 个实际 draw 帧，源码 / 二进制 / fixture / 配置、正文 / 投影及提交证据核对通过，无空白 / 缺失，适用 diff 动作 draw / 垂直滚动 / idle 预算满足；新增 diff 时延只作基线。唯一重复超限为首次命令准备 draw 35–38 ms，静态排查后的用户接受决定见[定向记录](records/f1-command-prepaint-inspection.md#用户确认与收尾)。诊断 `acceptance=false; budget_passed=false` 保持，不冒充总体性能通过。
-
-用户要求记录该观察后收尾提交；无剩余必修项，不追加优化、宿主或 reviewer。原始目录全部保留；真实 IME 时延、GPU / 实际呈现、超大 diff、patch 变化刷新及其他未测矩阵不补记通过，E3 暂缓项保持不变。不外推为完整 Magit 或 Git 写工作流交付。
+- **任务持久化与恢复**：认可核心 Job、跨 reload 存活和分级恢复的方向，尚未批准实现或存储方案；具体待决项见[调研](work/scripting-extension-research.md#9-待确认事项)。先由实际任务推动，不能把自动重跑视为安全恢复。
+- **日常编辑增强**：isearch、`M-y`、`C-u`、occur 等，实际需要时再确认优先级与范围。
+- **自动保存与备份**：保留为数据安全增强需求；排期前先确认触发、写入位置与恢复行为。
 
 ## 完成标准
 
-各阶段按已确认范围交付，执行 [本地检查](acceptance.md#本地检查与-headless-入口) 及按影响选择的回归；真实环境验证另行取得同意，未测不记通过。遗留事项、证据归档及下一步按 [维护检查点](README.md#三个维护检查点) 收尾，不为阶段完成重复维护模块 / 测试清单。
+各阶段按已确认范围交付，执行 [本地检查](acceptance.md#本地检查与-headless-入口) 及按影响选择的回归；真实环境验证另行取得同意，未测不记通过。收尾时按 [维护检查点](README.md#三个维护检查点) 更新当前工作、保留重要遗留事项并归档必要证据，不继续在本文累积已完成阶段的过程和测试清单。

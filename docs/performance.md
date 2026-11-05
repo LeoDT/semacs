@@ -68,4 +68,4 @@ F1 diff 专项同样先作基线：打开、折叠 / 展开、导航、刷新、
 
 本地检查、headless 命令、用户运行 fish 的宿主分工及失败停止规则统一见 [验收流程](acceptance.md)。入口、参数和样本以 `examples/perf_*.rs`、`scripts/perf_native.py`、`scripts/perf_sample.py` 及 `examples/support/samples.rs` 为准。
 
-本文不记录某次矩阵的完成情况。历史环境、实测与批准结论按需从 [冻结记录](README.md#按需参考与冻结记录) 查阅；它们不替代后续代码的验证。原生功能诊断入口 `examples/native_input.rs` 的状态日志也不是性能计时。
+本文不记录某次矩阵的完成情况。历史环境、实测与批准结论按需从 [冻结记录索引](records/README.md) 查阅；它们不替代后续代码的验证。原生功能诊断入口 `examples/native_input.rs` 的状态日志也不是性能计时。
