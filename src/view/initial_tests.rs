@@ -43,7 +43,7 @@ fn request(
     bounds: Bounds<Pixels>,
 ) -> (InitialViewport, InitialPreparation) {
     cx.update_window(window.into(), |_, window, cx| {
-        let viewport = view.read(cx).initial_viewport(bounds, window);
+        let viewport = view.read(cx).initial_viewport(bounds, window, cx);
         let work = view.read(cx).prepare_initial(viewport.clone(), cx);
         (viewport, work)
     })

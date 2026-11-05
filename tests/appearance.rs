@@ -47,9 +47,9 @@ fn font_commands_update_existing_hidden_and_new_views_and_minibuffers(cx: &mut T
     activate(&mut visual, &shell, other);
     let second = active_view(&mut visual, &shell);
     command(&mut visual, "increase-font-size");
-    assert_font(&visual, &second, "monospace", 17.);
+    assert_font(&visual, &second, "Lilex", 17.);
     activate(&mut visual, &shell, 0);
-    assert_font(&visual, &first, "monospace", 17.);
+    assert_font(&visual, &first, "Lilex", 17.);
 
     command(&mut visual, "set-font-family");
     assert_eq!(prompt(&mut visual, &shell), "Font family: ");
@@ -83,7 +83,7 @@ fn font_family_cancel_and_invalid_input_preserve_the_active_configuration(cx: &m
     visual.simulate_keystrokes("ctrl-g");
     redraw(&mut visual);
     assert_focused(&mut visual, &body);
-    assert_font(&visual, &body, "monospace", 16.);
+    assert_font(&visual, &body, "Lilex", 16.);
 
     command(&mut visual, "set-font-family");
     visual.simulate_keystrokes("enter");
@@ -93,7 +93,7 @@ fn font_family_cancel_and_invalid_input_preserve_the_active_configuration(cx: &m
             shell.read(cx).session().unwrap().kind(),
             &ReadKind::FontFamily
         );
-        assert_eq!(cx.global::<FontSettings>().family(), "monospace");
+        assert_eq!(cx.global::<FontSettings>().family(), "Lilex");
         assert!(
             minibuffer_editor(&visual, &shell)
                 .read(cx)
@@ -126,7 +126,7 @@ fn resizing_preserves_document_state_and_history_and_reveals_point(cx: &mut Test
         )
     });
     command(&mut visual, "increase-font-size");
-    assert_font(&visual, &body, "monospace", 17.);
+    assert_font(&visual, &body, "Lilex", 17.);
     visual.read(|cx| {
         let view = body.read(cx);
         let buffer = view.buffer();
@@ -171,7 +171,7 @@ fn live_settings_resize_an_existing_minibuffer_and_reject_out_of_range_commands(
         cx.set_global(fonts);
     });
     redraw(&mut visual);
-    assert_font(&visual, &editor, "monospace", 72.);
+    assert_font(&visual, &editor, "Lilex", 72.);
     visual.read(|cx| {
         let view = editor.read(cx);
         let bounds = view.viewport_layout().unwrap().bounds();
@@ -181,7 +181,7 @@ fn live_settings_resize_an_existing_minibuffer_and_reject_out_of_range_commands(
     visual.simulate_input("increase-font-size");
     visual.simulate_keystrokes("enter");
     redraw(&mut visual);
-    assert_font(&visual, &body, "monospace", 72.);
+    assert_font(&visual, &body, "Lilex", 72.);
     visual.read(|cx| {
         assert!(
             body.read(cx)
@@ -196,7 +196,7 @@ fn live_settings_resize_an_existing_minibuffer_and_reject_out_of_range_commands(
         cx.set_global(fonts);
     });
     command(&mut visual, "decrease-font-size");
-    assert_font(&visual, &body, "monospace", 8.);
+    assert_font(&visual, &body, "Lilex", 8.);
     command(&mut visual, "reset-font-size");
-    assert_font(&visual, &body, "monospace", 16.);
+    assert_font(&visual, &body, "Lilex", 16.);
 }

@@ -27,10 +27,13 @@ pub enum StyleRole {
     SyntaxConstant,
     SyntaxOperator,
     SyntaxPunctuation,
+    MarkupHeading,
+    MarkupStrong,
+    MarkupEmphasis,
 }
 
 impl StyleRole {
-    pub const COUNT: usize = 22;
+    pub const COUNT: usize = 25;
     pub const ALL: [Self; Self::COUNT] = [
         Self::Default,
         Self::Cursor,
@@ -54,6 +57,9 @@ impl StyleRole {
         Self::SyntaxConstant,
         Self::SyntaxOperator,
         Self::SyntaxPunctuation,
+        Self::MarkupHeading,
+        Self::MarkupStrong,
+        Self::MarkupEmphasis,
     ];
 
     pub fn name(self) -> &'static str {
@@ -80,6 +86,9 @@ impl StyleRole {
             Self::SyntaxConstant => "syntax.constant",
             Self::SyntaxOperator => "syntax.operator",
             Self::SyntaxPunctuation => "syntax.punctuation",
+            Self::MarkupHeading => "markup.heading",
+            Self::MarkupStrong => "markup.strong",
+            Self::MarkupEmphasis => "markup.emphasis",
         }
     }
 
@@ -95,17 +104,49 @@ impl StyleRole {
     }
 
     fn supports_background(self) -> bool {
-        matches!(
-            self,
-            Self::Default
-                | Self::Cursor
-                | Self::Region
-                | Self::ModeLine
-                | Self::ModeLineInactive
-                | Self::EchoArea
-                | Self::Completion
-                | Self::CompletionSelected
-        )
+        self.supports_text_attributes()
+            || matches!(
+                self,
+                Self::Default
+                    | Self::Cursor
+                    | Self::Region
+                    | Self::ModeLine
+                    | Self::ModeLineInactive
+                    | Self::EchoArea
+                    | Self::Completion
+                    | Self::CompletionSelected
+            )
+    }
+
+    pub fn supports_text_attributes(self) -> bool {
+        self == Self::Default || self == Self::MinibufferPrompt || self >= Self::SyntaxKeyword
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub struct FontEmphasis {
+    pub bold: Option<bool>,
+    pub italic: Option<bool>,
+}
+
+impl FontEmphasis {
+    pub fn font(self, base: &gpui_kit::Font) -> gpui_kit::Font {
+        let mut font = base.clone();
+        if let Some(bold) = self.bold {
+            font.weight = if bold {
+                gpui_kit::FontWeight::BOLD
+            } else {
+                gpui_kit::FontWeight::NORMAL
+            };
+        }
+        if let Some(italic) = self.italic {
+            font.style = if italic {
+                gpui_kit::FontStyle::Italic
+            } else {
+                gpui_kit::FontStyle::Normal
+            };
+        }
+        font
     }
 }
 
@@ -117,8 +158,12 @@ pub struct StyleColors {
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct StyleOverride {
-    foreground: Option<Hsla>,
-    background: Option<Hsla>,
+    pub(crate) foreground: Option<Hsla>,
+    pub(crate) background: Option<Hsla>,
+    pub(crate) bold: Option<bool>,
+    pub(crate) italic: Option<bool>,
+    pub(crate) underline: Option<bool>,
+    pub(crate) strikethrough: Option<bool>,
 }
 
 impl StyleOverride {
@@ -135,12 +180,53 @@ impl StyleOverride {
         Ok(Self {
             foreground: foreground.map(parse_color).transpose()?,
             background: background.map(parse_color).transpose()?,
+            ..Self::default()
         })
     }
 
-    fn merge(&mut self, next: Self) {
+    pub fn with_text_attributes(
+        mut self,
+        role: StyleRole,
+        weight: Option<&str>,
+        italic: Option<bool>,
+        underline: Option<bool>,
+        strikethrough: Option<bool>,
+    ) -> Result<Self, String> {
+        if !role.supports_text_attributes()
+            && (weight.is_some()
+                || italic.is_some()
+                || underline.is_some()
+                || strikethrough.is_some())
+        {
+            return Err(format!("Unsupported text attribute for {}", role.name()));
+        }
+        self.bold = weight
+            .map(|weight| match weight {
+                "normal" => Ok(false),
+                "bold" => Ok(true),
+                _ => Err(format!("Weight must be normal or bold: {weight}")),
+            })
+            .transpose()?;
+        self.italic = italic;
+        self.underline = underline;
+        self.strikethrough = strikethrough;
+        Ok(self)
+    }
+
+    pub(crate) fn merge(&mut self, next: Self) {
         self.foreground = next.foreground.or(self.foreground);
         self.background = next.background.or(self.background);
+        self.bold = next.bold.or(self.bold);
+        self.italic = next.italic.or(self.italic);
+        self.underline = next.underline.or(self.underline);
+        self.strikethrough = next.strikethrough.or(self.strikethrough);
+    }
+
+    pub(crate) fn emphasis(self, base: FontEmphasis) -> FontEmphasis {
+        FontEmphasis {
+            bold: self.bold.or(base.bold),
+            italic: self.italic.or(base.italic),
+        }
     }
 
     fn apply(self, colors: &mut StyleColors) {
@@ -173,6 +259,7 @@ pub struct ThemeSettings {
     active: String,
     overrides: BTreeMap<StyleRole, StyleOverride>,
     resolved: [StyleColors; StyleRole::COUNT],
+    attributes: [StyleOverride; StyleRole::COUNT],
 }
 
 impl Global for ThemeSettings {}
@@ -194,6 +281,7 @@ impl Default for ThemeSettings {
             active: "light".into(),
             overrides: BTreeMap::new(),
             resolved: builtin_colors(ThemeMode::Light),
+            attributes: builtin_attributes(),
         }
     }
 }
@@ -213,6 +301,16 @@ impl ThemeSettings {
 
     pub fn style(&self, role: StyleRole) -> StyleColors {
         self.resolved[role as usize]
+    }
+
+    pub(crate) fn attributes(&self, role: StyleRole) -> StyleOverride {
+        let mut attributes = self.attributes[role as usize];
+        attributes.foreground = Some(self.style(role).foreground);
+        attributes
+    }
+
+    pub(crate) fn patch(&self, role: StyleRole) -> StyleOverride {
+        self.attributes[role as usize]
     }
 
     pub fn define(
@@ -269,9 +367,11 @@ impl ThemeSettings {
     fn resolve(&mut self) {
         let definition = &self.themes[&self.active];
         self.resolved = builtin_colors(definition.mode);
+        self.attributes = builtin_attributes();
         for styles in [&definition.styles, &self.overrides] {
             for (role, colors) in styles {
                 colors.apply(&mut self.resolved[*role as usize]);
+                self.attributes[*role as usize].merge(*colors);
             }
         }
     }
@@ -344,7 +444,18 @@ fn builtin_colors(mode: ThemeMode) -> [StyleColors; StyleRole::COUNT] {
         pair(constant, background),
         pair(foreground, background),
         pair(muted, background),
+        pair(type_color, background),
+        pair(type_color, background),
+        pair(foreground, background),
     ]
+}
+
+fn builtin_attributes() -> [StyleOverride; StyleRole::COUNT] {
+    let mut attributes = [StyleOverride::default(); StyleRole::COUNT];
+    attributes[StyleRole::MarkupHeading as usize].bold = Some(true);
+    attributes[StyleRole::MarkupStrong as usize].bold = Some(true);
+    attributes[StyleRole::MarkupEmphasis as usize].italic = Some(true);
+    attributes
 }
 
 #[cfg(test)]

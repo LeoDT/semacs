@@ -53,6 +53,23 @@ fn configuration_registers_commands_font_and_multiple_keys() {
 }
 
 #[test]
+fn omitted_font_settings_use_the_bundled_default_and_partial_settings_compose() {
+    let defaults = crate::appearance::FontSettings::default();
+    assert_eq!(defaults.family(), "Lilex");
+    assert_eq!(load("").unwrap().1.font, defaults);
+    assert_eq!(load("semacs.setFont({});").unwrap().1.font, defaults);
+    let (_, configuration) = load("semacs.setFont({size: 20});").unwrap();
+    assert_eq!(configuration.font.family(), defaults.family());
+    assert_eq!(f32::from(configuration.font.base_size()), 20.);
+    let (_, configuration) =
+        load("semacs.setFont({family: 'Other Font'}); semacs.setFont({size: 22});").unwrap();
+    assert_eq!(configuration.font.family(), "Other Font");
+    assert_eq!(f32::from(configuration.font.base_size()), 22.);
+    let (_, configuration) = load("semacs.setFont({family: 'Other Font'});").unwrap();
+    assert_eq!(configuration.font.base_size(), defaults.base_size());
+}
+
+#[test]
 fn navigation_keys_bind_to_native_commands() {
     let bindings = [
         ("ctrl-left", Command::BackwardWord),
@@ -177,6 +194,31 @@ fn a_theme_accepts_every_named_interface_and_syntax_style() {
 }
 
 #[test]
+fn text_attributes_are_snapshotted_and_overridden_per_property() {
+    let (_, config) = load(r##"
+        const style = {weight: "bold", italic: true, underline: true, strikethrough: true, background: "#112233"};
+        semacs.setStyle("syntax.keyword", style);
+        style.weight = "normal";
+        semacs.setStyle("syntax.keyword", {italic: false, underline: false});
+        semacs.setStyle("markup.strong", {weight: "normal"});
+        semacs.setStyle("minibuffer-prompt", {weight: "bold", background: "#123456"});
+    "##).unwrap();
+    let keyword = config.theme.patch(crate::theme::StyleRole::SyntaxKeyword);
+    assert_eq!(keyword.bold, Some(true));
+    assert_eq!(keyword.italic, Some(false));
+    assert_eq!(keyword.underline, Some(false));
+    assert_eq!(keyword.strikethrough, Some(true));
+    assert_eq!(keyword.background, Some(gpui_kit::rgb(0x112233).into()));
+    assert_eq!(
+        config
+            .theme
+            .patch(crate::theme::StyleRole::MarkupStrong)
+            .bold,
+        Some(false)
+    );
+}
+
+#[test]
 fn invalid_themes_reject_the_entire_configuration() {
     for source in [
         r##"semacs.loadTheme("missing")"##,
@@ -190,12 +232,13 @@ fn invalid_themes_reject_the_entire_configuration() {
         r##"semacs.setStyle("default", {foreground:17})"##,
         r##"semacs.setStyle("default", {background:null})"##,
         r##"semacs.setStyle("default", {foreground:undefined})"##,
-        r##"semacs.setStyle("default", {weight:"bold"})"##,
+        r##"semacs.setStyle("default", {weight:"heavy"})"##,
+        r##"semacs.setStyle("region", {weight:"bold"})"##,
+        r##"semacs.setStyle("syntax.comment", {italic:1})"##,
         r##"semacs.setStyle("default", [])"##,
         r##"semacs.setStyle("region", {foreground:"#112233"})"##,
-        r##"semacs.setStyle("minibuffer-prompt", {background:"#112233"})"##,
         r##"semacs.setStyle("syntax.unknown", {foreground:"#112233"})"##,
-        r##"semacs.setStyle("syntax.keyword", {background:"#112233"})"##,
+        r##"semacs.setStyle("syntax.keyword", {underline:null})"##,
         r##"for(let i=0;i<33;i++)semacs.defineTheme("t-"+i,{appearance:"dark",styles:{}})"##,
         r##"for(let i=0;i<129;i++)semacs.setStyle("default", {})"##,
     ] {

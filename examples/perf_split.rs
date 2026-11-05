@@ -3,7 +3,7 @@
 use std::path::PathBuf;
 use std::time::Instant;
 
-use gpui_kit::{Entity, Keystroke, TestAppContext, VisualTestContext, font, px, size};
+use gpui_kit::{Entity, Keystroke, TestAppContext, VisualTestContext, px, size};
 use semacs::app::AppShell;
 use semacs::buffer::Buffer;
 use semacs::files::{self, DecodedFile, FileFormat};
@@ -171,7 +171,12 @@ fn measure(sample: &str, text: &str, run: usize, direction: &str) {
         cx.update(|_, cx| {
             for view in &views {
                 view.update(cx, |view, cx| {
-                    view.set_font(font("monospace").bold(), px(18.), px(27.), cx);
+                    view.set_font(
+                        semacs::appearance::FontSettings::default().font().bold(),
+                        px(18.),
+                        px(27.),
+                        cx,
+                    );
                 });
             }
         });

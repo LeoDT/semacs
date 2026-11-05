@@ -52,6 +52,14 @@ class ManualFixtureTests(unittest.TestCase):
                 self.assertTrue(result["disk_bytes"]["config/semacs/init.js"])
                 self.assertNotEqual(result.get("ime"), "unmeasured")
 
+    def test_font_profiles_inherit_the_bundled_default_family(self):
+        for profile in ("messages", "themes", "syntax", "languages", "flicker", "styles"):
+            with self.subTest(profile=profile):
+                config = m2_manual.PROFILES[profile][0]["config/semacs/init.js"]
+                if config:
+                    self.assertIn(b"semacs.setFont({size:", config)
+                self.assertNotIn(b"family:", config)
+
     def test_default_profile_missing_modified_or_linked_config_is_preserved_and_rejected(self):
         outside = Path(self.temporary.name) / "daily-init.js"
         outside.write_bytes(b"daily configuration must not change")
@@ -91,11 +99,12 @@ Path(os.environ["CAPTURE"]).write_text(json.dumps({
         (daily / "semacs/init.js").write_bytes(b"daily configuration must not be loaded")
         source = (Path(__file__).parent / "acceptance.fish").read_text().splitlines()
         original = os.environ.get("XDG_CONFIG_HOME")
-        for profile, filename in (("m2", "alpha.txt"), ("m2", "close.txt"), ("candidates", "source.txt")):
+        for profile, filename in (("m2", "alpha.txt"), ("m2", "close.txt"), ("candidates", "source.txt"), ("styles", "body.rs")):
             with self.subTest(profile=profile, filename=filename):
                 output = Path(self.temporary.name) / filename
                 m2_manual.prepare(output / "files", profile)
-                commands = [line for line in source if f'"$output/files/{filename}" >' in line]
+                template = "$body" if profile == "styles" else filename
+                commands = [line for line in source if f'"$output/files/{template}" >' in line]
                 self.assertEqual(len(commands), 1)
                 capture = output / "capture.json"
                 environment = {
@@ -105,6 +114,7 @@ Path(os.environ["CAPTURE"]).write_text(json.dumps({
                 script = (
                     f"set -l root {shlex.quote(str(root))}\n"
                     f"set -l output {shlex.quote(str(output))}\n"
+                    f"set -l body {shlex.quote(filename)}\n"
                     f"{commands[0]}\nor exit $status\n"
                     'printf "%s" "$XDG_CONFIG_HOME" > "$output/parent-env.txt"\n'
                 )
@@ -112,7 +122,8 @@ Path(os.environ["CAPTURE"]).write_text(json.dumps({
                                check=True, capture_output=True, timeout=10)
                 result = json.loads(capture.read_text())
                 self.assertEqual(result["config"], str(output / "files/config/semacs/init.js"))
-                self.assertEqual(result["bytes"], "")
+                expected_config = m2_manual.PROFILES[profile][0]["config/semacs/init.js"].decode()
+                self.assertEqual(result["bytes"], expected_config)
                 self.assertEqual(result["file"], str(output / "files" / filename))
                 self.assertEqual((output / "parent-env.txt").read_text(), str(daily))
                 self.assertEqual((daily / "semacs/init.js").read_bytes(), b"daily configuration must not be loaded")
@@ -335,6 +346,67 @@ Path(os.environ["CAPTURE"]).write_text(json.dumps({
                     m2_manual.verify(self.directory, "flicker")
                 self.assertEqual(path.read_bytes(), data)
                 self.assertFalse(json.loads((self.directory / "result.json").read_text())["completed"])
+
+    def test_styles_verify_only_the_two_ime_commits_and_record_unmeasured_limits(self):
+        self.completed_fixture("styles")
+        result = m2_manual.verify(self.directory, "styles")
+        self.assertTrue(result["completed"])
+        self.assertEqual(result["ime"], "user-confirmed styled Rust/Markdown body preedit/cancel/commit")
+        self.assertEqual(result["ime_latency"], "unmeasured")
+        self.assertEqual(result["performance"], "unmeasured")
+        self.assertEqual(result["gpu"], "unmeasured")
+        self.assertFalse(result["screenshots"])
+        self.assertEqual((self.directory / "body.rs").read_bytes(),
+                         m2_manual.STYLES_RUST.replace(b"// E3-RUST:", "// E3-RUST:你".encode(), 1))
+        self.assertEqual((self.directory / "body.md").read_bytes(),
+                         m2_manual.STYLES_MARKDOWN.replace(b"# E3-MD:", "# E3-MD:你".encode(), 1))
+        self.assertEqual(m2_manual.STYLES_RUST.decode().splitlines()[0], "// E3-RUST:")
+        self.assertEqual(m2_manual.STYLES_MARKDOWN.decode().splitlines()[0], "# E3-MD:")
+        self.assertIn('weight: "normal"', m2_manual.STYLES_CONFIG.decode())
+        self.assertIn("italic: false", m2_manual.STYLES_CONFIG.decode())
+        self.assertIn("C-? redo", m2_manual.STYLES_INSTRUCTIONS)
+        self.assertEqual(len(m2_manual.STYLES_OBSERVATIONS), 4)
+        self.assertNotIn("强调只换颜色", m2_manual.LANGUAGES_INSTRUCTIONS)
+
+    def test_styles_failed_ime_observation_is_not_reported_as_confirmed(self):
+        self.completed_fixture("styles")
+        observations = self.directory / "observations.tsv"
+        observations.write_text(observations.read_text().replace("styles-rust-ime\tyes", "styles-rust-ime\tno"))
+        with self.assertRaisesRegex(RuntimeError, "manual observation not confirmed"):
+            m2_manual.verify(self.directory, "styles")
+        result = json.loads((self.directory / "result.json").read_text())
+        self.assertFalse(result["completed"])
+        self.assertEqual(result["ime"], "unconfirmed")
+
+    def test_styles_incorrect_commits_and_changed_configuration_stop_without_repair(self):
+        for name, data in (
+            ("body.rs", m2_manual.STYLES_RUST),
+            ("body.md", m2_manual.STYLES_MARKDOWN.replace(b"# E3-MD:", "# E3-MD:你你ni".encode())),
+            ("config/semacs/init.js", b"preserve modified configuration"),
+        ):
+            with self.subTest(name=name):
+                self.directory = Path(self.temporary.name) / name.replace("/", "-")
+                self.completed_fixture("styles")
+                target = self.directory / name
+                target.write_bytes(data)
+                with self.assertRaisesRegex(RuntimeError, "disk-byte mismatch"):
+                    m2_manual.verify(self.directory, "styles")
+                self.assertEqual(target.read_bytes(), data)
+
+    def test_styles_performance_entry_is_representative_and_stops_between_invocations(self):
+        source = (Path(__file__).parent / "acceptance.fish").read_text()
+        block = source.split('else if test "$mode" = styles-perf\n')[1].split('else if test "$mode" = syntax-perf\n')[0]
+        commands = [line.strip() for line in block.splitlines() if "scripts/perf_native.py" in line]
+        self.assertEqual(len(commands), 2)
+        self.assertIn("--sample mixed --runs 3", commands[0])
+        self.assertIn('env XDG_CONFIG_HOME="$output/config"', commands[0])
+        self.assertIn("--syntax --sample markdown --runs 3", commands[1])
+        self.assertIn('--syntax-manifest-sha256 "$syntax_manifest"', commands[1])
+        self.assertNotIn("--sample html", block)
+        for command in commands:
+            following = block.split(command, 1)[1].lstrip()
+            self.assertTrue(following.startswith("or fail "))
+        self.assertIn('test ! -L "$output/config/semacs/init.js"', block)
 
     def test_wrong_profile_cannot_pass(self):
         self.completed_fixture("m2")

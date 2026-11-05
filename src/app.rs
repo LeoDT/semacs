@@ -31,6 +31,8 @@ mod windows;
 impl Global for KillRing {}
 
 pub fn init(cx: &mut App) {
+    crate::appearance::load_bundled_fonts(cx.text_system())
+        .expect("failed to load bundled Lilex fonts");
     gpui_kit::init(cx);
     crate::theme::ThemeSettings::default().install(cx);
 }

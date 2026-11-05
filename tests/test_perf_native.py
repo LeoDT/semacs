@@ -80,6 +80,172 @@ def csv_report(values, software=False):
     return output.getvalue()
 
 
+def display_diagnostic_report(values, software=False):
+    findings = []
+    for index, row in enumerate(values, 1):
+        errors = runner.validate_native_metrics([row], software, False, diagnostic=True)
+        row["status"] = "over-budget" if errors else "ok"
+        findings.extend(f"# budget_violation=row {index}: {error.removeprefix('STOP: ')}" for error in errors)
+    verdict = "not-applicable" if software else ("false" if findings else "true")
+    footer = (f"# completed=true; budget_passed={verdict}; acceptance=false; budget_violation_count={len(findings)}; "
+              "gpu_execution_ms=unmeasured; compositor_presentation_ms=unmeasured")
+    return csv_report(values, software).replace(
+        "# completed=true;", "\n".join(findings + [footer])
+    ) + runner.DISPLAY_DIAGNOSTIC_HEADER + "\n"
+
+
+class DisplayDiagnosticTests(unittest.TestCase):
+    def setUp(self):
+        temporary = ROOT / ".pi/tmp"
+        temporary.mkdir(parents=True, exist_ok=True)
+        self.directory = tempfile.TemporaryDirectory(prefix="display-diagnostic-test-", dir=temporary)
+        self.addCleanup(self.directory.cleanup)
+        self.root = Path(self.directory.name)
+
+    def read(self, content, software=False, diagnostic=True):
+        path = self.root / "report.csv"
+        path.write_text(content)
+        return runner.read_report(path, software, False, display_diagnostic=diagnostic)
+
+    def test_all_phases_survive_reported_budget_failures_but_are_not_acceptance(self):
+        values = native_rows()
+        values[0].update(first_frame_submit_ms="260", first_submit_ms="260", ready_submit_ms="700")
+        next(row for row in values if row["phase"] == "font")["draw_cpu_max_ms"] = "17"
+        next(row for row in values if row["phase"] == "idle")["frames"] = "1"
+        content = display_diagnostic_report(values)
+        self.assertEqual(len(self.read(content)), 71)
+        self.assertEqual(len(runner.diagnostic_findings(content)), 4)
+        self.assertIn("budget_passed=false; acceptance=false", content)
+        with self.assertRaisesRegex(RuntimeError, "not an acceptance"):
+            self.read(content, diagnostic=False)
+
+    def test_even_in_budget_or_software_diagnostic_is_never_acceptance(self):
+        for software in (False, True):
+            content = display_diagnostic_report(native_rows(), software)
+            self.assertEqual(len(self.read(content, software)), 71)
+            self.assertIn("acceptance=false", content)
+            with self.assertRaisesRegex(RuntimeError, "not an acceptance"):
+                self.read(content, software, diagnostic=False)
+
+    def test_completion_identity_order_integrity_and_verdict_are_fail_closed(self):
+        content = display_diagnostic_report(native_rows())
+        reordered = native_rows()
+        reordered[0], reordered[1] = reordered[1], reordered[0]
+        bad = native_rows()
+        bad[0].update(first_submit_ms="260", ready_submit_ms="700", first_frame_submit_ms="260")
+        exceeded = display_diagnostic_report(bad)
+        for invalid in (
+            content.replace(runner.DISPLAY_DIAGNOSTIC_HEADER, ""),
+            content.replace("acceptance=false; stage_timeout_ms=2000", "acceptance=true; stage_timeout_ms=2000"),
+            content.replace("# completed=true;", "# completed=false;"),
+            display_diagnostic_report(reordered),
+            exceeded.replace("budget_passed=false", "budget_passed=true"),
+            exceeded.replace("over-budget", "ok"),
+            content.replace("open,2,1,1,", "open,2,260,1,"),
+            content.replace(",0,1,838,", ",1,1,838,"),
+        ):
+            with self.subTest(invalid=invalid[:120]), self.assertRaises(RuntimeError):
+                self.read(invalid)
+
+    def test_blank_body_or_missing_ready_is_rejected_despite_diagnostic_mode(self):
+        for key, value in (("blank_frames", "1"), ("visible_rows", "0"), ("ready_submit_ms", "")):
+            rows = native_rows()
+            content = display_diagnostic_report(rows)
+            rows[0][key] = value
+            invalid = csv_report(rows).replace("# completed=true;", content[content.index("# completed=true;"):])
+            with self.assertRaises(RuntimeError):
+                self.read(invalid)
+
+    def test_watchdog_limits_each_stage_and_checks_progress_order(self):
+        import queue
+        lines = queue.Queue()
+        lines.put("STAGE open")
+        process = Mock()
+        with patch.object(runner.time, "monotonic", side_effect=[0, 0, 0, 3]):
+            with self.assertRaisesRegex(RuntimeError, "watchdog: open"):
+                runner.wait_display_diagnostic(process, lines)
+        process.wait.assert_not_called()
+        lines.put("STAGE scroll")
+        with self.assertRaisesRegex(RuntimeError, "stage progress"):
+            runner.wait_display_diagnostic(process, lines)
+
+    def test_progress_of_full_diagnostic_can_exit_normally(self):
+        import queue
+        lines = queue.Queue()
+        for phase in runner.DISPLAY_PHASES:
+            lines.put("STAGE " + phase)
+            lines.put("STAGE_DONE " + phase)
+        process = Mock(returncode=0)
+        process.poll.return_value = 0
+        with patch.object(runner.time, "monotonic", return_value=0):
+            self.assertEqual(runner.wait_display_diagnostic(process, lines), 0)
+
+    def test_fake_subprocess_completes_full_diagnostic_despite_open_failure(self):
+        from argparse import Namespace
+        values = native_rows()
+        values[0].update(first_frame_submit_ms="260", first_submit_ms="260", ready_submit_ms="700")
+        content = display_diagnostic_report(values)
+        script = self.root / "probe.py"
+        script.write_text(
+            "import pathlib, sys\n"
+            f"pathlib.Path(sys.argv[2]).write_text({content!r})\n"
+            f"for phase in {runner.DISPLAY_PHASES!r}:\n"
+            " print('STAGE ' + phase, flush=True)\n"
+            " print('STAGE_DONE ' + phase, flush=True)\n")
+        args = Namespace(output=self.root, binary=Path(sys.executable), input=script,
+                         software=False, ime=False, m1=False, display_diagnostic=True)
+        self.assertEqual(len(runner.run_probe(args, None, "mixed", 1)), 71)
+        self.assertIn("STAGE_DONE burst-delete", (self.root / "mixed-1.stdout.log").read_text())
+
+    def test_watchdog_kills_blocked_subprocess_and_keeps_partial_csv(self):
+        from argparse import Namespace
+        script = self.root / "blocked.py"
+        script.write_text(
+            "import pathlib, sys, time\n"
+            "pathlib.Path(sys.argv[2]).write_text('# partial diagnostic\\n')\n"
+            "print('STAGE open', flush=True)\n"
+            "time.sleep(20)\n")
+        args = Namespace(output=self.root, binary=Path(sys.executable), input=script,
+                         software=False, ime=False, m1=False, display_diagnostic=True)
+        with self.assertRaisesRegex(RuntimeError, "watchdog: open"):
+            runner.run_probe(args, None, "mixed", 1)
+        self.assertEqual((self.root / "mixed-1.csv").read_text(), "# partial diagnostic\n")
+        self.assertIn("STAGE open", (self.root / "mixed-1.stdout.log").read_text())
+
+    def test_main_runs_one_window_with_isolation_and_records_nonacceptance(self):
+        fixture = self.root / "fixture"
+        fixture.write_bytes(b"x" * (8 * 1024 * 1024))
+        binary = self.root / "probe"
+        binary.touch()
+        output = self.root / "output"
+        values = native_rows()
+        values[0].update(first_frame_submit_ms="260", first_submit_ms="260", ready_submit_ms="700")
+        content = display_diagnostic_report(values)
+
+        def probe(args, desktop, sample, run):
+            self.assertEqual((sample, run), ("mixed", 1))
+            self.assertEqual((args.output / "config/semacs/init.js").read_bytes(), b"")
+            (args.output / "mixed-1.csv").write_text(content)
+            return values
+
+        argv = ["perf_native.py", str(fixture), str(output), "--consent",
+                "--display-diagnostic", "--runs", "1", "--binary", str(binary)]
+        with patch.object(sys, "argv", argv), patch.object(runner, "Desktop") as desktop, \
+             patch.object(runner, "command", return_value="font"), \
+             patch.object(runner, "run_probe", side_effect=probe) as call:
+            runner.main()
+            call.assert_called_once()
+            desktop.return_value.restore.assert_called_once()
+        metadata = json.loads((output / "environment.json").read_text())
+        self.assertTrue(metadata["completed"])
+        self.assertTrue(metadata["restored"])
+        self.assertFalse(metadata["acceptance"])
+        self.assertFalse(metadata["budget_passed"])
+        self.assertEqual(len(metadata["budget_violations"]), 2)
+        self.assertEqual(metadata["stage_timeout_ms"], 2000)
+        self.assertEqual(metadata["samples"], ["mixed"])
+
+
 class NativeRunnerTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -104,6 +270,32 @@ class NativeRunnerTests(unittest.TestCase):
         ):
             with self.subTest(invalid=invalid), self.assertRaises(RuntimeError):
                 self.report(invalid)
+
+    def test_partial_stage_report_surfaces_stop_and_is_not_a_pass(self):
+        values = native_rows()[:1]
+        values[0].update(ready_submit_ms="", status="failed")
+        partial = csv_report(values).replace(
+            "# completed=true;",
+            "# stop_reason=open: ready_submit_ms=501 > 500\n# completed=false; budget_passed=false;")
+        with self.assertRaisesRegex(RuntimeError, "STOP: open: ready_submit_ms"):
+            self.report(partial)
+
+    def test_external_wait_stops_immediately_without_sending_next_action(self):
+        import queue
+        lines = queue.Queue()
+        lines.put("STOP font: ready_submit_ms=301 > 300")
+        process = Mock()
+        with self.assertRaisesRegex(RuntimeError, "STOP font"):
+            runner.wait_line(lines, "READY", process)
+        process.poll.assert_not_called()
+
+    def test_failed_status_cannot_hide_under_completed_footer(self):
+        values = native_rows(ime=True)
+        values[0]["status"] = "failed"
+        for value in values[1:]:
+            value["status"] = "ok"
+        with self.assertRaisesRegex(RuntimeError, "failed stage"):
+            self.report(csv_report(values))
 
     def test_refuses_input_when_focus_is_not_the_probe(self):
         desktop = runner.Desktop.__new__(runner.Desktop)
@@ -254,7 +446,10 @@ class DriverTests(unittest.TestCase):
                 self.assertEqual((output / "summary.json").exists(), not fail)
 
     def test_modes_and_pacing_require_explicit_consent_and_correct_mode(self):
-        for flags in ([], ["--consent", "--m1", "--ime"], ["--consent", "--m1", "--m2"],
+        for flags in ([], ["--consent", "--display-diagnostic"],
+                      ["--consent", "--display-diagnostic", "--runs", "1", "--sample", "single-ascii"],
+                      ["--consent", "--display-diagnostic", "--runs", "1", "--m1"],
+                      ["--consent", "--m1", "--ime"], ["--consent", "--m1", "--m2"],
                       ["--consent", "--interval-ms", "50"],
                       ["--consent", "--m1", "--duration-seconds", "0"],
                       ["--consent", "--m2-open-diagnostic"],
@@ -298,6 +493,23 @@ class DriverTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "STOP first_submit_ms"):
             runner.run_probe(args, None, "mixed", 1)
         self.assertIn("STOP", (self.root / "mixed-1.stdout.log").read_text())
+
+    def test_plain_probe_stops_with_partial_report_and_preserves_evidence(self):
+        from argparse import Namespace
+        script = self.root / "fake-probe.py"
+        script.write_text(
+            "import pathlib, sys\n"
+            "pathlib.Path(sys.argv[2]).write_text("
+            "'# stop_reason=open: ready_submit_ms=501 > 500\\n# completed=false; budget_passed=false;\\n')\n"
+            "print('STOP open: ready_submit_ms=501 > 500', flush=True)\n"
+            "raise SystemExit(2)\n")
+        args = Namespace(output=self.root, binary=Path(sys.executable), input=script,
+                         software=False, ime=False, m1=False)
+        with self.assertRaisesRegex(RuntimeError, "STOP open: ready_submit_ms"):
+            runner.run_probe(args, None, "mixed", 1)
+        self.assertIn("# completed=false;", (self.root / "mixed-1.csv").read_text())
+        self.assertIn("STOP open", (self.root / "mixed-1.stdout.log").read_text())
+        self.assertTrue((self.root / "mixed-1.stderr.log").exists())
 
     def test_m1_report_file_round_trip(self):
         path = self.root / "report.csv"

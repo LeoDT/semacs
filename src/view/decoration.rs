@@ -1,15 +1,20 @@
-use super::{RowPart, cursor::Cursor};
+use super::{RowPart, ViewportLayout, cursor::Cursor};
 use crate::syntax::DisplayHighlights;
-use crate::theme::{StyleRole, ThemeSettings};
-use gpui_kit::{App, DecorationRun, Hsla, LineLayout, Pixels, Point, TextAlign, Window};
+use crate::theme::{StyleOverride, StyleRole, ThemeSettings};
+use gpui_kit::{
+    App, Bounds, DecorationRun, LineLayout, Pixels, Point, StrikethroughStyle, TextAlign,
+    UnderlineStyle, Window, fill, point, px, size,
+};
 use smallvec::SmallVec;
 use std::ops::Range;
 
 pub(super) struct TextStyle<'a> {
-    colors: [Hsla; StyleRole::COUNT],
+    styles: [StyleOverride; StyleRole::COUNT],
+    patches: [StyleOverride; StyleRole::COUNT],
     pub syntax: Option<&'a DisplayHighlights>,
     pub marked: Option<Range<usize>>,
     pub prompt_end: usize,
+    annotations: Option<&'a crate::buffer::Annotations>,
 }
 
 impl<'a> TextStyle<'a> {
@@ -20,11 +25,21 @@ impl<'a> TextStyle<'a> {
         prompt_end: usize,
     ) -> Self {
         Self {
-            colors: StyleRole::ALL.map(|role| theme.style(role).foreground),
+            styles: StyleRole::ALL.map(|role| theme.attributes(role)),
+            patches: StyleRole::ALL.map(|role| theme.patch(role)),
             syntax,
             marked,
             prompt_end,
+            annotations: None,
         }
+    }
+
+    pub(super) fn with_annotations(
+        mut self,
+        annotations: Option<&'a crate::buffer::Annotations>,
+    ) -> Self {
+        self.annotations = annotations;
+        self
     }
 
     fn runs(
@@ -44,41 +59,90 @@ impl<'a> TextStyle<'a> {
                 syntax.next();
             }
             let mut end = range.end;
-            let mut role = StyleRole::Default;
+            let mut attributes = self.styles[StyleRole::Default as usize];
+            attributes.background = None;
             if let Some(span) = syntax.peek() {
                 if span.range.start <= position {
-                    role = span.style;
+                    if span.style != StyleRole::Default {
+                        attributes.merge(self.styles[span.style as usize]);
+                    }
+                    for role in &span.modifiers {
+                        attributes.merge(self.patches[*role as usize]);
+                    }
                     end = end.min(span.range.end);
                 } else {
                     end = end.min(span.range.start);
                 }
             }
+            let committed = match &self.marked {
+                Some(marked) if position < marked.start => {
+                    end = end.min(marked.start);
+                    Some(position)
+                }
+                Some(marked) if position < marked.end => {
+                    end = end.min(marked.end);
+                    None
+                }
+                Some(marked) => Some(position - marked.len()),
+                None => Some(position),
+            };
+            if let (Some(annotations), Some(committed)) = (self.annotations, committed) {
+                let delta = position - committed;
+                let index = annotations
+                    .ranges
+                    .partition_point(|span| span.range.end.0 <= committed);
+                if let Some(span) = annotations.ranges.get(index) {
+                    if span.range.start.0 <= committed {
+                        attributes.merge(span.style);
+                        end = end.min(span.range.end.0 + delta);
+                    } else {
+                        end = end.min(span.range.start.0 + delta);
+                    }
+                }
+            }
             if position < self.prompt_end {
-                role = StyleRole::MinibufferPrompt;
+                attributes = self.styles[StyleRole::Default as usize];
+                attributes.background = None;
+                attributes.merge(self.styles[StyleRole::MinibufferPrompt as usize]);
                 end = end.min(self.prompt_end);
             }
             if let Some(cursor) = &cursor {
                 if position < cursor.start {
                     end = end.min(cursor.start);
                 } else if position < cursor.end {
-                    role = StyleRole::Cursor;
+                    attributes.foreground = self.styles[StyleRole::Cursor as usize].foreground;
                     end = end.min(cursor.end);
                 }
             }
-            let color = self.colors[role as usize];
-            let len = (end - position) as u32;
+            let color = attributes.foreground.expect("resolved foreground");
+            let run = DecorationRun {
+                len: (end - position) as u32,
+                color,
+                background_color: attributes.background,
+                underline: attributes
+                    .underline
+                    .unwrap_or(false)
+                    .then_some(UnderlineStyle {
+                        thickness: px(1.),
+                        color: None,
+                        wavy: false,
+                    }),
+                strikethrough: attributes.strikethrough.unwrap_or(false).then_some(
+                    StrikethroughStyle {
+                        thickness: px(1.),
+                        color: None,
+                    },
+                ),
+            };
             if let Some(last) = runs.last_mut()
-                && last.color == color
+                && last.color == run.color
+                && last.background_color == run.background_color
+                && last.underline == run.underline
+                && last.strikethrough == run.strikethrough
             {
-                last.len += len;
+                last.len += run.len;
             } else {
-                runs.push(DecorationRun {
-                    len,
-                    color,
-                    background_color: None,
-                    underline: None,
-                    strikethrough: None,
-                });
+                runs.push(run);
             }
             position = end;
         }
@@ -86,7 +150,70 @@ impl<'a> TextStyle<'a> {
     }
 }
 
+impl ViewportLayout {
+    pub(super) fn line_backgrounds(
+        &self,
+        annotations: &crate::buffer::Annotations,
+        committed_text: &crate::text::Rope,
+        marked: Option<Range<usize>>,
+    ) -> Vec<(Bounds<Pixels>, gpui_kit::Hsla)> {
+        self.rows
+            .iter()
+            .filter_map(|row| {
+                let offset = row.source.start.0;
+                let committed = match &marked {
+                    Some(marked) if offset >= marked.end => offset - marked.len(),
+                    Some(marked) if offset >= marked.start => marked.start,
+                    _ => offset,
+                };
+                let logical_row = committed_text
+                    .offset_to_point(committed.min(committed_text.len()))
+                    .row;
+                let color = annotations.line_color(logical_row)?;
+                Some((
+                    Bounds::new(
+                        point(self.bounds.origin.x, self.origin(row).y),
+                        size(self.bounds.size.width, self.key.settings.line_height),
+                    ),
+                    color,
+                ))
+            })
+            .collect()
+    }
+}
+
 impl RowPart {
+    pub(super) fn paint_background(
+        &self,
+        origin: Point<Pixels>,
+        line_height: Pixels,
+        style: &TextStyle<'_>,
+        window: &mut Window,
+    ) {
+        let mut offset = 0;
+        for run in style.runs(self.range.start.0..self.range.end.0, None) {
+            let end = offset + run.len as usize;
+            if let Some(color) = run.background_color {
+                let left = self
+                    .line
+                    .as_ref()
+                    .map_or(px(0.), |line| line.x_for_index(offset));
+                let right = self
+                    .line
+                    .as_ref()
+                    .map_or(self.width, |line| line.x_for_index(end));
+                window.paint_quad(fill(
+                    Bounds::new(
+                        point(origin.x + left, origin.y),
+                        size((right - left).max(px(0.)), line_height),
+                    ),
+                    color,
+                ));
+            }
+            offset = end;
+        }
+    }
+
     pub(super) fn paint_text(
         &self,
         origin: Point<Pixels>,
@@ -100,7 +227,10 @@ impl RowPart {
             return;
         };
         let cursor = cursor.map(|cursor| cursor.range.start.0..cursor.range.end.0);
-        let runs = style.runs(self.range.start.0..self.range.end.0, cursor);
+        let mut runs = style.runs(self.range.start.0..self.range.end.0, cursor);
+        for run in &mut runs {
+            run.background_color = None;
+        }
         LineLayout::paint(
             line,
             origin,
@@ -119,6 +249,74 @@ impl RowPart {
 mod tests {
     use super::*;
     use crate::theme::StyleOverride;
+
+    #[gpui_kit::test]
+    fn range_backgrounds_preserve_syntax_decorations_and_cursor_foreground(
+        cx: &mut gpui_kit::TestAppContext,
+    ) {
+        use crate::buffer::{Buffer, StyledRange};
+        use crate::files::{DecodedFile, FileFormat};
+        use crate::text::ByteOffset;
+        use gpui_kit::AppContext;
+        let mut buffer = Buffer::new(
+            Some("style.rs".into()),
+            DecodedFile {
+                text: "fn main() {}".into(),
+                format: FileFormat::default(),
+            },
+        );
+        let observer = cx.new(|_| ());
+        cx.update(|cx| buffer.prepare_syntax(observer.downgrade().into(), cx));
+        cx.run_until_parked();
+        buffer
+            .set_annotations(
+                buffer.snapshot_id(),
+                vec![StyledRange {
+                    range: ByteOffset(0)..ByteOffset(1),
+                    style: StyleOverride::new(StyleRole::Default, None, Some("#223344")).unwrap(),
+                }],
+                vec![],
+            )
+            .unwrap();
+        let mut theme = ThemeSettings::default();
+        theme.set_style(
+            StyleRole::SyntaxKeyword,
+            StyleOverride::new(StyleRole::SyntaxKeyword, None, Some("#112233"))
+                .unwrap()
+                .with_text_attributes(
+                    StyleRole::SyntaxKeyword,
+                    Some("bold"),
+                    None,
+                    Some(true),
+                    Some(true),
+                )
+                .unwrap(),
+        );
+        let syntax = buffer.syntax_display().unwrap();
+        let annotations = buffer.annotations().unwrap();
+        let style =
+            TextStyle::new(&theme, Some(&syntax), None, 0).with_annotations(Some(&annotations));
+        let runs = style.runs(0..3, Some(0..1));
+        assert_eq!(runs[0].color, theme.style(StyleRole::Cursor).foreground);
+        assert_eq!(
+            runs[0].background_color,
+            Some(gpui_kit::rgb(0x223344).into())
+        );
+        assert!(runs[0].underline.is_some());
+        assert!(runs[0].strikethrough.is_some());
+        assert_eq!(
+            runs[1].background_color,
+            Some(gpui_kit::rgb(0x112233).into())
+        );
+        assert_eq!(runs.last().unwrap().background_color, None);
+        let style = TextStyle::new(&theme, Some(&syntax), Some(1..4), 0)
+            .with_annotations(Some(&annotations));
+        let runs = style.runs(1..4, None);
+        assert_eq!(runs.len(), 1);
+        assert_eq!(runs[0].color, theme.style(StyleRole::Default).foreground);
+        assert!(runs[0].background_color.is_none());
+        assert!(runs[0].underline.is_none());
+    }
 
     #[test]
     fn prompt_and_cursor_preserve_plain_body_colors() {

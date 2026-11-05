@@ -1,4 +1,4 @@
-//! Versioned, streaming soft-wrap indexes. Shaping is reserved for visible rows.
+//! Versioned, streaming soft-wrap indexes with font-sensitive grapheme advances.
 
 use std::borrow::Cow;
 use std::cmp::Ordering;
@@ -11,6 +11,11 @@ use std::sync::{
 
 use gpui_kit::{Font, Pixels, TextRun, TextSystem, WindowTextSystem, black, px};
 use unicode_segmentation::{GraphemeCursor, GraphemeIncomplete};
+
+#[cfg(test)]
+mod style_tests;
+mod typography;
+pub use typography::{FontSpan, Typography};
 
 pub use crate::input::DisplayChange;
 use crate::input::{DisplayId, DisplaySnapshot};
@@ -25,9 +30,19 @@ pub struct LayoutSettings {
     pub line_height: Pixels,
     pub wrap_width: Pixels,
     pub tab_size: u32,
+    pub typography: Typography,
 }
 
 impl LayoutSettings {
+    fn compatible_after_edit(&self, other: &Self) -> bool {
+        self.font == other.font
+            && self.font_size == other.font_size
+            && self.line_height == other.line_height
+            && self.wrap_width == other.wrap_width
+            && self.tab_size == other.tab_size
+            && self.typography.compatible_after_edit(&other.typography)
+    }
+
     pub fn validate(&self) {
         for value in [self.font_size, self.line_height, self.wrap_width] {
             assert!(f32::from(value).is_finite() && value > px(0.));
@@ -209,7 +224,10 @@ impl WrapJob {
         };
         if let (Some(previous), Some(change)) = (previous, change)
             && previous.complete
-            && previous.key.settings == job.key.settings
+            && previous
+                .key
+                .settings
+                .compatible_after_edit(&job.key.settings)
             && previous.key.display == change.before
             && job.key.display == change.after
             && previous.key.display.committed.buffer == job.key.display.committed.buffer
@@ -352,8 +370,9 @@ impl WrapJob {
 pub struct FontMeasure {
     settings: LayoutSettings,
     system: WindowTextSystem,
-    ascii: [Option<Pixels>; 128],
-    other: HashMap<String, Pixels>,
+    ascii: [[Option<Pixels>; 128]; 9],
+    other: [HashMap<String, Pixels>; 9],
+    other_entries: usize,
     tab_period: Pixels,
     measurements: usize,
 }
@@ -366,8 +385,9 @@ impl FontMeasure {
         let mut result = Self {
             settings,
             system: WindowTextSystem::new(system),
-            ascii: [None; 128],
-            other: HashMap::new(),
+            ascii: [[None; 128]; 9],
+            other: std::array::from_fn(|_| HashMap::new()),
+            other_entries: 0,
             tab_period: px(1.),
             measurements: 0,
         };
@@ -380,26 +400,41 @@ impl FontMeasure {
     }
 
     pub fn width(&mut self, grapheme: &str) -> Pixels {
+        self.width_with(grapheme, self.settings.typography.base())
+    }
+
+    pub fn width_at(&mut self, grapheme: &str, offset: usize) -> Pixels {
+        self.width_with(grapheme, self.settings.typography.font_at(offset))
+    }
+
+    fn width_with(&mut self, grapheme: &str, emphasis: crate::theme::FontEmphasis) -> Pixels {
+        let index = |value: Option<bool>| match value {
+            None => 0,
+            Some(false) => 1,
+            Some(true) => 2,
+        };
+        let font_index = index(emphasis.bold) + 3 * index(emphasis.italic);
         if grapheme.len() == 1 && grapheme.is_ascii() {
             let ix = grapheme.as_bytes()[0] as usize;
-            if let Some(width) = self.ascii[ix] {
+            if let Some(width) = self.ascii[font_index][ix] {
                 return width;
             }
-            let width = self.measure(grapheme);
-            self.ascii[ix] = Some(width);
+            let width = self.measure(grapheme, emphasis);
+            self.ascii[font_index][ix] = Some(width);
             return width;
         }
-        if let Some(width) = self.other.get(grapheme) {
+        if let Some(width) = self.other[font_index].get(grapheme) {
             return *width;
         }
-        let width = self.measure(grapheme);
-        if self.other.len() < 4096 && grapheme.len() <= 256 {
-            self.other.insert(grapheme.to_owned(), width);
+        let width = self.measure(grapheme, emphasis);
+        if self.other_entries < 4096 && grapheme.len() <= 256 {
+            self.other[font_index].insert(grapheme.to_owned(), width);
+            self.other_entries += 1;
         }
         width
     }
 
-    fn measure(&mut self, text: &str) -> Pixels {
+    fn measure(&mut self, text: &str, emphasis: crate::theme::FontEmphasis) -> Pixels {
         #[cfg(feature = "native-profiler")]
         let _trace = crate::preparation_trace::Span::detail("measure-grapheme", text.len());
         if self.measurements == 256 {
@@ -408,13 +443,16 @@ impl FontMeasure {
         }
         self.measurements += 1;
         self.system
-            .shape_line(
-                text.to_owned().into(),
+            .layout_line(
+                text,
                 self.settings.font_size,
-                &[self.run(text.len())],
+                &[TextRun {
+                    font: emphasis.font(&self.settings.font),
+                    ..self.run(text.len())
+                }],
                 None,
             )
-            .width()
+            .width
     }
 
     pub fn run(&self, len: usize) -> TextRun {
@@ -426,6 +464,12 @@ impl FontMeasure {
             underline: None,
             strikethrough: None,
         }
+    }
+
+    pub(crate) fn runs(&self, text: &str, offset: usize) -> Vec<TextRun> {
+        self.settings
+            .typography
+            .runs(text, offset, &self.settings.font)
     }
 
     pub fn tab_width(&self, phase: Pixels) -> Pixels {
@@ -536,7 +580,9 @@ struct Atom {
     end: usize,
     width: Pixels,
     newline: bool,
+    tab: bool,
 }
+
 enum ScanResult {
     Row(WrapRow),
     Pending,
@@ -580,16 +626,20 @@ impl<'a> RowScanner<'a> {
             return ScanResult::Done;
         }
         loop {
+            if cancelled.is_some_and(|flag| flag.load(AtomicOrdering::Relaxed)) {
+                return ScanResult::Pending;
+            }
             if self.pending.is_none() && self.graphemes.start >= self.end {
                 self.done = true;
-                if self.include_eof {
-                    return ScanResult::Row(WrapRow {
+                return if self.include_eof {
+                    ScanResult::Row(WrapRow {
                         byte_len: self.end - self.row_start,
                         content_len: self.end - self.row_start,
                         tab_phase: self.row_phase,
-                    });
-                }
-                return ScanResult::Done;
+                    })
+                } else {
+                    ScanResult::Done
+                };
             }
             let atom = if let Some(atom) = self.pending.take() {
                 atom
@@ -599,18 +649,20 @@ impl<'a> RowScanner<'a> {
                     GraphemeRead::Done => unreachable!("EOF handled before scanning"),
                     GraphemeRead::Item(grapheme) => {
                         let newline = grapheme.text == "\n";
+                        let tab = grapheme.text == "\t";
                         let width = if newline {
                             px(0.)
-                        } else if grapheme.text == "\t" {
+                        } else if tab {
                             metrics.tab_width(self.phase)
                         } else {
-                            metrics.width(&grapheme.text)
+                            metrics.width_at(&grapheme.text, grapheme.start)
                         };
                         Atom {
                             start: grapheme.start,
                             end: grapheme.end,
                             width,
                             newline,
+                            tab,
                         }
                     }
                 }
@@ -641,7 +693,11 @@ impl<'a> RowScanner<'a> {
                 return ScanResult::Row(row);
             }
             self.width += atom.width;
-            self.phase = metrics.advance_phase(self.phase, atom.width);
+            self.phase = if atom.tab {
+                px(0.)
+            } else {
+                metrics.advance_phase(self.phase, atom.width)
+            };
         }
     }
 }

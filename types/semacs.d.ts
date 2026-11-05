@@ -9,12 +9,22 @@ type SemacsStyleName =
     | "completion-match" | "completion-annotation" | "separator"
     | "syntax.keyword" | "syntax.comment" | "syntax.string" | "syntax.number"
     | "syntax.type" | "syntax.function" | "syntax.variable" | "syntax.constant"
-    | "syntax.operator" | "syntax.punctuation";
+    | "syntax.operator" | "syntax.punctuation"
+    | "markup.heading" | "markup.strong" | "markup.emphasis";
+
+interface SemacsTextStyle {
+    foreground?: string;
+    background?: string;
+    weight?: "normal" | "bold";
+    italic?: boolean;
+    underline?: boolean;
+    strikethrough?: boolean;
+}
 
 type SemacsStyleColors<N extends SemacsStyleName> =
     N extends "region" ? { background?: string } :
-    N extends "minibuffer-prompt" | "completion-match" | "completion-annotation" | "separator" | `syntax.${string}`
-        ? { foreground?: string } :
+    N extends "default" | "minibuffer-prompt" | `syntax.${string}` | `markup.${string}` ? SemacsTextStyle :
+    N extends "completion-match" | "completion-annotation" | "separator" ? { foreground?: string } :
     { foreground?: string; background?: string };
 
 type SemacsThemeStyles = { [N in SemacsStyleName]?: SemacsStyleColors<N> };

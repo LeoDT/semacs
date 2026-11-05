@@ -23,6 +23,11 @@ semacs 将 Emacs 的操作模型带到现代 GPU UI，不复刻 Emacs 外观或 
 | 材料 | 用途 |
 |---|---|
 | [E2 多语言本地验证](records/e2-languages-local.md) / [宿主工具准备](records/e2-host-tools-local.md) / [首批宿主回传](records/e2-languages-host-01.md) / [反馈修复本地验证](records/e2-flicker-fix-local.md) / [第二批宿主复核](records/e2-flicker-host-02.md) | 多语言实现、工具与宿主证据；RET / 闪烁修复及定向复核通过，用户已确认 E2 收尾 |
+| [E3 本地实现与性能回归](records/e3-styles-local.md) / [首版性能失败](records/e3-typography-probe.md) | 字体 / 装饰、范围 / 行背景、同环境对照与首版性能修复、一次集中审查及几何测试；初期本地证据，最终范围与收尾见 [实施计划](plan.md#阶段-e3文本样式与高亮合成) |
+| [E3 首批宿主字体失败](records/e3-host-manual-01.md) / [离线 fallback 诊断](records/e3-font-fallback-local.md) / [系统字体解析诊断](records/e3-font-resolution-host-01.md) | 宿主粗体 / 斜体不可见；确认原默认 monospace 解析失败、四种强调均落普通 fallback，保留失败与诊断证据 |
+| [E3 随包 Lilex 本地修复](records/e3-bundled-font-local.md) / [第二批宿主人工复核](records/e3-host-manual-02.md) | 本地完整检查、四组人工观察及正文 / 配置字节通过；用户接受中文输入轻微视觉跳动暂不修复，未关闭自定义缺失字体的 fallback 问题 |
+| [E3 随包字体首批原生性能失败](records/e3-native-perf-host-01.md) / [离线换行成本分解](records/e3-wrap-cost-local.md) / [换行与及时停止本地修复](records/e3-wrap-fix-local.md) / [单窗口原生复测](records/e3-native-perf-host-02.md) | 原完整布局约 20 秒；字体敏感字素换行与停止修复本地通过。新单窗口首屏 260.085 ms 超限后即停止，完整 ready 未测；用户选择先看完整诊断数据，预算不变 |
+| [单窗口完整显示诊断工具](records/e3-display-diagnostic-local.md) / [宿主完整数据](records/e3-display-diagnostic-host-01.md) | 单轮完整 ready / 滚动 / 输入明显改善、无空白和 idle draw；字体切换单次 draw 约 50 ms 仍超限，用户已接受当前速度及暂缓该峰值；单轮诊断不冒充完整验收 |
 | [M2 profiler 生命周期工具修复](records/profiler-lifecycle-local.md) | E1 后对齐 D1 消息历史、精确身份 / 分类校验与完整 feature 回归；未运行原生矩阵 |
 | [Rust 语法本地验证](records/e1-syntax-local.md) / [宿主定向验收](records/e1-syntax-host.md) | E1 增量解析 / 绘制高亮、审查修复、headless 回归、新语法就绪基线与五项宿主功能确认；尺寸及原生性能 / IME / GPU 边界按记录保留 |
 | [基础主题本地验证](records/e0-themes-local.md) / [宿主定向验收](records/e0-themes-host.md) | E0 配置 / 配色切换、审查修复、headless 回归及五项宿主功能确认；尺寸、原生性能 / IME / GPU 与旧 profiler 工具失败的边界按记录保留 |

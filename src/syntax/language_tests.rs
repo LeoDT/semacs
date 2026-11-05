@@ -179,13 +179,13 @@ fn markdown_blocks_inlines_tables_and_unknown_fences_have_defined_styles() {
     let text = "# Heading\n\n*italic* **bold** [label](https://example.com) `code`\n\n| Header |\n| --- |\n| *cell* |\n\n```unknown\nconst no_color = 42;\n```\n";
     let parsed = parsed("a.md", text);
     for (token, style) in [
-        ("Heading", StyleRole::SyntaxType),
-        ("italic", StyleRole::SyntaxVariable),
-        ("bold", StyleRole::SyntaxType),
+        ("Heading", StyleRole::MarkupHeading),
+        ("italic", StyleRole::MarkupEmphasis),
+        ("bold", StyleRole::MarkupStrong),
         ("label", StyleRole::SyntaxVariable),
         ("https:", StyleRole::SyntaxString),
         ("code", StyleRole::SyntaxString),
-        ("cell", StyleRole::SyntaxVariable),
+        ("cell", StyleRole::MarkupEmphasis),
         ("const", StyleRole::Default),
     ] {
         assert_token(&parsed, text, token, style);
@@ -228,7 +228,7 @@ fn markdown_fences_support_every_registered_public_language_and_html_children() 
             "const",
             StyleRole::SyntaxKeyword,
         ),
-        ("markdown", "# Heading", "Heading", StyleRole::SyntaxType),
+        ("markdown", "# Heading", "Heading", StyleRole::MarkupHeading),
     ] {
         let text = format!("中🙂\n\n```{alias}\n{code}\n```\n");
         let parsed = parsed("a.md", &text);
@@ -240,8 +240,8 @@ fn markdown_fences_support_every_registered_public_language_and_html_children() 
 fn markdown_excluded_block_continuations_never_receive_inline_or_code_colors() {
     let text = "> **hello\n> world**\n\n> ```js\n> const n = 42;\n> ```\n";
     let parsed = parsed("a.md", text);
-    assert_token(&parsed, text, "hello", StyleRole::SyntaxType);
-    assert_token(&parsed, text, "world", StyleRole::SyntaxType);
+    assert_token(&parsed, text, "hello", StyleRole::MarkupStrong);
+    assert_token(&parsed, text, "world", StyleRole::MarkupStrong);
     assert_token(&parsed, text, "const", StyleRole::SyntaxKeyword);
     assert_token(&parsed, text, "42", StyleRole::SyntaxNumber);
     for (offset, _) in text.match_indices("> ") {

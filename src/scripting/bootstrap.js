@@ -8,11 +8,20 @@
     const styles = [];
     const object = value => value !== null && typeof value === "object" && !Array.isArray(value);
     const copyStyle = (name, value) => {
-        if (!object(value) || Object.keys(value).some(key => key !== "foreground" && key !== "background"))
-            throw new TypeError("Style accepts only foreground and background");
-        for (const color of Object.values(value))
-            if (typeof color !== "string" || !/^#[0-9a-fA-F]{6}$/.test(color))
-                throw new TypeError("Color must be #RRGGBB");
+        const attributes = ["foreground", "background", "weight", "italic", "underline", "strikethrough"];
+        if (!object(value) || Object.keys(value).some(key => !attributes.includes(key)))
+            throw new TypeError("Unknown style attribute");
+        for (const [key, attribute] of Object.entries(value)) {
+            if (key === "foreground" || key === "background") {
+                if (typeof attribute !== "string" || !/^#[0-9a-fA-F]{6}$/.test(attribute))
+                    throw new TypeError("Color must be #RRGGBB");
+            } else if (key === "weight") {
+                if (attribute !== "normal" && attribute !== "bold")
+                    throw new TypeError("Weight must be normal or bold");
+            } else if (typeof attribute !== "boolean") {
+                throw new TypeError("Text decoration must be boolean");
+            }
+        }
         return {name, ...value};
     };
     const check = () => {
@@ -40,7 +49,7 @@
             if (typeof name !== "string" || name.length > 64 || !object(definition) ||
                 Object.keys(definition).some(key => key !== "appearance" && key !== "styles") ||
                 (definition.appearance !== "light" && definition.appearance !== "dark") ||
-                !object(definition.styles) || Object.keys(definition.styles).length > 22)
+                !object(definition.styles) || Object.keys(definition.styles).length > 25)
                 throw new TypeError("defineTheme expects a name and {appearance, styles}");
             themes.push({name, appearance: definition.appearance,
                 styles: Object.entries(definition.styles).map(([name, value]) => copyStyle(name, value))});

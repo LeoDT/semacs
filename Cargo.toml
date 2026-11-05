@@ -38,3 +38,6 @@ unicode-width = "0.2"
 gpui-kit = { version = "0.8.1", features = ["test-support"] }
 proptest = "1.12"
 rand = { version = "0.9", default-features = false, features = ["std", "std_rng", "os_rng"] }
+
+[target.'cfg(target_os = "linux")'.dev-dependencies]
+gpui-wgpu = { package = "gpui-pre-wgpu", version = "=0.3.10" }

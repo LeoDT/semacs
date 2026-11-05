@@ -142,9 +142,11 @@ pub(super) fn parse(
                 for range in intersect(&request.ranges, span.range) {
                     colored.push((
                         request.depth,
+                        request.language == LanguageId::MarkdownInline,
                         Span {
                             range: range.start_byte..range.end_byte,
                             style: span.style,
+                            modifiers: span.modifiers.clone(),
                         },
                     ));
                 }
@@ -164,13 +166,20 @@ pub(super) fn parse(
     let spans = if colored.is_empty() {
         host_spans
     } else {
-        colored.extend(host_spans.into_iter().map(|span| (0, span)));
+        colored.extend(host_spans.into_iter().map(|span| (0, false, span)));
         combine(colored, text.len(), cancelled)?
     };
     Ok(Parsed {
         language,
         highlights: Arc::new(Highlights {
             snapshot: snapshot.id(),
+            role_mask: spans.iter().fold(0, |mask, span| {
+                span.modifiers
+                    .iter()
+                    .fold(mask | (1 << span.style as usize), |mask, role| {
+                        mask | (1 << *role as usize)
+                    })
+            }),
             spans,
         }),
         snapshot,
@@ -312,8 +321,10 @@ fn injections(
 pub(super) fn capture_style(name: &str) -> Option<StyleRole> {
     Some(match name {
         "none" | "embedded" => StyleRole::Default,
-        "text.title" | "text.strong" => StyleRole::SyntaxType,
-        "text.emphasis" | "text.reference" => StyleRole::SyntaxVariable,
+        "text.title" => StyleRole::MarkupHeading,
+        "text.strong" => StyleRole::MarkupStrong,
+        "text.emphasis" => StyleRole::MarkupEmphasis,
+        "text.reference" => StyleRole::SyntaxVariable,
         "text.uri" | "text.literal" => StyleRole::SyntaxString,
         _ => match name.split('.').next()? {
             "keyword" => StyleRole::SyntaxKeyword,
@@ -331,30 +342,73 @@ pub(super) fn capture_style(name: &str) -> Option<StyleRole> {
     })
 }
 
-fn append_span(spans: &mut Vec<Span>, range: Range<usize>, style: StyleRole) {
-    if let Some(last) = spans.last_mut()
-        && last.range.end == range.start
-        && last.style == style
-    {
-        last.range.end = range.end;
-    } else {
-        spans.push(Span { range, style });
-    }
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+struct SemanticStyle {
+    inherit: bool,
+    role: StyleRole,
+    modifiers: smallvec::SmallVec<[StyleRole; 3]>,
 }
 
-type Active = BinaryHeap<(usize, usize, usize, usize, StyleRole)>;
+type Active = BinaryHeap<(usize, usize, usize, usize, SemanticStyle)>;
 
-fn emit_until(spans: &mut Vec<Span>, active: &mut Active, position: &mut usize, end: usize) {
+fn emit_until(
+    spans: &mut Vec<Span>,
+    active: &mut Active,
+    position: &mut usize,
+    end: usize,
+    inherit: bool,
+) {
     while *position < end {
         while active.peek().is_some_and(|entry| entry.3 <= *position) {
             active.pop();
         }
-        let Some(&(_, _, _, stop, style)) = active.peek() else {
+        let Some(selected) = active.peek() else {
             *position = end;
             break;
         };
-        let stop = stop.min(end);
-        append_span(spans, *position..stop, style);
+        let style = selected.4.role;
+        let mut stop = selected.3.min(end);
+        let mut modifiers = selected.4.modifiers.clone();
+        if inherit || selected.4.inherit || style >= StyleRole::MarkupHeading {
+            let mut enclosing: Vec<_> = active
+                .iter()
+                .filter(|entry| {
+                    entry.3 > *position
+                        && (entry.4.role >= StyleRole::MarkupHeading
+                            || !entry.4.modifiers.is_empty())
+                })
+                .collect();
+            enclosing.sort_unstable();
+            modifiers.clear();
+            for entry in enclosing {
+                stop = stop.min(entry.3);
+                for role in entry
+                    .4
+                    .modifiers
+                    .iter()
+                    .copied()
+                    .chain((entry.4.role >= StyleRole::MarkupHeading).then_some(entry.4.role))
+                {
+                    if let Some(index) = modifiers.iter().position(|previous| *previous == role) {
+                        modifiers.remove(index);
+                    }
+                    modifiers.push(role);
+                }
+            }
+        }
+        if let Some(last) = spans.last_mut()
+            && last.range.end == *position
+            && last.style == style
+            && last.modifiers == modifiers
+        {
+            last.range.end = stop;
+        } else {
+            spans.push(Span {
+                range: *position..stop,
+                style,
+                modifiers,
+            });
+        }
         *position = stop;
     }
 }
@@ -371,6 +425,10 @@ fn query(
         .iter()
         .map(|name| capture_style(name))
         .collect();
+    let inherit_markup = styles
+        .iter()
+        .flatten()
+        .any(|style| *style >= StyleRole::MarkupHeading);
     let mut cursor = QueryCursor::new();
     let mut progress = |_: &tree_sitter::QueryCursorState| {
         if cancelled.load(Ordering::Relaxed) {
@@ -396,14 +454,24 @@ fn query(
             continue;
         };
         let range = capture.node.byte_range();
-        emit_until(&mut spans, &mut active, &mut position, range.start);
+        emit_until(
+            &mut spans,
+            &mut active,
+            &mut position,
+            range.start,
+            inherit_markup,
+        );
         // Inner captures beat enclosing strings; later patterns resolve equal ranges.
         active.push((
             usize::MAX - range.len(),
             matched.pattern_index,
             sequence,
             range.end,
-            style,
+            SemanticStyle {
+                inherit: false,
+                role: style,
+                modifiers: smallvec::SmallVec::new(),
+            },
         ));
         sequence += 1;
     }
@@ -412,26 +480,48 @@ fn query(
     if cursor.did_exceed_match_limit() {
         return Err("query match limit exceeded".into());
     }
-    emit_until(&mut spans, &mut active, &mut position, text.len());
+    emit_until(
+        &mut spans,
+        &mut active,
+        &mut position,
+        text.len(),
+        inherit_markup,
+    );
     Ok(spans)
 }
 
 fn combine(
-    mut colored: Vec<(usize, Span)>,
+    mut colored: Vec<(usize, bool, Span)>,
     end: usize,
     cancelled: &AtomicBool,
 ) -> Result<Vec<Span>, String> {
-    colored.sort_unstable_by_key(|(_, span)| span.range.start);
+    colored.sort_unstable_by_key(|(_, _, span)| span.range.start);
     check(cancelled)?;
     let mut spans = Vec::new();
     let mut active = BinaryHeap::new();
     let mut position = 0;
-    for (sequence, (depth, span)) in colored.into_iter().enumerate() {
+    for (sequence, (depth, inherit, span)) in colored.into_iter().enumerate() {
         check(cancelled)?;
-        emit_until(&mut spans, &mut active, &mut position, span.range.start);
-        active.push((depth, 0, sequence, span.range.end, span.style));
+        emit_until(
+            &mut spans,
+            &mut active,
+            &mut position,
+            span.range.start,
+            false,
+        );
+        active.push((
+            depth,
+            0,
+            sequence,
+            span.range.end,
+            SemanticStyle {
+                inherit,
+                role: span.style,
+                modifiers: span.modifiers,
+            },
+        ));
     }
-    emit_until(&mut spans, &mut active, &mut position, end);
+    emit_until(&mut spans, &mut active, &mut position, end, false);
     Ok(spans)
 }
 
@@ -467,7 +557,7 @@ mod tests {
         assert_eq!(buffer.text().to_string(), text);
         assert_eq!(
             parsed.highlights.in_range(1..2).next().unwrap().style,
-            StyleRole::SyntaxVariable
+            StyleRole::MarkupEmphasis
         );
         assert!(
             parsed
@@ -549,7 +639,7 @@ mod tests {
             parsed
                 .highlights
                 .in_range(text.find("Title").unwrap()..text.len())
-                .any(|span| span.style == StyleRole::SyntaxType)
+                .any(|span| span.style == StyleRole::MarkupHeading)
         );
     }
 }

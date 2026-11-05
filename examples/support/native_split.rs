@@ -476,7 +476,12 @@ impl Run {
             Phase::Font => {
                 for view in self.views.borrow().iter() {
                     view.update(cx, |view, cx| {
-                        view.set_font(font("monospace").bold(), px(18.), px(27.), cx)
+                        view.set_font(
+                            semacs::appearance::FontSettings::default().font().bold(),
+                            px(18.),
+                            px(27.),
+                            cx,
+                        )
                     });
                 }
             }
@@ -708,7 +713,7 @@ pub fn run(text: String, sample: String, report: PathBuf, direction: String, all
             let specs = window.gpu_specs().expect("renderer identity required");
             assert!(allow_software || !specs.is_software_emulated, "hardware GPU required");
             writeln!(output, "# mode=split; direction={direction}; sample={sample}; release={}; graphics={specs:?}", !cfg!(debug_assertions)).unwrap();
-            writeln!(output, "# monospace 16px/24px -> bold 18px/27px; 960x640 requested, actual body sizes below; soft wrap enabled; CPU submission NOT screen presentation").unwrap();
+            writeln!(output, "# Lilex 16px/24px -> bold 18px/27px; 960x640 requested, actual body sizes below; soft wrap enabled; CPU submission NOT screen presentation").unwrap();
             writeln!(output, "phase,views,selected_view,action_cpu_ms,first_frame_submit_ms,first_submit_ms,ready_submit_ms,all_ready_submit_ms,draw_cpu_max_ms,frames,missing_observations,blank_frames,idle_ticks,min_visible_rows,fully_indexed_views,bytes,width_px,height_px,status,shared_text_verified,observed_elapsed_ms").unwrap();
             output.flush().unwrap();
             let mut run = Run {

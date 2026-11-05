@@ -1,6 +1,6 @@
 /// <reference path="../types/semacs.d.ts" />
 
-semacs.setFont({ family: "monospace", size: 18 });
+semacs.setFont({ size: 18 });
 
 semacs.defineTheme("night", {
     appearance: "dark",

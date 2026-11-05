@@ -129,9 +129,10 @@ impl Engine {
         }
         let family: Option<String> = font.get("family").map_err(|error| js_error(ctx, error))?;
         let size: Option<f32> = font.get("size").map_err(|error| js_error(ctx, error))?;
+        let default_font = FontSettings::default();
         let font = FontSettings::new(
-            family.as_deref().unwrap_or("monospace"),
-            px(size.unwrap_or(16.)),
+            family.as_deref().unwrap_or(default_font.family()),
+            size.map(px).unwrap_or(default_font.base_size()),
         )
         .map_err(|error| error.to_string())?;
 
@@ -206,7 +207,21 @@ impl Engine {
                     .map_err(|error| js_error(ctx, error))?;
                 Ok((
                     role,
-                    StyleOverride::new(role, foreground.as_deref(), background.as_deref())?,
+                    StyleOverride::new(role, foreground.as_deref(), background.as_deref())?
+                        .with_text_attributes(
+                            role,
+                            style
+                                .get::<_, Option<String>>("weight")
+                                .map_err(|error| js_error(ctx, error))?
+                                .as_deref(),
+                            style.get("italic").map_err(|error| js_error(ctx, error))?,
+                            style
+                                .get("underline")
+                                .map_err(|error| js_error(ctx, error))?,
+                            style
+                                .get("strikethrough")
+                                .map_err(|error| js_error(ctx, error))?,
+                        )?,
                 ))
             })
             .collect()

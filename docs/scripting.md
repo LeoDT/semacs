@@ -14,35 +14,36 @@
 
 ### `semacs.setFont({ family?, size? })`
 
-声明启动和重载时的字体基准。可多次调用，后一次提供的字段覆盖前一次字段；未声明的字段沿用默认值。字体族按既有规则去除首尾空白、拒绝空白和控制字符，平台仍可能回退；字号为 8–72 逻辑像素，作为 `reset-font-size` 的基准。
+声明启动和重载时的字体基准。可多次调用，后一次提供的字段覆盖前一次字段；整份配置中未声明的字段使用默认值。未指定 `family` 时使用随包 Lilex，只调整字号不必显式填写字体族。默认字体与自定义具体族名的边界见[显示设置契约](emacs-fidelity.md#字体与字号)。字体族按既有规则去除首尾空白、拒绝空白和控制字符，平台仍可能回退；字号为 8–72 逻辑像素，作为 `reset-font-size` 的基准。
 
 ### 主题与命名样式
 
-`semacs.defineTheme(name, { appearance, styles })` 定义一个主题；`appearance` 为 `"light"` 或 `"dark"`，未指定的颜色从该模式的内置主题补齐，不从上次主题继承。名称为 1–64 个小写 ASCII 字母、数字或连字符，不能重复或覆盖内置 `light` / `dark`。不加载 elisp 主题，不使用 Emacs font-lock / face 接口。
+`semacs.defineTheme(name, { appearance, styles })` 定义一个主题；`appearance` 为 `"light"` 或 `"dark"`，未指定的属性从该模式的内置主题补齐，不从上次主题继承。名称为 1–64 个小写 ASCII 字母、数字或连字符，不能重复或覆盖内置 `light` / `dark`。不加载 elisp 主题，不使用 Emacs font-lock / face 接口。
 
 `semacs.loadTheme(name)` 声明初始主题，默认 `light`；多次调用最后一次生效，可在定义前引用，最终必须存在。`M-x load-theme` 提供当前定义的主题候选，切换只影响本次运行，不写回文件。
 
-`semacs.setStyle(name, colors)` 声明独立于当前主题的用户覆盖；同一样式可多次调用，按属性覆盖。切换主题保留这些显式覆盖；成功重载整体替换主题定义、选择和覆盖，删除声明即恢复默认，失败保持旧配置。所有主题 API 仅配置阶段可用。
+`semacs.setStyle(name, attributes)` 声明独立于当前主题的用户覆盖；同一样式可多次调用，按属性覆盖。切换主题保留这些显式覆盖；成功重载整体替换主题定义、选择和覆盖，删除声明即恢复默认，失败保持旧配置。所有主题 API 仅配置阶段可用。
 
-颜色仅支持不透明 `#RRGGBB`（十六进制大小写均可）。样式与可用属性：
+颜色仅支持不透明 `#RRGGBB`（十六进制大小写均可）。文字属性包括 `weight: "normal" | "bold"`，以及布尔值 `italic`、`underline`、`strikethrough`。未指定的属性不覆盖下层样式；`"normal"` / `false` 显式取消相应强调。样式与可用属性：
 
 | 样式名 | 属性 / 用途 |
 |---|---|
-| `default` | `foreground` / `background`，正文及输入 |
+| `default` | 前景 / 背景及全部文字属性，正文及输入基准 |
 | `cursor` | `foreground` 为覆盖文字颜色，`background` 为方块填色 |
 | `region` | 仅 `background`，保留正文文字颜色 |
 | `mode-line` / `mode-line-inactive` | `foreground` / `background` |
-| `minibuffer-prompt` | 仅 `foreground` |
+| `minibuffer-prompt` | 前景 / 背景及全部文字属性 |
 | `echo-area` | `foreground` / `background`；读入末尾临时注记只使用其前景色 |
 | `completion` / `completion-selected` | `foreground` / `background` |
 | `completion-match` | 仅 `foreground`，优先于候选行文字颜色 |
 | `completion-annotation` | 仅 `foreground`，候选注释及计数 |
 | `separator` | 仅 `foreground`，分屏分隔线 |
-| `syntax.keyword` / `syntax.comment` / `syntax.string` / `syntax.number` | 仅 `foreground`，语法关键字 / 注释 / 字符串 / 数字 |
-| `syntax.type` / `syntax.function` / `syntax.variable` / `syntax.constant` | 仅 `foreground`，语法类型 / 函数 / 变量 / 常量 |
-| `syntax.operator` / `syntax.punctuation` | 仅 `foreground`，语法运算符 / 标点 |
+| `syntax.keyword` / `syntax.comment` / `syntax.string` / `syntax.number` | 前景 / 背景及全部文字属性，语法关键字 / 注释 / 字符串 / 数字 |
+| `syntax.type` / `syntax.function` / `syntax.variable` / `syntax.constant` | 前景 / 背景及全部文字属性，语法类型 / 函数 / 变量 / 常量 |
+| `syntax.operator` / `syntax.punctuation` | 前景 / 背景及全部文字属性，语法运算符 / 标点 |
+| `markup.heading` / `markup.strong` / `markup.emphasis` | 前景 / 背景及全部文字属性，Markdown 标题 / 强强调 / 强调；内置分别为加粗 / 加粗 / 斜体 |
 
-未知样式、未支持的属性及非法颜色均拒绝整份配置。这里只定义颜色，不支持任意继承、多个启用主题叠加或自动跟随系统。语法启用与显示边界见 [E1 契约](emacs-fidelity.md#阶段-e1rust-tree-sitter)。
+未知样式、未支持的属性及非法颜色均拒绝整份配置。不支持逐段字体族 / 字号、任意继承、多个启用主题叠加或自动跟随系统。字体实际效果依赖平台字体及回退，不保证所请求字形一定存在。语法启用见 [E1 契约](emacs-fidelity.md#阶段-e1rust-tree-sitter)，字体与背景合成见 [E3 契约](emacs-fidelity.md#阶段-e3文本样式与高亮合成)。
 
 ```js
 semacs.defineTheme("night", {
@@ -55,6 +56,8 @@ semacs.defineTheme("night", {
 });
 semacs.loadTheme("night");
 semacs.setStyle("cursor", { foreground: "#202124", background: "#ffcc66" });
+semacs.setStyle("syntax.keyword", { weight: "bold" });
+semacs.setStyle("syntax.comment", { italic: true });
 ```
 
 ### `semacs.registerCommand(name, transform)`

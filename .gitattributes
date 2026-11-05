@@ -1,0 +1,2 @@
+# Preserve the bundled upstream license byte-for-byte, including its whitespace.
+assets/fonts/lilex/OFL.txt -text -whitespace

@@ -51,7 +51,7 @@ MESSAGE_LONG = "D1-LONG-BEGIN " + "longword-" * 70 + " D1-LONG-END"
 MESSAGE_MULTILINE = "D1-MULTI-BEGIN\n" + "\n".join(
     f"detail-{index:02}: intentional multiline message" for index in range(1, 13)
 ) + "\nD1-MULTI-END"
-MESSAGES_CONFIG = f"""semacs.setFont({{family: "monospace", size: 24}});
+MESSAGES_CONFIG = f"""semacs.setFont({{size: 24}});
 semacs.registerCommand("d1-long-error", text => {{ throw new Error({json.dumps(MESSAGE_LONG)}); }});
 semacs.registerCommand("d1-multiline-error", text => {{ throw new Error({json.dumps(MESSAGE_MULTILINE)}); }});
 semacs.bindKey("ctrl-c l", "d1-long-error");
@@ -99,7 +99,7 @@ D1 定向目视验证（只操作本批窗口，英文/ASCII 输入；任一异�
 
 不会截图、自动注键或改变输入法；本批不测原生性能、真实 IME 或 GPU。
 """
-THEMES_CONFIG = b"""semacs.setFont({family: "monospace", size: 20});
+THEMES_CONFIG = b"""semacs.setFont({size: 20});
 semacs.defineTheme("e0-night", {
     appearance: "dark",
     styles: {"mode-line": {foreground: "#ffffff", background: "#304060"}}
@@ -167,7 +167,7 @@ fn greet(name: &str) -> i32 {
     if name.len() > 0 { ANSWER + 1 } else { 0 }
 }
 '''.encode()
-SYNTAX_CONFIG = b'''semacs.setFont({family: "monospace", size: 20});
+SYNTAX_CONFIG = b'''semacs.setFont({size: 20});
 semacs.defineTheme("e1-custom", {
     appearance: "dark", styles: {"syntax.string": {foreground: "#ffb3d1"}}
 });
@@ -258,7 +258,7 @@ const n = call(42);
 <style>.box { width: 12px; color: red; }</style>
 <div class="box">plain text</div>
 '''
-LANGUAGES_CONFIG = b'''semacs.setFont({family: "monospace", size: 20});
+LANGUAGES_CONFIG = b'''semacs.setFont({size: 20});
 semacs.loadTheme("dark");
 '''
 LANGUAGES_SEEDS = {
@@ -284,7 +284,7 @@ E2 多语言 / 真实 IME 定向观察；一个窗口，只有 body.md / body.ht
    初始 body.md 应有块级 / 行内及围栏高亮。HTML 围栏内的 script 中 const / 42，
    style 中 width / 12px 应按 JS / CSS 着色，而不是整块一种颜色。
    检查后面的 JSX / TSX 标签与表达式、TS 类型、CSS、Rust 围栏；
-   unknown 围栏内容应为普通代码文本。强调只换颜色，不改变字重 / 字号。
+   unknown 围栏内容应为普通代码文本。强调沿用 E3 默认粗体 / 斜体，不改变字号。
 2. 分屏 / 主题（languages-split-theme）
    C-x 3 左右分屏，C-x o 来回选择，两侧颜色一致。
    M-x load-theme RET，输入 light RET，再切 dark。检查文字 / region / 方块光标可读，
@@ -308,6 +308,95 @@ E2 多语言 / 真实 IME 定向观察；一个窗口，只有 body.md / body.ht
 
 最终只允许 body.md 的 // MD: 后和 body.html 的 // HTML: 后各增加一个“你”。
 配置不可改。脚本会独立核对全部文件字节；目视观察不冒充自动判定或 IME 时延测量。
+"""
+
+STYLES_RUST = '''// E3-RUST:
+const ANSWER: i32 = 42;
+fn styled(name: &str) -> i32 {
+    let text = "AV ffi 中文 🙂 é";
+    if name.is_empty() { ANSWER } else { 7 }
+}
+// wrap: AV ffi normal bold italic 中文 🙂 é — observe the caret along this intentionally long comment without changing its text.
+'''.encode()
+STYLES_MARKDOWN = '''# E3-MD:
+
+Normal / **bold** / *italic* / ***both*** / `AV ffi 中文 🙂 é`.
+
+This intentionally long line mixes **bold text**, *italic text*, and ***both together*** so that narrowing the window exercises wrapping without changing the saved bytes.
+
+```rust
+fn fenced() { let n = 42; }
+```
+'''.encode()
+STYLES_CONFIG = b'''semacs.setFont({size: 20});
+semacs.defineTheme("e3-rich", {
+    appearance: "dark", styles: {
+        "syntax.keyword": {weight: "bold"},
+        "syntax.comment": {italic: true},
+        "syntax.string": {background: "#34344c", underline: true},
+        "syntax.number": {strikethrough: true}
+    }
+});
+semacs.defineTheme("e3-plain", {
+    appearance: "light", styles: {
+        "syntax.keyword": {weight: "normal"},
+        "syntax.comment": {italic: false},
+        "syntax.string": {underline: false},
+        "syntax.number": {strikethrough: false},
+        "markup.heading": {weight: "normal"},
+        "markup.strong": {weight: "normal"},
+        "markup.emphasis": {italic: false}
+    }
+});
+semacs.loadTheme("e3-rich");
+semacs.setStyle("cursor", {foreground: "#202124", background: "#ffcc66"});
+'''
+STYLES_SEEDS = {
+    "body.rs": STYLES_RUST,
+    "body.md": STYLES_MARKDOWN,
+    "config/semacs/init.js": STYLES_CONFIG,
+}
+STYLES_EXPECTED = {
+    **STYLES_SEEDS,
+    "body.rs": STYLES_RUST.replace(b"// E3-RUST:", "// E3-RUST:你".encode(), 1),
+    "body.md": STYLES_MARKDOWN.replace(b"# E3-MD:", "# E3-MD:你".encode(), 1),
+}
+STYLES_OBSERVATIONS = (
+    "styles-fonts", "styles-layout-theme", "styles-rust-ime", "styles-markdown-ime-save",
+)
+STYLES_INSTRUCTIONS = """
+E3 最小人工验证：一个窗口，仅本批 body.rs / body.md 和隔离配置。
+脚本不注键、不改变输入法、不截图。按提示手动使用日常中文输入法，不操作日常文件。
+任一异常立即停止后续组，正常关闭窗口后对失败 / 未观察项答 no；不要修复字节或重试。
+
+1. Rust 字体 / 装饰（styles-fonts）
+   初始是 e3-rich 深色、20px 正文：const / fn / let / if 应加粗，注释应斜体，
+   字符串有背景与下划线，42 / 7 有删除线；AV / ffi / 中文 / emoji / 组合字符不能丢字或重叠。
+   黄色方块光标覆盖文字仍可辨。若看不出斜体等效果，记录实际字体与现象并答 no，先分析是否回退，不改配置重试。
+2. 选区 / 换行 / 主题（styles-layout-theme）
+   M-< C-n C-a C-t M-f 选中 const，region 应可辨并保留粗体；C-g 停用。
+   C-x 3 分屏，C-x o 切换，确认两侧字体一致；C-x 1 保留当前 pane。
+   M-x load-theme RET，输入 e3-plain RET：应取消关键字粗体、注释斜体、字符串下划线 / 背景和数字删除线。
+   再切回 e3-rich，应恢复对应样式，不改正文。
+   缩窄窗口到约 480px，M-x increase-font-size RET；移动 / 点击长行不同字符，
+   检查换行、方块光标、选区和文字位置一致，不能出现空白正文或旧锚点把导航拉回。
+   M-x reset-font-size RET 恢复 20px，按需恢复窗口大小。不要输入额外正文。
+3. Rust 真实 IME（styles-rust-ime）
+   切回 e3-rich。M-< C-e 定位首行 // E3-RUST: 的冒号后。
+   开启日常中文输入法，输入 ni：观察预编辑和候选跟随当前 caret；Escape 取消，不残留拼音。
+   再输入 ni，明确选择“你”提交一次，然后关闭中文输入状态，首行应为 // E3-RUST:你。
+   C-/ 撤销，应回到冒号；C-? redo，恢复恰好一个“你”。C-x C-s 保存等待 clean。
+4. Markdown 强调 / IME / 保存（styles-markdown-ime-save）
+   C-x C-f 输入 body.md RET。标题和 bold 应加粗，italic 应斜体，both 应同时粗斜；
+   围栏里的 Rust 沿用代码样式，普通文字不被整段错误加粗。
+   切 e3-plain，确认 Markdown 强调可取消；再切 e3-rich，确认恢复。
+   可缩窄窗口检查长行换行与点击，再恢复；M-< C-e 定位首行 # E3-MD: 的冒号后。
+   再做 ni -> Escape 取消，然后 ni -> 明确选择“你”提交一次；观察从预编辑到提交的字体变化与候选位置。
+   关闭中文输入状态，首行应为 # E3-MD:你。C-x C-s 保存等待 clean，C-x C-c 正常关闭窗口。
+   回终端逐组回答，记录正常 / 窄窗口大致尺寸、输入法名称和字体效果。
+
+最终只允许两份正文首行冒号后各增加一个“你”；配置和其他正文须保持原始字节。
+目视功能观察不表示 IME 时延、原生性能或 GPU 通过；性能另用独立命令与新目录。
 """
 
 FLICKER_SCRIPT = b"<script>\n// FLICKER:\nconst n = call(42);\n</script>\n"
@@ -350,7 +439,7 @@ E2 闪烁修复定向目视复核；一个窗口，两份约 256 KiB 的可丢�
 INSTRUCTIONS = {
     "messages": MESSAGES_INSTRUCTIONS, "themes": THEMES_INSTRUCTIONS,
     "syntax": SYNTAX_INSTRUCTIONS, "languages": LANGUAGES_INSTRUCTIONS,
-    "flicker": FLICKER_INSTRUCTIONS,
+    "flicker": FLICKER_INSTRUCTIONS, "styles": STYLES_INSTRUCTIONS,
 }
 
 PROFILES = {
@@ -361,6 +450,7 @@ PROFILES = {
     "syntax": (SYNTAX_SEEDS, SYNTAX_EXPECTED, SYNTAX_OBSERVATIONS),
     "languages": (LANGUAGES_SEEDS, LANGUAGES_EXPECTED, LANGUAGES_OBSERVATIONS),
     "flicker": (FLICKER_SEEDS, FLICKER_SEEDS, FLICKER_OBSERVATIONS),
+    "styles": (STYLES_SEEDS, STYLES_EXPECTED, STYLES_OBSERVATIONS),
 }
 
 
@@ -407,12 +497,16 @@ def verify(directory, profile="m2"):
         "errors": errors, "evidence": "user-observed real desktop plus independent disk bytes",
         "performance": "unmeasured",
     }
-    if profile in ("messages", "themes", "syntax", "languages", "flicker"):
+    if profile in ("messages", "themes", "syntax", "languages", "flicker", "styles"):
         result.update(ime="unmeasured", ime_latency="unmeasured", gpu="unmeasured", screenshots=False)
     if profile == "languages":
         confirmed = all(observations.get(name) == "yes" for name in
                         ("languages-markdown-ime-history", "languages-html-ime"))
         result["ime"] = "user-confirmed Markdown/HTML body preedit/cancel/commit" if confirmed else "unconfirmed"
+    if profile == "styles":
+        confirmed = all(observations.get(name) == "yes" for name in
+                        ("styles-rust-ime", "styles-markdown-ime-save"))
+        result["ime"] = "user-confirmed styled Rust/Markdown body preedit/cancel/commit" if confirmed else "unconfirmed"
     (directory / "result.json").write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n")
     if errors:
         raise RuntimeError("; ".join(errors))

@@ -161,7 +161,7 @@ fn main() {
         std::env::var("RUNS").map_or(3, |value| value.parse::<usize>().expect("positive RUNS"));
     assert!(runs > 0);
     println!(
-        "# release={}; GPUI TestPlatform / TestTextSystem with Base Root; initial 960x640; monospace 16px/24px; soft wrap enabled",
+        "# release={}; GPUI TestPlatform / TestTextSystem with Base Root; initial 960x640; Lilex 16px/24px; soft wrap enabled",
         !cfg!(debug_assertions)
     );
     println!(

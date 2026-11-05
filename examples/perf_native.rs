@@ -213,6 +213,24 @@ impl Step {
     }
 }
 
+fn display_actions() -> VecDeque<Step> {
+    let mut actions = VecDeque::new();
+    actions.extend(std::iter::repeat_n(Step::Scroll, 30));
+    actions.extend([Step::Resize, Step::Font]);
+    actions.extend(std::iter::repeat_n(Step::Forced, 30));
+    actions.extend([
+        Step::Idle,
+        Step::Click,
+        Step::Insert,
+        Step::Delete,
+        Step::Newline,
+        Step::Join,
+        Step::BurstInsert,
+        Step::BurstDelete,
+    ]);
+    actions
+}
+
 struct Measurement {
     step: Step,
     start: Instant,
@@ -221,7 +239,7 @@ struct Measurement {
     first_frame: Option<PresentedFrame>,
     first_paint: Option<PaintState>,
     first: Option<PresentedFrame>,
-    last: Option<PresentedFrame>,
+    ready: Option<PresentedFrame>,
     paint: Option<PaintState>,
     frames: usize,
     draw_ms: f64,
@@ -244,7 +262,7 @@ impl Measurement {
             first_frame: None,
             first_paint: None,
             first: None,
-            last: None,
+            ready: None,
             paint: None,
             frames: 0,
             draw_ms: 0.,
@@ -286,10 +304,157 @@ impl Measurement {
             return false;
         }
         self.first.get_or_insert(frame);
-        self.last = Some(frame);
         self.paint = Some(paint);
-        paint.ready
+        if paint.ready && paint.indexed == paint.bytes {
+            self.ready.get_or_insert(frame);
+        }
+        self.ready.is_some()
     }
+
+    fn hard_error(&self, now: Instant, diagnostic: bool) -> Option<String> {
+        let label = self.step.name();
+        if self.blank_frames > 0 {
+            return Some(format!("{label}: blank body frame"));
+        }
+        if matches!(self.step, Step::Open)
+            && self.first_frame.is_some()
+            && !self.first_paint.is_some_and(|paint| paint.visible > 0)
+        {
+            return Some("open: first frame has no body observation".into());
+        }
+        let timeout = Duration::from_secs(if diagnostic { 2 } else { 30 });
+        if now.duration_since(self.start) > timeout {
+            return Some(format!(
+                "{label}: observation timeout ({} ms)",
+                timeout.as_millis()
+            ));
+        }
+        None
+    }
+
+    fn performance_errors(&self, now: Instant, hardware: bool, external: bool) -> Vec<String> {
+        let label = self.step.name();
+        // Submitted timestamps survive late observation; only missing boundaries use the clock.
+        let elapsed = |frame: Option<PresentedFrame>| {
+            millis(frame.map_or(now, |frame| frame.presentation.present_end) - self.start)
+        };
+        let mut errors = Vec::new();
+        if matches!(self.step, Step::Idle) && self.frames > 0 {
+            errors.push("idle: unexpected draw".into());
+        }
+        if hardware {
+            let mut limits = vec![("draw_cpu_max_ms", self.max_draw_ms, 16.)];
+            match self.step {
+                Step::Open => limits.extend([
+                    ("first_submit_ms", elapsed(self.first), 250.),
+                    ("ready_submit_ms", elapsed(self.ready), 500.),
+                ]),
+                Step::Resize | Step::Font => limits.extend([
+                    ("first_frame_submit_ms", elapsed(self.first_frame), 50.),
+                    ("ready_submit_ms", elapsed(self.ready), 300.),
+                ]),
+                Step::Insert | Step::Delete | Step::Newline | Step::Join => limits.extend([
+                    ("action_cpu_ms", self.action_cpu_ms, 2.),
+                    ("first_submit_ms", elapsed(self.first), 16.),
+                    ("ready_submit_ms", elapsed(self.ready), 300.),
+                ]),
+                Step::BurstInsert | Step::BurstDelete => limits.extend([
+                    ("action_cpu_ms", self.action_cpu_ms, 50.),
+                    ("first_submit_ms", elapsed(self.first), 50.),
+                    ("ready_submit_ms", elapsed(self.ready), 300.),
+                ]),
+                Step::Scroll => limits.push(("first_submit_ms", elapsed(self.first), 4.)),
+                Step::Forced => limits.push(("first_submit_ms", elapsed(self.first), 2.)),
+                Step::Preedit | Step::Cancel | Step::Commit if external => limits.extend([
+                    ("first_submit_ms", elapsed(self.first), 75.),
+                    ("ready_submit_ms", elapsed(self.ready), 300.),
+                ]),
+                _ => {}
+            }
+            for (metric, value, limit) in limits {
+                if value > limit {
+                    errors.push(format!("{label}: {metric}={value:.6} ms > {limit:.3} ms"));
+                }
+            }
+        }
+        errors
+    }
+
+    fn budget_error(&self, now: Instant, hardware: bool, external: bool) -> Option<String> {
+        self.hard_error(now, false).or_else(|| {
+            self.performance_errors(now, hardware, external)
+                .into_iter()
+                .next()
+        })
+    }
+
+    fn csv_row(&self, fallback: Option<PaintState>, external: bool, status: &str) -> String {
+        let paint = self.paint.or(fallback);
+        let cell = |value: fn(PaintState) -> String| paint.map_or_else(String::new, value);
+        let first_ms = self.first.map_or(String::new(), |frame| {
+            format!("{:.3}", millis(frame.presentation.present_end - self.start))
+        });
+        let ready_ms = self.ready.map_or(String::new(), |frame| {
+            format!("{:.3}", millis(frame.presentation.present_end - self.start))
+        });
+        let first_frame_ms = self.first_frame.map_or(String::new(), |frame| {
+            format!("{:.3}", millis(frame.presentation.present_end - self.start))
+        });
+        let first_scan = self
+            .first_paint
+            .map_or(String::new(), |paint| paint.scanned.to_string());
+        let first_visible = self
+            .first_paint
+            .map_or(String::new(), |paint| paint.visible.to_string());
+        format!(
+            "{},{},{},{},{},{},{},{},{},{},{},{},{:.3},{:.3},{:.3},{},{},{},{},{:.3},{:.3},{}",
+            self.step.name(),
+            cell(|p| p.bytes.to_string()),
+            cell(|p| p.rows.to_string()),
+            cell(|p| p.visible.to_string()),
+            cell(|p| p.scanned.to_string()),
+            self.frames,
+            cell(|p| format!("{:.1}", p.width)),
+            cell(|p| format!("{:.1}", p.height)),
+            cell(|p| format!("{:.1}", p.scroll)),
+            first_ms,
+            ready_ms,
+            if external && matches!(self.step, Step::Preedit | Step::Cancel | Step::Commit) {
+                "arm-to-submit"
+            } else {
+                "action-to-submit"
+            },
+            self.draw_ms,
+            self.submit_ms,
+            self.max_draw_ms,
+            first_frame_ms,
+            first_scan,
+            first_visible,
+            self.blank_frames,
+            self.action_cpu_ms,
+            millis(self.start.elapsed()),
+            status,
+        )
+    }
+}
+
+fn create_report(path: &std::path::Path, header: &str, diagnostic: bool) -> std::fs::File {
+    let mut output = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(path)
+        .expect("create new report; refusing to overwrite");
+    writeln!(output, "{header}").unwrap();
+    if diagnostic {
+        writeln!(
+            output,
+            "# mode=display-diagnostic; acceptance=false; stage_timeout_ms=2000"
+        )
+        .unwrap();
+    }
+    writeln!(output, "phase,bytes,wrap_rows,visible_rows,scan_bytes,frames,width_px,height_px,scroll_y,first_submit_ms,ready_submit_ms,boundary,draw_cpu_total_ms,submit_cpu_total_ms,draw_cpu_max_ms,first_frame_submit_ms,first_scan_bytes,first_visible_rows,blank_frames,action_cpu_ms,observed_elapsed_ms,status").unwrap();
+    output.flush().unwrap();
+    output
 }
 
 fn millis(duration: Duration) -> f64 {
@@ -302,78 +467,82 @@ struct Run {
     collector: ForegroundJournalCollector,
     actions: VecDeque<Step>,
     current: Option<Measurement>,
-    rows: Vec<String>,
-    header: String,
+    output: std::fs::File,
+    row_count: usize,
+    budget_violations: usize,
+    diagnostic: bool,
     report: PathBuf,
     commands: Option<mpsc::Receiver<String>>,
     external: bool,
     waiting_since: Instant,
     last_paint: Option<PaintState>,
+    hardware: bool,
+    succeeded: Rc<Cell<bool>>,
 }
 
 impl Run {
-    fn record(&mut self, measurement: Measurement, cx: &App) {
+    fn write_row(&mut self, measurement: &Measurement, status: &str) {
+        self.row_count += 1;
+        writeln!(
+            self.output,
+            "{}",
+            measurement.csv_row(self.last_paint, self.external, status)
+        )
+        .unwrap();
+        self.output.flush().unwrap();
+    }
+
+    fn record(&mut self, measurement: &Measurement, cx: &App) -> Result<(), String> {
         let view = self.editor.read(cx);
-        assert_eq!(
-            measurement.blank_frames, 0,
-            "body must remain visible during updates"
-        );
-        assert_eq!(
-            view.display_snapshot().text().to_string(),
-            measurement.expected
-        );
-        assert_eq!(
-            view.display_snapshot().marked_range().is_some(),
-            measurement.marked
-        );
+        let check = |valid, reason| {
+            if valid {
+                Ok(())
+            } else {
+                Err(format!("{}: {reason}", measurement.step.name()))
+            }
+        };
+        check(measurement.blank_frames == 0, "body must remain visible")?;
+        check(
+            view.display_snapshot().text().to_string() == measurement.expected,
+            "display text mismatch",
+        )?;
+        check(
+            view.display_snapshot().marked_range().is_some() == measurement.marked,
+            "marked state mismatch",
+        )?;
         if measurement.marked {
-            assert!(
+            check(
                 !view.buffer().is_modified(),
-                "ordinary preedit must remain clean"
-            );
+                "ordinary preedit must remain clean",
+            )?;
         }
         let paint = measurement
             .paint
             .or(self.last_paint)
-            .expect("body must have painted");
-        assert_eq!(
-            paint.indexed, paint.bytes,
-            "final index must cover the whole display"
-        );
+            .ok_or_else(|| "body must have painted".to_string())?;
+        check(
+            paint.indexed == paint.bytes,
+            "final index must cover the whole display",
+        )?;
         if matches!(measurement.step, Step::Scroll) {
-            assert!(
+            check(
                 paint.scroll > measurement.old_scroll,
-                "scroll must actually move"
-            );
+                "scroll must actually move",
+            )?;
         }
-        let first_ms = measurement.first.map_or(String::new(), |frame| {
-            format!(
-                "{:.3}",
-                millis(frame.presentation.present_end - measurement.start)
-            )
-        });
-        let ready_ms = measurement.last.map_or(String::new(), |frame| {
-            format!(
-                "{:.3}",
-                millis(frame.presentation.present_end - measurement.start)
-            )
-        });
-        let first_frame_ms = measurement.first_frame.map_or(String::new(), |frame| {
-            format!(
-                "{:.3}",
-                millis(frame.presentation.present_end - measurement.start)
-            )
-        });
         if matches!(measurement.step, Step::Open) {
-            assert!(
+            check(
                 measurement
                     .first_paint
                     .is_some_and(|paint| paint.visible > 0),
-                "cold first frame must contain body text"
-            );
+                "cold first frame must contain body text",
+            )?;
         }
         if matches!(measurement.step, Step::Font) {
-            assert_eq!(view.wrap_index().unwrap().key().settings.font_size, px(18.));
+            check(
+                view.wrap_index().unwrap().key().settings.font_size == px(18.),
+                "font size mismatch",
+            )?;
         }
         if matches!(
             measurement.step,
@@ -385,30 +554,44 @@ impl Run {
                 | Step::BurstDelete
                 | Step::Commit
         ) {
-            assert!(view.buffer().is_modified());
+            check(
+                view.buffer().is_modified(),
+                "committed edit must mark buffer modified",
+            )?;
         }
         if matches!(measurement.step, Step::Cancel) {
-            assert!(!view.buffer().is_modified());
+            check(
+                !view.buffer().is_modified(),
+                "cancel must leave buffer clean",
+            )?;
         }
-        let first_scan = measurement
-            .first_paint
-            .map_or(String::new(), |paint| paint.scanned.to_string());
-        let first_visible = measurement
-            .first_paint
-            .map_or(String::new(), |paint| paint.visible.to_string());
-        self.rows.push(format!(
-            "{},{},{},{},{},{},{:.1},{:.1},{:.1},{},{},{},{:.3},{:.3},{:.3},{},{},{},{},{:.3},{:.3}",
-            measurement.step.name(), paint.bytes, paint.rows, paint.visible, paint.scanned,
-            measurement.frames, paint.width, paint.height, paint.scroll, first_ms, ready_ms,
-            if self.external && matches!(measurement.step, Step::Preedit | Step::Cancel | Step::Commit) { "arm-to-submit" } else { "action-to-submit" },
-            measurement.draw_ms, measurement.submit_ms, measurement.max_draw_ms,
-            first_frame_ms, first_scan, first_visible, measurement.blank_frames,
-            measurement.action_cpu_ms, millis(measurement.start.elapsed()),
-        ));
+        let errors = measurement.performance_errors(Instant::now(), self.hardware, self.external);
+        for reason in &errors {
+            writeln!(
+                self.output,
+                "# budget_violation=row {}: {reason}",
+                self.row_count + 1
+            )
+            .unwrap();
+        }
+        self.budget_violations += errors.len();
+        self.write_row(
+            measurement,
+            if errors.is_empty() {
+                "ok"
+            } else {
+                "over-budget"
+            },
+        );
+        if self.diagnostic {
+            println!("STAGE_DONE {}", measurement.step.name());
+            std::io::stdout().flush().unwrap();
+        }
         if self.external {
             println!("DONE {}", measurement.step.name());
             std::io::stdout().flush().unwrap();
         }
+        Ok(())
     }
 
     fn begin(&mut self, step: Step, window: &mut Window, cx: &mut App) {
@@ -438,7 +621,11 @@ impl Run {
             measurement.old_scroll = paint.scroll;
             measurement.old_width = paint.width;
         }
-        // Expected text construction and previous-stage assertions are outside the interval.
+        if self.diagnostic {
+            println!("STAGE {}", step.name());
+            std::io::stdout().flush().unwrap();
+        }
+        // Expected text construction and previous-stage checks are outside the interval.
         measurement.start = Instant::now();
         match step {
             Step::Scroll => {
@@ -459,7 +646,12 @@ impl Run {
                 window.resize(size_fn((size.width * 0.75).max(px(320.)), size.height));
             }
             Step::Font => self.editor.update(cx, |view, cx| {
-                view.set_font(font("monospace").bold(), px(18.), px(27.), cx)
+                view.set_font(
+                    semacs::appearance::FontSettings::default().font().bold(),
+                    px(18.),
+                    px(27.),
+                    cx,
+                )
             }),
             Step::Forced => window.refresh(),
             Step::Click => {
@@ -515,29 +707,48 @@ impl Run {
         }
     }
 
-    fn finish(&self, cx: &mut App) {
-        let mut output = OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&self.report)
-            .expect("create new report; refusing to overwrite");
-        writeln!(output, "{}", self.header).unwrap();
-        writeln!(output, "phase,bytes,wrap_rows,visible_rows,scan_bytes,frames,width_px,height_px,scroll_y,first_submit_ms,ready_submit_ms,boundary,draw_cpu_total_ms,submit_cpu_total_ms,draw_cpu_max_ms,first_frame_submit_ms,first_scan_bytes,first_visible_rows,blank_frames,action_cpu_ms,observed_elapsed_ms").unwrap();
-        for row in &self.rows {
-            writeln!(output, "{row}").unwrap();
+    fn finish(&mut self, error: Option<String>, cx: &mut App) -> bool {
+        if error.is_some()
+            && let Some(measurement) = self.current.take()
+        {
+            self.write_row(&measurement, "failed");
         }
-        writeln!(
-            output,
-            "# completed=true; gpu_execution_ms=unmeasured; compositor_presentation_ms=unmeasured"
-        )
-        .unwrap();
-        output.flush().unwrap();
-        println!("COMPLETED {}", self.report.display());
+        if let Some(reason) = &error {
+            writeln!(self.output, "# stop_reason={reason}").unwrap();
+        }
+        let success = error.is_none();
+        let verdict = if !self.hardware {
+            "not-applicable"
+        } else if success && self.budget_violations == 0 {
+            "true"
+        } else {
+            "false"
+        };
+        writeln!(self.output, "# completed={success}; budget_passed={verdict}; acceptance={}; budget_violation_count={}; gpu_execution_ms=unmeasured; compositor_presentation_ms=unmeasured",
+            self.hardware && !self.diagnostic, self.budget_violations).unwrap();
+        self.output.flush().unwrap();
+        self.succeeded.set(error.is_none());
+        if let Some(reason) = error {
+            println!("STOP {reason}; report={}", self.report.display());
+        } else if self.diagnostic {
+            println!(
+                "DIAGNOSTIC_COMPLETE {}; budget_violation_count={}; acceptance=false",
+                self.report.display(),
+                self.budget_violations
+            );
+        } else {
+            println!("COMPLETED {}", self.report.display());
+        }
+        std::io::stdout().flush().unwrap();
         cx.quit();
+        false
     }
 
     fn tick(&mut self, window: &mut Window, cx: &mut App) -> bool {
-        let mut completed = false;
+        let mut completed = self
+            .current
+            .as_ref()
+            .is_some_and(|reading| reading.ready.is_some());
         for (frame, paint) in collect_frames(&mut self.collector, &self.paints, window) {
             if let Some(paint) = paint {
                 self.last_paint = Some(paint);
@@ -546,20 +757,27 @@ impl Run {
                 completed |= measurement.accept(frame, paint);
             }
         }
-        if let Some(measurement) = &mut self.current {
-            assert!(
-                measurement.start.elapsed() < Duration::from_secs(30),
-                "stage timeout: {:?}",
-                measurement.step
-            );
-            if matches!(measurement.step, Step::Idle) {
-                measurement.idle_ticks += 1;
-                completed = measurement.idle_ticks >= 30;
+        if let Some(measurement) = &self.current
+            && let Some(reason) = if self.diagnostic {
+                measurement.hard_error(Instant::now(), true)
+            } else {
+                measurement.budget_error(Instant::now(), self.hardware, self.external)
             }
+        {
+            return self.finish(Some(reason), cx);
+        }
+        if let Some(measurement) = &mut self.current
+            && matches!(measurement.step, Step::Idle)
+        {
+            measurement.idle_ticks += 1;
+            completed = measurement.idle_ticks >= 30;
         }
         if completed {
             let measurement = self.current.take().unwrap();
-            self.record(measurement, cx);
+            if let Err(reason) = self.record(&measurement, cx) {
+                self.current = Some(measurement);
+                return self.finish(Some(reason), cx);
+            }
             self.waiting_since = Instant::now();
             if self.external {
                 println!("READY");
@@ -585,8 +803,7 @@ impl Run {
                             "font" => Step::Font,
                             "click" => Step::Click,
                             "done" => {
-                                self.finish(cx);
-                                return false;
+                                return self.finish(None, cx);
                             }
                             other => panic!("unknown external command: {other}"),
                         };
@@ -596,8 +813,7 @@ impl Run {
                     Err(mpsc::TryRecvError::Disconnected) => panic!("external driver disconnected"),
                 }
             } else {
-                self.finish(cx);
-                return false;
+                return self.finish(None, cx);
             }
         }
         true
@@ -619,7 +835,7 @@ fn main() {
     let mut args = std::env::args_os().skip(1);
     let input =
         PathBuf::from(args.next().expect(
-            "expected MIXED_SAMPLE SAMPLE NEW_REPORT [--allow-software] [--external | --m1 | --m2-directory NEW_DIRECTORY | --split right|below | --syntax]",
+            "expected MIXED_SAMPLE SAMPLE NEW_REPORT [--allow-software] [--display-diagnostic | --external | --m1 | --m2-directory NEW_DIRECTORY | --split right|below | --syntax]",
         ));
     let sample = args.next().expect("expected SAMPLE").into_string().unwrap();
 
@@ -628,6 +844,7 @@ fn main() {
     let mut allow_software = false;
     let mut external = false;
     let mut m1_mode = false;
+    let mut display_diagnostic = false;
     let mut syntax_mode = false;
     let mut split_direction = None;
     let mut m2_directory = None;
@@ -639,6 +856,7 @@ fn main() {
             "--allow-software" => allow_software = true,
             "--external" => external = true,
             "--m1" => m1_mode = true,
+            "--display-diagnostic" => display_diagnostic = true,
             "--syntax" => syntax_mode = true,
             "--split" => {
                 let direction = args.next().expect("split direction: right or below");
@@ -681,6 +899,16 @@ fn main() {
             + usize::from(syntax_mode)
             <= 1,
         "external, M1, M2, split and syntax are separate measurements"
+    );
+    assert!(
+        !display_diagnostic
+            || (!external
+                && !m1_mode
+                && !syntax_mode
+                && m2_directory.is_none()
+                && split_direction.is_none()
+                && sample == "mixed"),
+        "display diagnostic requires the ordinary mixed workload"
     );
     assert!(!pacing_options || m1_mode, "pacing options require --m1");
     assert!(
@@ -733,13 +961,16 @@ fn main() {
     });
     let succeeded = Rc::new(Cell::new(false));
     let outcome = succeeded.clone();
-    let require_success = m1_mode || m2_directory.is_some();
     gpui_kit::application().run(move |cx| {
         semacs::app::init(cx);
         profiler::set_trace_enabled(true);
         let collector = cx.foreground_journal().collector();
         let paints = Rc::new(RefCell::new(VecDeque::new()));
         let probe_paints = paints.clone();
+        if display_diagnostic {
+            println!("STAGE open");
+            std::io::stdout().flush().unwrap();
+        }
         let open = Measurement::new(Step::Open, text, false);
         let (window, probe) = gpui_kit::open_window(
             WindowOptions {
@@ -763,7 +994,7 @@ fn main() {
             assert!(allow_software || !specs.is_software_emulated,
                 "hardware GPU required; --allow-software is diagnostic only");
             let header = format!("# sample={sample}; model_ms={model_ms:.3}; external={external}; graphics={specs:?}\n# release={}; native {}; soft wrap enabled\n# first/ready end at CPU platform submission, NOT screen presentation; external includes driver/IPC/IME overhead",
-                !cfg!(debug_assertions), if m1_mode || m2_directory.is_some() { "monospace 16px/24px, fixed dimensions" } else { "monospace 16px/24px -> bold 18px/27px" });
+                !cfg!(debug_assertions), if m1_mode || m2_directory.is_some() { "Lilex 16px/24px, fixed dimensions" } else { "Lilex 16px/24px -> bold 18px/27px" });
             if let Some(directory) = m2_directory {
                 m2::start(m2::Session {
                     shell: probe.read(cx).shell.clone(), paints, collector,
@@ -779,23 +1010,18 @@ fn main() {
                 }, window, cx);
                 return;
             }
-            let mut actions = VecDeque::new();
-            if !external {
-                actions.extend(std::iter::repeat_n(Step::Scroll, 30));
-                actions.extend([Step::Resize, Step::Font]);
-                actions.extend(std::iter::repeat_n(Step::Forced, 30));
-                actions.extend([Step::Idle, Step::Click, Step::Insert, Step::Delete,
-                    Step::Newline, Step::Join, Step::BurstInsert, Step::BurstDelete]);
-            }
+            let actions = if external { VecDeque::new() } else { display_actions() };
             let run = Run {
-                editor, paints, collector, actions, current: Some(open), rows: Vec::new(),
-                header,
+                editor, paints, collector, actions, current: Some(open),
+                output: create_report(&report, &header, display_diagnostic),
+                row_count: 0, budget_violations: 0, diagnostic: display_diagnostic,
                 report, commands, external, waiting_since: Instant::now(), last_paint: None,
+                hardware: !specs.is_software_emulated, succeeded: outcome,
             };
             schedule(Rc::new(RefCell::new(run)), window);
         }).unwrap();
     });
-    if require_success && !succeeded.get() {
+    if !succeeded.get() {
         std::process::exit(2);
     }
 }

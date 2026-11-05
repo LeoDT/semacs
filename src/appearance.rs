@@ -1,10 +1,21 @@
-use std::fmt;
+use std::{borrow::Cow, fmt};
 
 use gpui_kit::{Font, Global, Pixels, SharedString, font, px};
 
+const DEFAULT_FONT_FAMILY: &str = "Lilex";
+const BUNDLED_FONTS: [&[u8]; 4] = [
+    include_bytes!("../assets/fonts/lilex/Lilex-Regular.ttf"),
+    include_bytes!("../assets/fonts/lilex/Lilex-Bold.ttf"),
+    include_bytes!("../assets/fonts/lilex/Lilex-Italic.ttf"),
+    include_bytes!("../assets/fonts/lilex/Lilex-BoldItalic.ttf"),
+];
 const MIN_FONT_SIZE: Pixels = px(8.);
 const MAX_FONT_SIZE: Pixels = px(72.);
 const LINE_HEIGHT_RATIO: f32 = 1.5;
+
+pub(crate) fn load_bundled_fonts(system: &gpui_kit::TextSystem) -> gpui_kit::Result<()> {
+    system.add_fonts(BUNDLED_FONTS.into_iter().map(Cow::Borrowed).collect())
+}
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct FontSettings {
@@ -36,7 +47,7 @@ impl std::error::Error for FontSettingsError {}
 
 impl Default for FontSettings {
     fn default() -> Self {
-        Self::new("monospace", px(16.)).expect("valid default font")
+        Self::new(DEFAULT_FONT_FAMILY, px(16.)).expect("valid default font")
     }
 }
 
@@ -92,6 +103,9 @@ impl FontSettings {
         self.size = self.base_size;
     }
 }
+
+#[cfg(all(test, target_os = "linux"))]
+mod font_tests;
 
 #[cfg(test)]
 mod tests {

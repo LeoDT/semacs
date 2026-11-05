@@ -47,6 +47,8 @@
 python3 -B scripts/perf_sample.py .pi/tmp/NEW-sample.txt
 cargo build --release --example perf_view --example perf_m1
 RUNS=3 target/release/examples/perf_view .pi/tmp/NEW-sample.txt
+# 定向样本可设置 SHAPES=mixed,single-ascii；未知 / 空 / 重复名称拒绝。
+# perf_view 逐阶段检查既有预算，首次超限立即退出，不继续后续运行。
 RUNS=3 target/release/examples/perf_m1 .pi/tmp/NEW-sample.txt
 ```
 
@@ -89,8 +91,18 @@ fish scripts/acceptance.fish MODE NEW_OUTPUT_DIRECTORY --consent
 | `languages` | 一个窗口，Markdown / HTML 嵌入高亮、分屏 / 主题、两处正文真实 IME 取消 / 提交、历史及保存；fixture 工具打印五组步骤，独立核对两个“你”和配置字节 |
 | `flicker` | 一个窗口，Markdown / HTML 各约 256 KiB，ASCII 连续输入 / 删除及共享显示 / 历史的配色稳定性；三组目视步骤，独立核对正文恢复及空配置，不复测 IME |
 | `syntax-perf` | Markdown（含 HTML→JS/CSS）/ HTML 各约 256 KiB、各三轮原生 CPU 输入 / 绘制；布局与语法 ready 分开记录，不外推大文件全矩阵 |
+| `styles` | 一个窗口，隔离 rich / plain 主题下的 Rust / Markdown 字体、装饰、背景与换行，用户手动做两处 IME 取消 / 提交；四组观察及独立字节核对 |
+| `styles-perf` | mixed 约 8 MiB 三轮，再 Markdown 约 256 KiB 三轮；至多六个顺序窗口，复用原生 CPU 驱动，不展开全矩阵 |
 
-人工模式先读终端提示；`scripting` / `messages` / `themes` / `syntax` / `flicker` 使用英文输入，不自动注键、不改变 IME、不截图，不测原生性能。`languages` 由用户在指定两处手动使用日常中文输入法；脚本不注键、不切换输入法、不截图，其 IME 结论来自用户观察及保存字节，不是自动状态断言或时延测量。详细键序列只在驱动中维护，不在本文再复制。不要直接照抄历史批次目录名。
+人工模式先读终端提示；`scripting` / `messages` / `themes` / `syntax` / `flicker` 使用英文输入，不自动注键、不改变 IME、不截图，不测原生性能。`languages` / `styles` 由用户在指定两处手动使用日常中文输入法；脚本不注键、不切换输入法、不截图，其 IME 结论来自用户观察及保存字节，不是自动状态断言或时延测量。详细键序列只在驱动中维护，不在本文再复制。不要直接照抄历史批次目录名。
+
+### E3 最小定向验证
+
+先运行 `styles`，全部人工观察与磁盘字节检查通过后，才运行独立新目录的 `styles-perf`。详细操作仅由 fixture 工具打印，不在这里重复维护。
+
+`styles` 只打开一个窗口，用可丢弃 Rust / Markdown 和隔离配置检查随包默认 Lilex 的粗斜体 / 装饰、范围背景、选区 / 光标、换行与候选坐标。用户手动切换输入法并在两份正文首行各提交一个“你”，Rust 还执行 undo / redo；工具核对最终字节与配置不变。记录窗口尺寸、字体效果和输入法名称；看不出变体时先记录并停止，不自行改字体重试。没有截图、OS 注键或自动输入法切换，不测 IME 时延。整行背景原语仍以本地几何回归为证据，不把文字范围背景的目视检查说成整行背景宿主验收。
+
+`styles-perf` 先用约 8 MiB mixed 覆盖普通文本的完整字体测量 / 换行，再用带真实 Markdown 语言身份的约 256 KiB 样本覆盖强调字体与嵌入高亮，各三轮；并未测试 HTML 窗口、全部 8 MiB 形状或持续输入。最多六个窗口顺序运行，期间不要输入、改宽或关闭 probe。两段均使用隔离空配置；普通 mixed 在当前阶段检查既有首场景 / 当前正文 / 完整 ready 与 draw 预算；超限即保存含失败阶段的部分报告并非零退出，不推进下一动作或后续窗口。未观察到的提交边界留空，已提交的时刻不因回调迟到而改成观察时间；Markdown 段沿用下节逐阶段检查、冻结 fixture 和 pending 输入覆盖校验。布局与语法整体就绪继续分开，不新增或放宽预算，不冒充 GPU / 实际呈现测量。
 
 ### E2 定向原生 CPU 批次
 
@@ -106,7 +118,21 @@ fish scripts/acceptance.fish MODE NEW_OUTPUT_DIRECTORY --consent
 
 `split-perf` 分别记录选中 view 与同场景所有 view 的 ready：前者沿用对应预算，后者是没有新增门限的聚合基线，不能合成“多 view 整体验收通过”。改宽 / 字体走 view 层入口，不冒充正式配置命令端到端时延。字段、动作矩阵及校验以 [perf_native.py](../scripts/perf_native.py) 为准，不为整理文档放宽断言。
 
-fish 不提供软件降级；底层 `--software` 只供另行授权的诊断。普通原生 / IME 模式逐窗判定，M1 / M2 / split-perf / syntax-perf 还在运行中检查既有预算，失败停批。
+fish 不提供软件降级；底层 `--software` 只供另行授权的诊断。普通原生 / IME、M1 / M2 / split-perf / syntax-perf 在运行中检查各自适用的既有预算，失败停批。下述显式完整显示诊断只改变采集停止策略，不改变预算或验收结论。
+
+### 单窗口完整显示诊断
+
+用户另行批准后，`perf_native.py --display-diagnostic --sample mixed --runs 1 --consent` 仅运行一个 mixed 窗口的完整显示动作：打开、滚动、改宽、字体、稳定绘制、idle、点击、插入 / 删除 / 换行 / 合行及同回调 32 键。沿用普通 probe 的实际动作，不测真实 OS 输入、IME 时延或 GPU。可按以下入口执行，文件及输出目录必须是新的：
+
+```sh
+cargo build --release --features native-profiler --example perf_native
+python3 -B scripts/perf_sample.py .pi/tmp/NEW-mixed.txt
+python3 -B scripts/perf_native.py .pi/tmp/NEW-mixed.txt .pi/tmp/NEW-display-diagnostic --consent --display-diagnostic --sample mixed --runs 1
+```
+
+驱动自动建立并核对隔离空配置。每个完整阶段仍按原门限判定，记录全部超限及 `over-budget` 状态后继续下一动作；报告始终为 `acceptance=false`，普通验收读取入口拒绝此报告，即使所有数字合格也不自动算验收。流程完整采集的 `completed=true` 与 `budget_passed` 分开，不能将成功退出解释为预算通过。
+
+正文 / marked 状态、可见性、完整索引、实际滚动和字体等正确性检查仍为硬停止。原生阶段观察上限为 2 秒；父驱动另有阶段 watchdog，以便 UI 阻塞时也能终止，开始收到阶段进度前最多等 5 秒。这些是诊断安全上限，不是性能预算。阶段结果即时刷盘；若父驱动终止阻塞进程，保留已有 CSV / stdout / stderr，当前阶段可能没有完成行或 footer，未观测边界不补 0。超时或正确性失败不得自动重跑；先交回新目录分析。
 
 <a id="首轮超限后的单次诊断"></a>
 
@@ -186,7 +212,7 @@ fish 不提供软件降级；底层 `--software` 只供另行授权的诊断。�
 
 ### 4. 字体、字号、窄窗口与长名称（candidate-layout-font）
 
-- M-x `set-font-family` RET，输入 `sans-serif` 后 RET。按实际显示观察字体变化；系统字体回退不算字体实际命中的证明。脚本另保存 fc-match 信息。
+- M-x `set-font-family` RET，输入本机已安装的一个具体字体族名后 RET（不使用 `monospace` / `sans-serif` 通用别名）。按实际显示观察字体变化；系统字体回退不算字体实际命中的证明。脚本另保存 fc-match 环境信息，但它不代表随包默认字体或 GPUI 的实际命中。
 - M-x `increase-font-size` RET，重复共四次，从 16px 增至 20px。
 - 正常窗口以及约 480px 宽的窄窗口中，分别检查 M-x 的候选列表。连续向下到末项、向上到输入行时，选中项始终可见、不循环；输入行、计数与列表不裁切，输入行选择标识可辨。C-g 取消。
 - C-x C-f 输入 `sub/`，检查多个 long-candidate 长名称的截断和选择高亮。选择一个长名称 RET 打开，再 C-x b 输入 `overwrite.txt` 后 RET；再次 C-x b 检查长名称 buffer 的文件路径注释截断。C-g 取消。
@@ -202,7 +228,7 @@ fish 不提供软件降级；底层 `--software` 只供另行授权的诊断。�
 
 - C-x b 输入 `overwrite.txt` 后 RET，M-< 回到开头。开启中文输入法，ni 后明确选择“你”提交；再输入 ni，观察预编辑 / 候选窗，然后用输入法自己消费的 Escape 取消。
 - 关闭中文输入状态。正文应为 **你Xalpha second** / **next line**，不重复、不残留 ni；C-x C-s 保存并等待 clean。
-- 可用 M-x `reset-font-size` 恢复 16px，再 `set-font-family` 恢复 `monospace`；这些设置仅本次运行有效。
+- 可用 M-x `reset-font-size` 恢复 16px，再 `set-font-family` 恢复 `Lilex`；这些设置仅本次运行有效。
 - C-x C-c 退出。全部测试 buffer 应 clean；不要额外改字。脚本询问上面六组观察以及窗口尺寸 / 字体说明，并独立核对新文件、未覆盖的原文件和所有子目录 fixture 的字节。任何未观察项目均答 no。
 
 ## 结论与证据边界

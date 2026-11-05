@@ -34,7 +34,7 @@ keymap、`M-x` 与后续帮助共用唯一的命令注册来源，避免命令�
 
 ## D12 外观
 
-不模拟 Emacs 外观；外围组件由 gpui-kit 绘制，semacs 的命名样式与主题设置统一解析并映射到 gpui-kit 颜色，正文编辑视图不交给通用输入控件。主题借鉴可理解的界面名称和切换操作，不引入 Emacs font-lock / 完整 face 机制或 elisp 兼容。
+不模拟 Emacs 外观；外围组件由 gpui-kit 绘制，semacs 的命名样式与主题设置统一解析并映射到 gpui-kit 颜色，正文编辑视图不交给通用输入控件。正文默认字体随包提供 Lilex 的四个真实变体，通过现有 GPUI TextSystem 统一加载，避免依赖系统字体安装和通用族名解析；不为此引入另一套字体解析或布局后端。主题借鉴可理解的界面名称和切换操作，不引入 Emacs font-lock / 完整 face 机制或 elisp 兼容。
 产品可观察的 mode line / echo 要求见 [保真度分级](emacs-fidelity.md#2-保真度分级)。
 
 ## D13 键位配置
@@ -77,7 +77,7 @@ GPUI 只提供窗口、平台输入 / IME、字体 shaping 与绘制，gpui-kit 
 - 输入绑定原目标及会话，异步布局绑定目标及快照身份；迟到结果不能按当前焦点重新解释或覆盖新状态。
 - 布局未兼容当前显示文本时，不提供错误的 caret、命中或 IME 坐标；显示投影的边界不替代 Emacs 字符运动语义。
 - buffer 拥有共享 document、history、modified、文件 / 保存身份及 mark / active；view 拥有 point、goal column、scroll、布局与输入会话。编辑调整其他 view 的 point 而不触发自动滚动。阶段 C 的分割、焦点、关闭与输入路由行为见 [buffer 与 view 契约](emacs-fidelity.md#阶段-cbuffer-与-view)。
-- 昂贵全文工作不能阻塞前台；区分临时预览与最终精确布局，不以截断正文、关闭软换行或漏绘换取性能。具体算法与阈值由代码维护。
+- 昂贵全文工作不能阻塞前台；区分临时预览与最终完整布局；全文索引用字体敏感的字素测宽，可见行与输入坐标使用精确 shaping，精度边界见 [E3 契约](emacs-fidelity.md#阶段-e3文本样式与高亮合成)，不以截断正文、关闭软换行或漏绘换取性能。具体算法与阈值由代码维护。
 
 ## D22 源码复用与许可
 

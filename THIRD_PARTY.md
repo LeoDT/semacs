@@ -1,5 +1,19 @@
 # Third-party source
 
+## Bundled default font
+
+- Lilex, Copyright 2019 The Lilex Project Authors
+  (<https://github.com/mishamyrt/Lilex>), under SIL Open Font License 1.1.
+- `assets/fonts/lilex/{Lilex-Regular,Lilex-Bold,Lilex-Italic,Lilex-BoldItalic}.ttf`
+  and `assets/fonts/lilex/OFL.txt` are copied verbatim from the same paths in
+  Zed snapshot `ba63a022c9a22ca66d68ef2a8f0bb9b5b0a9984d`. No font data or
+  names are modified. This is an embedded font asset, not a system font
+  installation or a dependency on the local Zed checkout.
+- The four font files are embedded in semacs; retain their copyright and
+  the complete `assets/fonts/lilex/OFL.txt` license when distributing binaries.
+  The fonts remain under OFL; that license does not apply to documents created
+  with them. Font files may not be sold by themselves.
+
 ## Completion behavior reference and matching dependency
 
 - Vertico (`https://github.com/minad/vertico`, local snapshot `c60d802`) and

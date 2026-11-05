@@ -117,7 +117,7 @@ impl ShapedRow {
             let has_tab = fragment.ends_with('\t');
             let content = fragment.trim_end_matches('\t');
             if !content.is_empty() {
-                let run = metrics.run(content.len());
+                let runs = metrics.runs(content, row.start.0 + offset);
                 let line = {
                     #[cfg(feature = "native-profiler")]
                     let _trace =
@@ -125,7 +125,7 @@ impl ShapedRow {
                     system.shape_line(
                         content.to_owned().into(),
                         metrics.settings().font_size,
-                        &[run],
+                        &runs,
                         None,
                     )
                 };
@@ -139,10 +139,7 @@ impl ShapedRow {
                     line: Some(line),
                 });
                 x += width;
-                for grapheme in content.graphemes(true) {
-                    let width = metrics.width(grapheme);
-                    phase = metrics.advance_phase(phase, width);
-                }
+                phase = metrics.advance_phase(phase, width);
             }
             if has_tab {
                 let width = metrics.tab_width(phase);
@@ -356,6 +353,7 @@ pub struct BufferView {
     geometry: Option<ViewportLayout>,
     content_bounds: Option<Bounds<Pixels>>,
     retained_paint_layout: Option<ViewportLayout>,
+    style_scroll_anchor: Option<(ByteOffset, Pixels)>,
     scroll: Point<Pixels>,
     reflow_base: Option<WrapIndex>,
     pending_change: Option<DisplayChange>,
@@ -381,6 +379,7 @@ impl BufferView {
     }
 
     pub fn with_target(target: EditTarget, cx: &mut Context<Self>) -> Self {
+        cx.default_global::<ThemeSettings>();
         let fonts = cx.default_global::<FontSettings>().clone();
         let mut observed_fonts = fonts.clone();
         let font_subscription = cx.observe_global::<FontSettings>(move |view, cx| {
@@ -405,6 +404,7 @@ impl BufferView {
                 line_height: fonts.line_height(),
                 wrap_width: px(1.),
                 tab_size: TAB_WIDTH,
+                typography: Default::default(),
             },
             metrics: None,
             index: None,
@@ -415,6 +415,7 @@ impl BufferView {
             geometry: None,
             content_bounds: None,
             retained_paint_layout: None,
+            style_scroll_anchor: None,
             scroll: Point::default(),
             reflow_base: None,
             pending_change: None,
@@ -515,6 +516,7 @@ impl BufferView {
     }
 
     pub(crate) fn initialize_scroll(&mut self, scroll: Point<Pixels>, cx: &mut Context<Self>) {
+        self.style_scroll_anchor = None;
         self.scroll = scroll;
         self.reveal_caret = false;
         cx.notify();
@@ -575,6 +577,12 @@ impl BufferView {
         }
     }
 
+    pub fn visible_layout_ready(&self) -> bool {
+        self.viewport_layout().is_some_and(|layout| {
+            !layout.rows.is_empty() && layout.rows.len() == layout.requested_rows
+        })
+    }
+
     pub fn layout_ready(&self) -> bool {
         self.index.as_ref().is_some_and(WrapIndex::is_complete)
             && self
@@ -610,6 +618,7 @@ impl BufferView {
     }
 
     fn queue_change(&mut self, change: DisplayChange, cx: &mut Context<Self>) {
+        self.style_scroll_anchor = None;
         self.pending_recenter = None;
         if self.reflow_base.is_none() {
             self.reflow_base = self
@@ -795,6 +804,7 @@ impl BufferView {
         line_height: Pixels,
         cx: &mut Context<Self>,
     ) {
+        self.style_scroll_anchor = None;
         self.retain_paint_layout();
         self.settings.font = font;
         self.settings.font_size = font_size;
@@ -808,6 +818,7 @@ impl BufferView {
     }
 
     pub fn scroll_by(&mut self, delta: Point<Pixels>, cx: &mut Context<Self>) {
+        self.style_scroll_anchor = None;
         self.reveal_caret = false;
         self.pending_recenter = None;
         self.scroll.x = (self.scroll.x + delta.x).max(px(0.));
@@ -818,11 +829,46 @@ impl BufferView {
         cx.notify();
     }
 
+    fn typography(&self, cx: &App) -> crate::display::Typography {
+        let snapshot = self.display_snapshot();
+        crate::display::Typography::new(
+            ThemeSettings::global(cx),
+            self.buffer().syntax_display(),
+            snapshot
+                .marked_range()
+                .map(|range| range.start.0..range.end.0),
+            if self.annotate_message {
+                self.buffer().read_only_prefix().0
+            } else {
+                0
+            },
+            self.buffer()
+                .annotations()
+                .map_or_else(|| Arc::from([]), |annotations| annotations.fonts.clone()),
+        )
+    }
+
     fn ensure_index(&mut self, bounds: Bounds<Pixels>, cx: &mut Context<Self>) {
         #[cfg(feature = "native-profiler")]
         let _trace = crate::preparation_trace::Span::new("ensure-index", 0);
         self.settings.wrap_width = bounds.size.width.max(px(1.));
         let snapshot = self.display_snapshot();
+        let typography = self.typography(cx);
+        if typography != self.settings.typography
+            && self.style_scroll_anchor.is_none()
+            && let Some(index) = &self.index
+            && index.key().display == snapshot.id()
+        {
+            let first = (f32::from(self.scroll.y) / f32::from(index.key().settings.line_height))
+                .floor() as usize;
+            if let Some(row) = index.row(first) {
+                self.style_scroll_anchor = Some((
+                    row.start,
+                    self.scroll.y - index.key().settings.line_height * first as f32,
+                ));
+            }
+        }
+        self.settings.typography = typography;
         let key = LayoutKey {
             display: snapshot.id(),
             settings: self.settings.clone(),
@@ -926,6 +972,12 @@ impl BufferView {
         self.split_geometry_ready = true;
         self.ensure_index(bounds, cx);
         let index = self.index.as_ref().unwrap();
+        if let Some((offset, remainder)) = self.style_scroll_anchor
+            && let Some(row) = index.row_for_offset(offset)
+        {
+            self.scroll.y = self.settings.line_height * row.index as f32 + remainder;
+            self.style_scroll_anchor = None;
+        }
         if let Some(position) = self.pending_recenter
             && let Some(row) = index.row_for_offset(self.target.buffer().point())
         {
@@ -1084,6 +1136,7 @@ impl BufferView {
             return;
         }
         self.invalidate_input_registration();
+        self.style_scroll_anchor = None;
         self.pending_recenter = None;
         self.clear_message(cx);
         window.focus(&self.focus, cx);
@@ -1102,6 +1155,9 @@ impl BufferView {
             window.notify_text_input_changed(&self.focus);
         } else if outcome.reveal_point {
             window.notify_text_selection_changed(&self.focus);
+        }
+        if outcome.reveal_point || outcome.viewport.is_some() {
+            self.style_scroll_anchor = None;
         }
         self.pending_recenter = None;
         match outcome.viewport {
@@ -1247,6 +1303,7 @@ impl BufferView {
 
     pub(crate) fn show_end(&mut self, cx: &mut Context<Self>) {
         let end = ByteOffset(self.buffer().text().len());
+        self.style_scroll_anchor = None;
         self.target.show_point(end);
         self.reveal_caret = true;
         cx.notify();
@@ -1322,6 +1379,7 @@ impl BufferView {
             self.invalidate_input_registration();
         }
         if self.target.buffer().point() != before_point {
+            self.style_scroll_anchor = None;
             self.pending_recenter = None;
             self.reveal_caret = true;
             window.notify_text_selection_changed(&self.focus);
@@ -1423,7 +1481,7 @@ impl Element for TextCanvas {
             }
         });
         let annotation = self.view.read(cx).annotation_lines(window, cx);
-        let (layout, cursor, marked, region, prompt_end, syntax) = {
+        let (layout, cursor, marked, region, prompt_end, syntax, annotations, committed_text) = {
             let view = self.view.read(cx);
             let Some(layout) = view.paint_layout().cloned() else {
                 return;
@@ -1450,20 +1508,41 @@ impl Element for TextCanvas {
                     ByteOffset(0)
                 },
                 syntax,
+                view.buffer().annotations(),
+                view.buffer().text(),
             )
         };
         let style = decoration::TextStyle::new(
             ThemeSettings::global(cx),
-            syntax.as_deref(),
+            syntax.as_ref().map(|syntax| &***syntax),
             marked.as_ref().map(|range| range.start.0..range.end.0),
             prompt_end.0,
-        );
+        )
+        .with_annotations(annotations.as_deref());
         let cursor_colors = ThemeSettings::global(cx).style(StyleRole::Cursor);
         window.with_content_mask(
             Some(ContentMask {
                 bounds: layout.bounds,
             }),
             |window| {
+                if let Some(annotations) = &annotations {
+                    for (bounds, color) in
+                        layout.line_backgrounds(annotations, &committed_text, style.marked.clone())
+                    {
+                        window.paint_quad(fill(bounds, color));
+                    }
+                }
+                for row in &layout.rows {
+                    let origin = layout.origin(row);
+                    for part in &row.parts {
+                        part.paint_background(
+                            point(origin.x + part.x, origin.y),
+                            layout.key.settings.line_height,
+                            &style,
+                            window,
+                        );
+                    }
+                }
                 for bounds in region {
                     window.paint_quad(fill(
                         bounds,
@@ -1553,6 +1632,8 @@ mod region_tests;
 mod routing_tests;
 #[cfg(test)]
 mod split_tests;
+#[cfg(test)]
+mod style_tests;
 #[cfg(test)]
 mod syntax_tests;
 #[cfg(test)]

@@ -97,6 +97,14 @@ impl DisplayHighlights {
         }
     }
 
+    pub(crate) fn shares_source(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.source, &other.source)
+    }
+
+    pub(crate) fn role_mask(&self) -> u32 {
+        self.source.role_mask
+    }
+
     pub fn in_range(&self, range: Range<usize>) -> impl Iterator<Item = Span> + '_ {
         let mut cursor = self.pieces.cursor::<Bytes>(());
         cursor.seek(&Bytes(range.start), Bias::Right);
@@ -118,6 +126,7 @@ impl DisplayHighlights {
                         range: start + (span.range.start - source)
                             ..start + (span.range.end - source),
                         style: span.style,
+                        modifiers: span.modifiers.clone(),
                     })
             })
         })

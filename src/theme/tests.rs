@@ -42,7 +42,7 @@ fn validates_names_colors_attributes_and_limits() {
     }
     assert!(StyleRole::parse("font-lock-keyword-face").is_err());
     assert!(StyleOverride::new(StyleRole::Region, Some("#ffffff"), None).is_err());
-    assert!(StyleOverride::new(StyleRole::MinibufferPrompt, None, Some("#ffffff")).is_err());
+    assert!(StyleOverride::new(StyleRole::Separator, None, Some("#ffffff")).is_err());
     let mut settings = ThemeSettings::default();
     for name in ["", "light", "dark", "BAD", "has space", "中文"] {
         assert!(settings.define(name, "dark", vec![]).is_err());

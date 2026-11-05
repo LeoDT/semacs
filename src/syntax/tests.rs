@@ -180,6 +180,7 @@ fn display_projection_splits_committed_spans_around_uncolored_preedit() {
         spans[0],
         Span {
             range: 0..1,
+            modifiers: Default::default(),
             style: StyleRole::SyntaxKeyword
         }
     );
@@ -187,6 +188,7 @@ fn display_projection_splits_committed_spans_around_uncolored_preedit() {
         spans[1],
         Span {
             range: 4..5,
+            modifiers: Default::default(),
             style: StyleRole::SyntaxKeyword
         }
     );

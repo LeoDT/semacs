@@ -36,7 +36,7 @@ impl AppShell {
             return;
         }
         let view = opening.view.clone();
-        let viewport = view.read(cx).initial_viewport(bounds, window);
+        let viewport = view.read(cx).initial_viewport(bounds, window, cx);
         if opening.viewport.as_ref() == Some(&viewport) {
             return;
         }

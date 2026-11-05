@@ -8,8 +8,8 @@ function fail
     exit 1
 end
 
-if test (count $argv) -ne 3; or not contains -- $argv[1] perf display-perf split-perf ime split-ime manual candidates scripting messages themes syntax languages flicker syntax-perf open-diagnostic; or test "$argv[3]" != --consent
-    echo "Usage: fish scripts/acceptance.fish <perf|display-perf|split-perf|ime|split-ime|manual|candidates|scripting|messages|themes|syntax|languages|flicker|syntax-perf|open-diagnostic> NEW_OUTPUT_DIRECTORY --consent" >&2
+if test (count $argv) -ne 3; or not contains -- $argv[1] perf display-perf split-perf ime split-ime manual candidates scripting messages themes syntax languages flicker styles styles-perf syntax-perf open-diagnostic; or test "$argv[3]" != --consent
+    echo "Usage: fish scripts/acceptance.fish <perf|display-perf|split-perf|ime|split-ime|manual|candidates|scripting|messages|themes|syntax|languages|flicker|styles|styles-perf|syntax-perf|open-diagnostic> NEW_OUTPUT_DIRECTORY --consent" >&2
     exit 2
 end
 set -l mode $argv[1]
@@ -48,7 +48,7 @@ for file in $untracked
 end
 echo "Output: $output"
 echo "Build logs are saved; any failure stops the batch without retries."
-if contains -- "$mode" candidates scripting messages themes syntax languages flicker
+if contains -- "$mode" candidates scripting messages themes syntax languages flicker styles
     cargo build --release --bin semacs --target-dir "$root/target" > "$output/build.log" 2>&1
 else if test "$mode" = split-ime
     cargo build --release --bin semacs --example native_split_ime --target-dir "$root/target" > "$output/build.log" 2>&1
@@ -78,6 +78,24 @@ else if test "$mode" = split-perf
         python3 -B scripts/perf_native.py "$output/sample.txt" "$output/split-$direction" --consent --split $direction --sample mixed --sample single-ascii --runs 3
         or fail "split performance stopped; keep and report this directory, do not rerun"
     end
+else if test "$mode" = styles-perf
+    echo "E3 representative CPU/submission checks: mixed 8 MiB x3, then Markdown 256 KiB x3."
+    echo "Six sequential windows at most. No screenshots, OS key injection or scripted IME changes."
+    echo "Do not type in, resize or close probes. Any failed report stops subsequent windows."
+    python3 -B scripts/perf_sample.py "$output/sample.txt"
+    or fail "mixed fixture generation failed"
+    python3 -c 'import pathlib,sys; p=pathlib.Path(sys.argv[1]); p.parent.mkdir(parents=True); p.open("xb").close()' "$output/config/semacs/init.js"
+    or fail "cannot prepare isolated empty performance configuration"
+    env XDG_CONFIG_HOME="$output/config" python3 -B scripts/perf_native.py "$output/sample.txt" "$output/native-mixed" --consent --sample mixed --runs 3
+    or fail "E3 mixed CPU check stopped; keep and report this directory, do not rerun"
+    test -f "$output/config/semacs/init.js"; and test ! -L "$output/config/semacs/init.js"; and test ! -s "$output/config/semacs/init.js"
+    or fail "isolated mixed configuration changed"
+    set -l syntax_manifest (python3 -B scripts/perf_syntax_sample.py "$output/files")
+    or fail "syntax performance fixtures failed"
+    string match --quiet --regex '^[0-9a-f]{64}$' "$syntax_manifest"
+    or fail "missing frozen syntax batch identity"
+    python3 -B scripts/perf_native.py "$output/files/markdown.md" "$output/native-markdown" --consent --syntax --sample markdown --runs 3 --syntax-manifest-sha256 "$syntax_manifest"
+    or fail "E3 Markdown CPU check stopped; keep and report this directory, do not rerun"
 else if test "$mode" = syntax-perf
     echo "Syntax-enabled Markdown/HTML, ~256 KiB each, three runs each; six sequential windows."
     echo "Input, CPU draw/submission and stable idle only; not OS keyboard, IME latency, GPU time or large-file matrix."
@@ -152,12 +170,14 @@ else if test "$mode" = scripting
     echo "Any failure stops the batch and terminates only the child test app; all artifacts are kept."
     python3 -B scripts/scripting_manual.py "$output/scripting" --binary "$root/target/release/semacs" --consent
     or fail "scripting smoke stopped; keep and report $output, do not rerun"
-else if contains -- "$mode" themes syntax languages flicker
+else if contains -- "$mode" themes syntax languages flicker styles
     begin
         uname -a
         rustc --version
         printf 'WAYLAND_DISPLAY=%s\nXDG_SESSION_TYPE=%s\nXDG_CURRENT_DESKTOP=%s\nLANG=%s\n' "$WAYLAND_DISPLAY" "$XDG_SESSION_TYPE" "$XDG_CURRENT_DESKTOP" "$LANG"
         fc-match monospace
+        fc-match monospace:style=Bold
+        fc-match monospace:style=Italic
     end > "$output/environment.txt" 2>&1
     set -l body body.txt
     set -l checks theme-start-split theme-switch theme-cancel-unknown theme-minibuffer-messages theme-editing
@@ -170,11 +190,14 @@ else if contains -- "$mode" themes syntax languages flicker
     else if test "$mode" = flicker
         set body body.md
         set checks flicker-markdown flicker-html flicker-shared-history
+    else if test "$mode" = styles
+        set body body.rs
+        set checks styles-fonts styles-layout-theme styles-rust-ime styles-markdown-ime-save
     end
     python3 -B scripts/m2_manual.py prepare "$output/files" --profile "$mode"
     or fail "theme/syntax fixture generation failed"
     echo "One manual $mode window; isolated configuration and disposable files only."
-    if test "$mode" = languages
+    if contains -- "$mode" languages styles
         echo "Use your usual Chinese IME manually for the two prompted body targets; no scripted IME changes."
         echo "No screenshots, OS key injection or performance measurements."
     else
@@ -194,11 +217,13 @@ else if contains -- "$mode" themes syntax languages flicker
             fail "theme/syntax observation not passed; keep and report $output"
         end
     end
-    read -l -P "Observed window dimensions, color readability / flicker and (languages only) IME name: " geometry
+    read -l -P "Observed window dimensions, font/color readability / flicker and (languages/styles) IME name: " geometry
     printf '%s\n' "$geometry" >> "$output/notes.txt"
     python3 -B scripts/m2_manual.py verify "$output/files" --profile "$mode" > "$output/verification.log" 2>&1
     or fail "theme/syntax observations or independent disk/config bytes failed; see $output/verification.log"
-    if test "$mode" = languages
+    if test "$mode" = styles
+        echo "E3 user-observed font/IME behavior and independent disk/config bytes verified; native performance/IME latency/GPU remain unmeasured."
+    else if test "$mode" = languages
         echo "E2 user-observed body IME and independent disk/config bytes verified; native performance/IME latency/GPU remain unmeasured."
     else
         echo "Theme/syntax manual observations and disk/config bytes verified; native performance/IME/GPU remain unmeasured."

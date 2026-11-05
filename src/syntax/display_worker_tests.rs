@@ -111,6 +111,37 @@ fn failed_parse_discards_display_and_next_edit_recovers(cx: &mut TestAppContext)
 }
 
 #[gpui_kit::test]
+fn typography_retains_and_releases_old_highlights_on_background(cx: &mut TestAppContext) {
+    use crate::theme::{StyleOverride, StyleRole, ThemeSettings};
+    let syntax = Syntax::new(buffer().snapshot(), Some(Path::new("worker.rs")));
+    let observer = cx.new(|_| ());
+    cx.update(|cx| syntax.prepare(observer.downgrade().into(), cx));
+    cx.run_until_parked();
+    let weak = Arc::downgrade(&syntax.highlights().unwrap());
+    let mut theme = ThemeSettings::default();
+    theme.set_style(
+        StyleRole::SyntaxKeyword,
+        StyleOverride::default()
+            .with_text_attributes(StyleRole::SyntaxKeyword, Some("bold"), None, None, None)
+            .unwrap(),
+    );
+    let typography = crate::display::Typography::new(
+        &theme,
+        syntax.display_highlights(),
+        None,
+        0,
+        Arc::from([]),
+    );
+    drop(syntax);
+    cx.run_until_parked();
+    assert!(weak.upgrade().is_some());
+    drop(typography);
+    assert!(weak.upgrade().is_some());
+    cx.run_until_parked();
+    assert!(weak.upgrade().is_none());
+}
+
+#[gpui_kit::test]
 fn display_cache_releases_its_last_highlight_owner_on_background(cx: &mut TestAppContext) {
     let syntax = Syntax::new(buffer().snapshot(), Some(Path::new("worker.rs")));
     let observer = cx.new(|_| ());

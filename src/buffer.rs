@@ -10,6 +10,11 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use crate::files::{DecodedFile, FileFormat, FileIdentity, FileStamp};
 use crate::text::{ByteOffset, Rope};
 
+#[cfg(test)]
+mod annotation_tests;
+mod annotations;
+pub(crate) use annotations::Annotations;
+pub use annotations::{LineBackground, StyledRange};
 mod history;
 mod selection;
 pub(crate) use history::EditGroup;
@@ -110,6 +115,7 @@ struct Document {
     modified: bool,
     history: history::History,
     syntax: crate::syntax::Syntax,
+    annotations: Option<std::sync::Arc<Annotations>>,
 }
 
 impl Document {
@@ -176,6 +182,7 @@ impl Buffer {
         let document = Document {
             snapshot,
             syntax,
+            annotations: None,
             revision: 0,
             last_edit: None,
             points,
@@ -319,9 +326,7 @@ impl Buffer {
         self.document.borrow().syntax.highlights()
     }
 
-    pub(crate) fn syntax_display(
-        &self,
-    ) -> Option<std::sync::Arc<crate::syntax::DisplayHighlights>> {
+    pub(crate) fn syntax_display(&self) -> Option<crate::syntax::DisplayHighlightSnapshot> {
         self.document.borrow().syntax.display_highlights()
     }
 
@@ -509,6 +514,7 @@ impl Buffer {
         );
         doc.snapshot.text.replace(start..old_end, edit.text);
         doc.snapshot.id.version = version;
+        doc.annotations = None;
         doc.syntax
             .edited(doc.snapshot.clone(), start..old_end, start + inserted);
         doc.points.retain(|weak| {

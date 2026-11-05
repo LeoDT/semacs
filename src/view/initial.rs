@@ -43,10 +43,12 @@ impl BufferView {
         &self,
         bounds: Bounds<Pixels>,
         window: &Window,
+        cx: &App,
     ) -> InitialViewport {
         let size = text_bounds(bounds).size;
         let mut settings = self.settings.clone();
         settings.wrap_width = size.width;
+        settings.typography = self.typography(cx);
         InitialViewport {
             settings,
             size,
@@ -115,6 +117,7 @@ impl BufferView {
     ) -> bool {
         let mut settings = self.settings.clone();
         settings.wrap_width = viewport.size.width;
+        settings.typography = self.typography(cx);
         if prepared.viewport != *viewport
             || viewport.settings != settings
             || prepared.index.key().display != self.display_snapshot().id()

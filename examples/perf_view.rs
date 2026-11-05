@@ -3,7 +3,7 @@
 use std::path::PathBuf;
 use std::time::Instant;
 
-use gpui_kit::{Entity, Keystroke, TestAppContext, VisualTestContext, font, point, px, size};
+use gpui_kit::{Entity, Keystroke, TestAppContext, VisualTestContext, point, px, size};
 use semacs::app::AppShell;
 use semacs::buffer::Buffer;
 use semacs::files::{self, DecodedFile, FileFormat};
@@ -30,6 +30,7 @@ fn input_measurement(
     });
     draw(cx, false);
     let front_ms = ms(start);
+    check_budget("input front", front_ms, 2.);
     cx.read(|cx| {
         let view = editor.read(cx);
         assert_eq!(
@@ -37,9 +38,14 @@ fn input_measurement(
             view.display_snapshot().id()
         );
         assert!(view.wrap_index().unwrap().scanned_bytes() <= 8192);
+        assert!(
+            view.visible_layout_ready(),
+            "input first frame needs current visible geometry"
+        );
     });
     ready(cx, editor);
     let ready_ms = ms(start);
+    check_budget("input ready", ready_ms, 300.);
     cx.read(|cx| {
         let view = editor.read(cx);
         assert_eq!(view.buffer().text().to_string(), expected);
@@ -72,6 +78,7 @@ fn measure(sample: &str, text: &str, run: usize) {
     let mut cx = VisualTestContext::from_window(window.into(), &app);
     draw(&mut cx, false);
     let first_ms = ms(start);
+    check_budget("initial first", first_ms, 2.);
     let (first_rows, scan_bytes) = cx.read(|cx| {
         let view = editor.read(cx);
         (
@@ -80,8 +87,13 @@ fn measure(sample: &str, text: &str, run: usize) {
         )
     });
     assert!(first_rows > 0, "first frame must contain body text");
+    assert!(
+        cx.read(|cx| editor.read(cx).visible_layout_ready()),
+        "initial first frame needs current visible geometry"
+    );
     ready(&mut cx, &editor);
     let ready_ms = ms(start);
+    check_budget("initial ready", ready_ms, 300.);
     let (rows, bounds) = cx.read(|cx| {
         let view = editor.read(cx);
         assert_eq!(view.buffer().text().len(), text.len());
@@ -103,6 +115,7 @@ fn measure(sample: &str, text: &str, run: usize) {
     draw(&mut cx, false);
     ready(&mut cx, &editor);
     let scroll_ms = ms(start);
+    check_budget("scroll", scroll_ms, 1.);
     cx.read(|cx| assert!(editor.read(cx).viewport_layout().unwrap().scroll().y > px(0.)));
 
     let start = Instant::now();
@@ -110,6 +123,7 @@ fn measure(sample: &str, text: &str, run: usize) {
     draw(&mut cx, false);
     ready(&mut cx, &editor);
     let resize_ms = ms(start);
+    check_budget("resize ready", resize_ms, 300.);
     cx.read(|cx| {
         assert!(
             editor
@@ -126,23 +140,31 @@ fn measure(sample: &str, text: &str, run: usize) {
     let start = Instant::now();
     cx.update(|_, cx| {
         editor.update(cx, |view, cx| {
-            view.set_font(font("monospace").bold(), px(18.), px(27.), cx)
+            view.set_font(
+                semacs::appearance::FontSettings::default().font().bold(),
+                px(18.),
+                px(27.),
+                cx,
+            )
         })
     });
     draw(&mut cx, false);
     ready(&mut cx, &editor);
     let font_ms = ms(start);
+    check_budget("font ready", font_ms, 300.);
     let key = cx.read(|cx| editor.read(cx).wrap_index().unwrap().key().clone());
     let start = Instant::now();
     for _ in 0..30 {
         draw(&mut cx, true);
     }
     let forced_frame_ms = ms(start) / 30.;
+    check_budget("forced frame", forced_frame_ms, 0.25);
     let start = Instant::now();
     for _ in 0..30 {
         draw(&mut cx, false);
     }
     let empty_draw_ms = ms(start) / 30.;
+    check_budget("empty draw", empty_draw_ms, 0.25);
     cx.read(|cx| assert_eq!(editor.read(cx).wrap_index().unwrap().key(), &key));
 
     let click = cx.read(|cx| {
@@ -178,6 +200,48 @@ fn measure(sample: &str, text: &str, run: usize) {
     dispatcher.scheduler().end_test();
 }
 
+fn check_budget(metric: &str, value: f64, limit: f64) {
+    assert!(
+        value.is_finite() && value >= 0. && value <= limit,
+        "{metric}: {value:.3} ms exceeds {limit:.3} ms budget"
+    );
+}
+
+#[test]
+fn budget_checks_reject_invalid_and_over_limit_measurements() {
+    check_budget("ready", 300., 300.);
+    for invalid in [300.001, f64::NAN, f64::INFINITY, -1.] {
+        assert!(std::panic::catch_unwind(|| check_budget("ready", invalid, 300.)).is_err());
+    }
+}
+
+fn parse_shapes(value: &str) -> Vec<&'static str> {
+    let mut selected = Vec::new();
+    for name in value.split(',') {
+        let known = samples::NAMES
+            .into_iter()
+            .find(|known| *known == name)
+            .expect("SHAPES contains an unknown or empty sample");
+        assert!(
+            !selected.contains(&known),
+            "SHAPES contains a duplicate sample"
+        );
+        selected.push(known);
+    }
+    selected
+}
+
+#[test]
+fn shape_selection_is_explicit_and_ordered() {
+    assert_eq!(
+        parse_shapes("single-ascii,mixed"),
+        vec!["single-ascii", "mixed"]
+    );
+    for invalid in ["", "unknown", "mixed,", "mixed,mixed"] {
+        assert!(std::panic::catch_unwind(|| parse_shapes(invalid)).is_err());
+    }
+}
+
 fn main() {
     let path = std::env::args_os()
         .nth(1)
@@ -194,12 +258,17 @@ fn main() {
     assert!(runs > 0);
     println!("# GPUI TestPlatform + TestTextSystem; no native fonts, display, IME or GPU");
     println!(
-        "# Initial 960x640, resize 720x640, monospace 16px/24px -> bold 18px/27px; soft wrap enabled"
+        "# Initial 960x640, resize 720x640, Lilex 16px/24px -> bold 18px/27px; soft wrap enabled"
     );
     println!(
         "sample,run,bytes,wrap_rows,first_rows,preview_scan_bytes,model_ms,first_ms,ready_ms,scroll_ms,resize_ready_ms,font_ready_ms,forced_frame_ms,empty_draw_ms,insert_front_ms,insert_ready_ms,delete_front_ms,delete_ready_ms,newline_front_ms,newline_ready_ms,join_front_ms,join_ready_ms"
     );
-    for sample in samples::NAMES {
+    let selected = std::env::var("SHAPES").ok();
+    let requested = selected
+        .as_deref()
+        .map(parse_shapes)
+        .unwrap_or_else(|| samples::NAMES.to_vec());
+    for sample in requested {
         let text = samples::build(sample, &mixed);
         for run in 1..=runs {
             measure(sample, &text, run);

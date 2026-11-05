@@ -87,6 +87,8 @@ def wait_line(lines, prefix, process):
             if process.poll() is not None:
                 raise RuntimeError(f"probe exited {process.returncode} while waiting for {prefix}")
             continue
+        if line.startswith("STOP "):
+            raise RuntimeError(line)
         if line.startswith(prefix):
             return line
     raise TimeoutError(f"waiting for {prefix}; see probe logs")
@@ -203,14 +205,28 @@ def metric(row, key, optional=False):
     return number
 
 
+def limit_errors(row, values, limits, software):
+    return [] if software else [
+        f"STOP: {row['phase']}: {key}={values[key]} > {limit}"
+        for key, limit in limits.items() if values[key] > limit
+    ]
+
+
 def check_limits(row, values, limits, software):
-    if not software:
-        for key, limit in limits.items():
-            if values[key] > limit:
-                raise RuntimeError(f"STOP: {row['phase']}: {key}={values[key]} > {limit}")
+    errors = limit_errors(row, values, limits, software)
+    if errors:
+        raise RuntimeError(errors[0])
 
 
-def validate_native_metrics(rows, software, ime):
+def validate_native_metrics(rows, software, ime, diagnostic=False):
+    errors = []
+
+    def check(row, values, limits):
+        found = limit_errors(row, values, limits, software)
+        if found and not diagnostic:
+            raise RuntimeError(found[0])
+        errors.extend(found)
+
     for row in rows:
         phase = row["phase"]
         values = {key: metric(row, key) for key in (
@@ -222,8 +238,10 @@ def validate_native_metrics(rows, software, ime):
         limits = {"draw_cpu_max_ms": 16}
         if phase == "idle":
             if values["frames"] != 0:
-                raise RuntimeError(f"idle produced draw: {row}")
-            check_limits(row, values, limits, software)
+                if not diagnostic:
+                    raise RuntimeError(f"idle produced draw: {row}")
+                errors.append("idle: unexpected draw")
+            check(row, values, limits)
             continue
         for key in ("first_submit_ms", "ready_submit_ms", "first_frame_submit_ms"):
             values[key] = metric(row, key)
@@ -249,7 +267,9 @@ def validate_native_metrics(rows, software, ime):
             if row.get("boundary") != "arm-to-submit":
                 raise RuntimeError(f"IME boundary is not arm-to-submit: {row}")
             limits.update(first_submit_ms=75, ready_submit_ms=300)
-        check_limits(row, values, limits, software)
+        check(row, values, limits)
+
+    return errors
 
 
 M2_PHASES = (
@@ -653,8 +673,82 @@ def validate_syntax_report(content, rows, software, sample, fixture):
         raise RuntimeError("coverage missing: input while prior syntax pending / completion verdict")
 
 
-def read_report(path, software, ime, m1=None, m2=False, split=None, sample=None, syntax=False, fixture=None):
+DISPLAY_PHASES = (
+    ["open"] + ["scroll"] * 30 + ["resize", "font"] + ["forced"] * 30
+    + ["idle", "click", "insert", "delete", "newline", "join", "burst-insert", "burst-delete"]
+)
+DISPLAY_DIAGNOSTIC_HEADER = "# mode=display-diagnostic; acceptance=false; stage_timeout_ms=2000"
+
+
+def diagnostic_findings(content):
+    return [(int(row), reason) for row, reason in re.findall(
+        r"^# budget_violation=row (\d+): (.+)$", content, re.MULTILINE)]
+
+
+def validate_display_diagnostic(content, rows, software):
+    if DISPLAY_DIAGNOSTIC_HEADER not in content.splitlines():
+        raise RuntimeError("missing display diagnostic identity")
+    if [row["phase"] for row in rows] != DISPLAY_PHASES:
+        raise RuntimeError("incomplete or reordered display diagnostic")
+    findings = diagnostic_findings(content)
+    counts = [0] * len(rows)
+    for index, reason in findings:
+        if not 1 <= index <= len(rows) or not reason.startswith(rows[index - 1]["phase"] + ":"):
+            raise RuntimeError("invalid diagnostic violation row")
+        counts[index - 1] += 1
+    for row, count in zip(rows, counts):
+        expected = "over-budget" if count else "ok"
+        if row.get("status") != expected:
+            raise RuntimeError("diagnostic status / violation mismatch")
+        errors = validate_native_metrics([row], software, False, diagnostic=True)
+        if errors and not count:
+            raise RuntimeError("diagnostic omitted budget failure")
+        if row["phase"] != "idle" and metric(row, "visible_rows") == 0:
+            raise RuntimeError("diagnostic missing body")
+    verdict = "not-applicable" if software else ("false" if findings else "true")
+    footer = f"# completed=true; budget_passed={verdict}; acceptance=false; budget_violation_count={len(findings)}; gpu_execution_ms=unmeasured; compositor_presentation_ms=unmeasured"
+    if footer not in content.splitlines():
+        raise RuntimeError("invalid diagnostic completion / budget verdict")
+
+
+def wait_display_diagnostic(process, lines):
+    deadline = time.monotonic() + 5
+    stage = 0
+    active = False
+    while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            label = DISPLAY_PHASES[stage] if stage < len(DISPLAY_PHASES) else "shutdown"
+            raise RuntimeError(f"STOP display diagnostic watchdog: {label}; keeping partial report and logs")
+        try:
+            line = lines.get(timeout=min(remaining, 0.1))
+        except queue.Empty:
+            if process.poll() is not None:
+                return process.returncode
+            continue
+        if line.startswith("STAGE "):
+            if active or stage >= len(DISPLAY_PHASES) or line != "STAGE " + DISPLAY_PHASES[stage]:
+                raise RuntimeError("invalid diagnostic stage progress")
+            active = True
+            deadline = time.monotonic() + 2
+        elif line.startswith("STAGE_DONE "):
+            if not active or line != "STAGE_DONE " + DISPLAY_PHASES[stage]:
+                raise RuntimeError("invalid diagnostic stage completion")
+            active = False
+            stage += 1
+            deadline = time.monotonic() + 2
+        elif line.startswith("STOP "):
+            return process.wait(timeout=2)
+
+
+def read_report(path, software, ime, m1=None, m2=False, split=None, sample=None, syntax=False, fixture=None, display_diagnostic=False):
     content = path.read_text()
+    if "# mode=display-diagnostic;" in content and not display_diagnostic:
+        raise RuntimeError("display diagnostic is not an acceptance report")
+    stops = [line.removeprefix("# stop_reason=") for line in content.splitlines()
+             if line.startswith("# stop_reason=")]
+    if stops:
+        raise RuntimeError(f"STOP: {stops[-1]}; partial report {path}")
     if "# completed=true;" not in content:
         raise RuntimeError(f"incomplete report {path}")
     renderer = "is_software_emulated: true" if software else "is_software_emulated: false"
@@ -662,6 +756,11 @@ def read_report(path, software, ime, m1=None, m2=False, split=None, sample=None,
         raise RuntimeError(f"unexpected renderer class in {path}")
     reader = csv.DictReader(line for line in content.splitlines() if not line.startswith("#"))
     rows = list(reader)
+    if display_diagnostic:
+        if ime or m1 is not None or m2 or split is not None or syntax:
+            raise RuntimeError("display diagnostic cannot use another workload")
+        validate_display_diagnostic(content, rows, software)
+        return rows
     if syntax:
         if reader.fieldnames != SYNTAX_FIELDS:
             raise RuntimeError("unexpected syntax report columns")
@@ -683,6 +782,8 @@ def read_report(path, software, ime, m1=None, m2=False, split=None, sample=None,
          "idle": 1, "click": 1, "insert": 1, "delete": 1, "newline": 1,
          "join": 1, "burst-insert": 1, "burst-delete": 1}
     )
+    if any(row.get("status", "ok") != "ok" for row in rows):
+        raise RuntimeError(f"failed stage in {path}")
     counts = {phase: sum(row["phase"] == phase for row in rows) for phase in expected}
     if counts != expected or len(rows) != sum(expected.values()):
         raise RuntimeError(f"wrong phase matrix in {path}: {counts}")
@@ -699,6 +800,8 @@ def run_probe(args, desktop, sample, run):
     stem = args.output / f"{sample}-{run}"
     report = stem.with_suffix(".csv")
     invocation = [str(args.binary), str(args.input), sample, str(report)]
+    if getattr(args, "display_diagnostic", False):
+        invocation.append("--display-diagnostic")
     if args.software:
         invocation.append("--allow-software")
     if args.ime:
@@ -719,7 +822,7 @@ def run_probe(args, desktop, sample, run):
     environment = os.environ.copy()
     token = uuid.uuid4().hex
     environment["SEMACS_PERF_TOKEN"] = token
-    if getattr(args, "syntax", False):
+    if getattr(args, "syntax", False) or getattr(args, "display_diagnostic", False):
         environment["XDG_CONFIG_HOME"] = str(args.output / "config")
     if args.software:
         environment["LIBGL_ALWAYS_SOFTWARE"] = "1"
@@ -741,7 +844,8 @@ def run_probe(args, desktop, sample, run):
         try:
             if args.ime:
                 drive_ime(process, desktop, lines, stem, token)
-            status = process.wait(timeout=args.duration_seconds + 120 if args.m1 else 150)
+            status = (wait_display_diagnostic(process, lines) if getattr(args, "display_diagnostic", False)
+                      else process.wait(timeout=args.duration_seconds + 120 if args.m1 else 150))
             if getattr(args, "m2_open_diagnostic", False):
                 diagnostic_rows = read_open_diagnostic(report, args.software, status == 0)
             if status != 0:
@@ -756,7 +860,8 @@ def run_probe(args, desktop, sample, run):
             pacing = (args.duration_seconds, args.interval_ms) if args.m1 else None
             rows = read_report(report, args.software, args.ime, pacing, getattr(args, "m2", False), getattr(args, "split", None), sample,
                                getattr(args, "syntax", False),
-                               getattr(args, "syntax_fixture", None) if getattr(args, "syntax", False) else None)
+                               getattr(args, "syntax_fixture", None) if getattr(args, "syntax", False) else None,
+                               display_diagnostic=getattr(args, "display_diagnostic", False))
             if getattr(args, "m2", False):
                 verify_m2_files(stem.with_suffix(".files"))
             return rows
@@ -785,6 +890,7 @@ def main():
     mode.add_argument("--m2-open-diagnostic", action="store_true", help="one mixed-file open only; buffered frame / slow-view diagnostic, NOT acceptance")
     mode.add_argument("--m2", action="store_true", help="M2 file / save / switch / completion / lifecycle baseline")
     mode.add_argument("--syntax", action="store_true", help="syntax-enabled Markdown/HTML input/draw baseline; layout and syntax ready are separate")
+    mode.add_argument("--display-diagnostic", action="store_true", help="one full mixed display workload; record budget failures and continue; NOT acceptance")
     mode.add_argument("--m1", action="store_true", help="M1 command chain + paced native sustained input; stop on first hardware budget failure")
     parser.add_argument("--duration-seconds", type=int, help="M1 sustained duration, 1..600; default 60")
     parser.add_argument("--interval-ms", type=int, help="M1 input cadence, 20..1000 ms; default 50")
@@ -798,6 +904,10 @@ def main():
         parser.error("--consent is required before opening desktop test windows")
     if args.runs < 1:
         parser.error("--runs must be positive")
+    if args.display_diagnostic:
+        if args.runs != 1 or args.sample not in (None, ["mixed"]):
+            parser.error("display diagnostic requires --runs 1 and only --sample mixed")
+        args.sample = ["mixed"]
     if args.m2_open_diagnostic:
         if args.runs != 1 or args.sample not in (None, ["mixed"]):
             parser.error("open diagnostic requires --runs 1 and only --sample mixed")
@@ -840,7 +950,7 @@ def main():
     args.output.mkdir(parents=True, exist_ok=False)
     digest = hashlib.sha256(args.input.read_bytes()).hexdigest()
     config = args.output / "config/semacs/init.js"
-    if args.syntax:
+    if args.syntax or args.display_diagnostic:
         config.parent.mkdir(parents=True)
         with config.open("xb") as file:
             file.write(b"")
@@ -851,10 +961,12 @@ def main():
         "syntax_batch_manifest_sha256": args.syntax_manifest_sha256,
         "syntax_batch_fixtures": args.syntax_batch if args.syntax else None,
         "syntax_fixture_bytes": args.input.stat().st_size if args.syntax else None,
-        "isolated_config_sha256": hashlib.sha256(b"").hexdigest() if args.syntax else None,
+        "isolated_config_sha256": hashlib.sha256(b"").hexdigest() if args.syntax or args.display_diagnostic else None,
         "all_view_ready_budget": "not-established" if args.split else None,
         "m2_open_diagnostic": args.m2_open_diagnostic,
-        "acceptance": not (args.m2_open_diagnostic or args.split or args.syntax),
+        "display_diagnostic": args.display_diagnostic,
+        "stage_timeout_ms": 2000 if args.display_diagnostic else None,
+        "acceptance": not (args.m2_open_diagnostic or args.split or args.syntax or args.display_diagnostic),
         "measurement_scope": "selected-view-budgets-and-all-view-baseline" if args.split else None,
         "duration_seconds": args.duration_seconds,
         "interval_ms": args.interval_ms, "runs": args.runs, "samples": args.sample or list(SAMPLES),
@@ -882,6 +994,11 @@ def main():
                         raise RuntimeError("syntax fixture changed; refusing subsequent probes")
                     if config.is_symlink() or config.read_bytes() != b"":
                         raise RuntimeError("isolated syntax configuration changed; refusing subsequent probes")
+                if args.display_diagnostic:
+                    content = (args.output / f"{sample}-{run}.csv").read_text()
+                    metadata["budget_violations"] = diagnostic_findings(content)
+                    metadata["budget_passed"] = ("not-applicable" if args.software else
+                                                 not metadata["budget_violations"])
                 if args.m2 and not args.m2_open_diagnostic:
                     metadata.setdefault("m2_coverage", []).append({
                         "sample": sample, "run": run,
@@ -910,7 +1027,8 @@ def main():
                     ):
                         if row.get(key):
                             values.setdefault((sample, row["phase"], key), []).append(float(row[key]))
-                print(f"{sample} {run}/{args.runs}: complete", flush=True)
+                label = "diagnostic complete (not acceptance)" if args.display_diagnostic else "complete"
+                print(f"{sample} {run}/{args.runs}: {label}", flush=True)
         metadata["completed"] = True
     except Exception as error:
         metadata["error"] = str(error)
@@ -926,6 +1044,15 @@ def main():
                 verify_syntax_batch(args.input.parent, args.syntax_manifest_sha256)
                 if config.is_symlink() or config.read_bytes() != b"":
                     raise RuntimeError("isolated syntax configuration changed")
+            if args.display_diagnostic:
+                if config.is_symlink() or config.read_bytes() != b"":
+                    raise RuntimeError("isolated display diagnostic configuration changed")
+                partial = args.output / "mixed-1.csv"
+                if partial.exists():
+                    metadata["budget_violations"] = diagnostic_findings(partial.read_text())
+                if not metadata["completed"]:
+                    metadata["budget_passed"] = (False if metadata.get("budget_violations") and not args.software
+                                                 else "unmeasured")
             metadata["restored"] = desktop is not None
         except Exception as error:
             metadata["completed"] = False

@@ -27,11 +27,13 @@ use crate::theme::StyleRole;
 pub(crate) struct Span {
     pub range: Range<usize>,
     pub style: StyleRole,
+    pub modifiers: smallvec::SmallVec<[StyleRole; 3]>,
 }
 
 pub(crate) struct Highlights {
     pub snapshot: SnapshotId,
     spans: Vec<Span>,
+    role_mask: u32,
 }
 
 impl Highlights {
@@ -45,6 +47,7 @@ impl Highlights {
             .map(move |span| Span {
                 range: span.range.start.max(range.start)..span.range.end.min(range.end),
                 style: span.style,
+                modifiers: span.modifiers.clone(),
             })
     }
 }
@@ -90,7 +93,7 @@ impl Drop for Work {
 }
 
 // Cancellation may drop queued inputs or completed task outputs on the caller's thread.
-struct BackgroundOwned<T: Send + 'static> {
+pub(crate) struct BackgroundOwned<T: Send + 'static> {
     value: Option<T>,
     executor: BackgroundExecutor,
 }
@@ -128,12 +131,14 @@ impl<T: Send + 'static> Drop for BackgroundOwned<T> {
     }
 }
 
+pub(crate) type DisplayHighlightSnapshot = Arc<BackgroundOwned<DisplayHighlights>>;
+
 struct State {
     language: Option<LanguageId>,
     generation: u64,
     latest: BufferSnapshot,
     base: Option<BackgroundOwned<Parsed>>,
-    display: Option<BackgroundOwned<Arc<DisplayHighlights>>>,
+    display: Option<DisplayHighlightSnapshot>,
     pending: Option<Change>,
     work: Option<Work>,
     failed: Option<SnapshotId>,
@@ -178,10 +183,10 @@ impl Syntax {
     pub fn edited(&self, snapshot: BufferSnapshot, old: Range<usize>, new_end: usize) {
         let mut state = self.0.borrow_mut();
         if let Some(display) = state.display.take() {
-            state.display = Some(BackgroundOwned::new(
-                Arc::new(display.edited(snapshot.id(), old.clone(), new_end)),
+            state.display = Some(Arc::new(BackgroundOwned::new(
+                display.edited(snapshot.id(), old.clone(), new_end),
                 display.executor.clone(),
-            ));
+            )));
         }
         state.latest = snapshot;
         if state.language.is_some() {
@@ -205,12 +210,8 @@ impl Syntax {
             .map(|base| base.highlights.clone())
     }
 
-    pub fn display_highlights(&self) -> Option<Arc<DisplayHighlights>> {
-        self.0
-            .borrow()
-            .display
-            .as_ref()
-            .map(|display| Arc::clone(display))
+    pub fn display_highlights(&self) -> Option<DisplayHighlightSnapshot> {
+        self.0.borrow().display.as_ref().cloned()
     }
 
     pub fn ready(&self) -> bool {
@@ -284,13 +285,13 @@ fn start(shared: &Rc<RefCell<State>>, cx: &mut App) {
                 match result {
                     Ok(parsed) => {
                         if state.latest.id() == id {
-                            state.display = Some(BackgroundOwned::new(
-                                Arc::new(DisplayHighlights::new(
+                            state.display = Some(Arc::new(BackgroundOwned::new(
+                                DisplayHighlights::new(
                                     parsed.highlights.clone(),
                                     parsed.snapshot.text().len(),
-                                )),
+                                ),
                                 parsed.executor.clone(),
-                            ));
+                            )));
                         }
                         state.base = Some(parsed);
                     }

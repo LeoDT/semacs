@@ -559,7 +559,7 @@ pub fn run(input: PathBuf, sample: String, text: String, report: PathBuf, allow_
             let specs = window.gpu_specs().expect("renderer identity required");
             assert!(allow_software || !specs.is_software_emulated, "hardware GPU required");
             writeln!(output, "# mode=syntax; sample={sample}; release={}; fixture_bytes={}; input_offset={offset}; graphics={specs:?}", !cfg!(debug_assertions), text.len()).unwrap();
-            writeln!(output, "# monospace 16px/24px; 960x640 requested, actual body sizes below; soft wrap enabled; synthetic GPUI input, NOT OS keys or IME; CPU submission NOT screen presentation").unwrap();
+            writeln!(output, "# Lilex 16px/24px; 960x640 requested, actual body sizes below; soft wrap enabled; synthetic GPUI input, NOT OS keys or IME; CPU submission NOT screen presentation").unwrap();
             writeln!(output, "phase,step,bytes,point,target_buffer,target_version,painted_buffer,painted_version,syntax_buffer,syntax_version,syntax_pending_before_action,syntax_pending_frames,first_frame_submit_ms,first_submit_ms,ready_submit_ms,syntax_and_layout_submit_ms,action_cpu_ms,draw_cpu_max_ms,frames,missing_observations,blank_frames,idle_ticks,visible_rows,indexed_bytes,width_px,height_px,first_visible_rows,text_verified,syntax_status,observed_elapsed_ms").unwrap();
             output.flush().unwrap();
             let mut steps = phases();

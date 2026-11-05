@@ -10,16 +10,16 @@ import subprocess
 import sys
 
 CONFIGURATIONS = {
-    "initial": b"""semacs.setFont({family: "monospace", size: 24});
+    "initial": b"""semacs.setFont({size: 24});
 semacs.registerCommand("smoke-uppercase-region", text => text.toUpperCase());
 semacs.bindKey("ctrl-c u", "smoke-uppercase-region");
 semacs.bindKey("ctrl-c U", "smoke-uppercase-region");
 """,
-    "reloaded": b"""semacs.setFont({family: "monospace", size: 32});
+    "reloaded": b"""semacs.setFont({size: 32});
 semacs.registerCommand("smoke-lowercase-region", text => text.toLowerCase());
 semacs.bindKey("ctrl-c l", "smoke-lowercase-region");
 """,
-    "invalid": b"""semacs.setFont({family: "monospace", size: 40});
+    "invalid": b"""semacs.setFont({size: 40});
 semacs.bindKey("ctrl-c l", null);
 throw new Error("intentional scripting smoke configuration failure");
 """,
