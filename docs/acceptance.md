@@ -1,6 +1,6 @@
 # 验收流程
 
-本文维护验证范围的选择、本地 / 宿主分工、可执行入口与安全规则。行为见 [保真度契约](emacs-fidelity.md)，预算与指标见 [性能预算](performance.md)，当前工作从 [计划](plan.md) 查阅，历史结论见 [阶段归档](archive/completed-through-f1.md)和 [冻结记录索引](records/README.md)，不在本文逐阶段累积覆盖清单或批次结论。
+本文维护验证范围的选择、本地 / 宿主分工、可执行入口与安全规则。行为见 [保真度契约](emacs-fidelity.md)，预算与指标见 [性能预算](performance.md)，当前工作从 [计划](plan.md) 查阅，历史结论见 [R0–F1 归档](archive/completed-through-f1.md)、[F2 归档](archive/f2-status.md)和 [冻结记录索引](records/README.md)，不在本文逐阶段累积覆盖清单或批次结论。
 
 ## 宿主验证的适用条件
 
@@ -35,7 +35,7 @@
 | 影响范围 | 离线检查 |
 |---|---|
 | profiler / 性能驱动 | `cargo test --all-targets --features native-profiler`、对应 feature 的 Clippy，以及 `python3 -B -m unittest discover -s tests -p 'test_*.py'` |
-| 人工 fixture / 字节核对工具 | `python3 -B -m unittest discover -s scripts -p 'test_m2_manual.py' -v`；Magit profile 另跑 `python3 -B -m unittest discover -s scripts -p 'test_magit_fixture.py' -v` |
+| 人工 fixture / 字节核对工具 | `python3 -B -m unittest discover -s scripts -p 'test_m2_manual.py' -v`；Magit profile 另跑 `python3 -B -m unittest discover -s scripts -p 'test_magit_fixture.py' -v`；F2 单窗口入口另跑 `python3 -B -m unittest discover -s scripts -p 'test_magit_status_manual.py' -v` |
 | 脚本配置冒烟驱动 | `python3 -B -m unittest discover -s scripts -p 'test_scripting_manual.py' -v` |
 | split IME 驱动 | `python3 -B -m unittest discover -s scripts -p 'test_split_ime.py' -v`，不访问桌面 |
 | fish 入口 | `fish --no-execute scripts/acceptance.fish` |
@@ -56,6 +56,7 @@ RUNS=3 target/release/examples/perf_m1 .pi/tmp/NEW-sample.txt
 
 | 入口 | 范围与解释 |
 |---|---|
+| `python3 -B scripts/perf_status.py .pi/tmp/NEW-status-perf` | release `perf_status`，64 / 4096 条隔离清单各三轮；原生 status / 刷新、随包 JS `s` / `u`、折叠导航及双 view，独立正文 / 可见行 / 完整 index oracle；只记 headless 基线，不测桌面、原生 idle 或预算通过 |
 | `python3 -B scripts/perf_diff.py .pi/tmp/NEW-diff-perf` | 构建 profiler release `perf_diff`，真实 Git patch 约 256 KiB / 2 MiB，各三轮 staged / unstaged 的 headless 专项；独立正文 / 折叠投影 oracle、同场景双 view 与分段基线，不测原生 idle |
 | `perf_view` / `perf_m1` | 基础布局 / 绘制与命令输入；M1 未等待输入段的 ready 只是末键恢复，不是逐键 ready 或原生持续输入 |
 | `RUNS=3 target/release/examples/perf_split .pi/tmp/NEW-sample.txt` | 共享 buffer 双 view；聚合 ready 与选中 view 分开记录，不给聚合擅加旧单 view 门限 |
@@ -94,10 +95,15 @@ fish scripts/acceptance.fish MODE NEW_OUTPUT_DIRECTORY --consent
 | `syntax-perf` | Markdown（含 HTML→JS/CSS）/ HTML 各约 256 KiB、各三轮原生 CPU 输入 / 绘制；布局与语法 ready 分开记录，不外推大文件全矩阵 |
 | `diff-perf` / `diff-diagnostic` | F1 diff 原生 CPU / 提交专项，约 256 KiB patch 三轮，每轮一个窗口及内部左右分屏；前者超限即停，后者显式完整诊断、记录性能超限后继续，见 [专项说明](acceptance/profiles.md#f1-diff-专项性能) |
 | `magit` | 一个窗口，隔离配置与临时 Git 仓库；四组 diff 显示 / 折叠导航、分屏刷新、长行水平查看、旧侧 / index / worktree 访问，见 [fixture 说明](../scripts/magit_fixture.py) |
+| `magit-status` | 一个窗口及内部分屏，独立空配置和临时仓库；status 可读性 / 焦点、默认 `s` / `u` 与 diff `[stale]`，每组后独立核对完整 index，见 [F2 定向流程](acceptance/profiles.md#f2-最小定向验证) |
 | `styles` | 一个窗口，隔离 rich / plain 主题下的 Rust / Markdown 字体、装饰、背景与换行，用户手动做两处 IME 取消 / 提交；四组观察及独立字节核对 |
 | `styles-perf` | mixed 约 8 MiB 三轮，再 Markdown 约 256 KiB 三轮；至多六个顺序窗口，复用原生 CPU 驱动，不展开全矩阵 |
 
-人工模式先读终端提示；`scripting` / `messages` / `themes` / `syntax` / `flicker` / `magit` 使用英文输入，不自动注键、不改变 IME、不截图，不测原生性能。`languages` / `styles` 由用户在指定两处手动使用日常中文输入法；脚本不注键、不切换输入法、不截图，其 IME 结论来自用户观察及保存字节，不是自动状态断言或时延测量。详细键序列只在驱动中维护，不在本文再复制。不要直接照抄历史批次目录名。
+人工模式先读终端提示；`scripting` / `messages` / `themes` / `syntax` / `flicker` / `magit` / `magit-status` 使用英文输入，不自动注键、不改变 IME、不截图，不测原生性能。`languages` / `styles` 由用户在指定两处手动使用日常中文输入法；脚本不注键、不切换输入法、不截图，其 IME 结论来自用户观察及保存字节，不是自动状态断言或时延测量。详细键序列只在驱动中维护，不在本文再复制。不要直接照抄历史批次目录名。
+
+### F2 最小定向验证
+
+`magit-status` 的授权范围、阶段性 index 检查与停止规则见 [F2 定向流程](acceptance/profiles.md#f2-最小定向验证)。
 
 ### F1 最小定向验证
 

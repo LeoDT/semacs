@@ -3,10 +3,11 @@ use crate::diff::{Comparison, Diff, DiffNavigation, RenderedDiff, Visit};
 use std::sync::Arc;
 
 pub(super) struct DiffSession {
-    comparison: Comparison,
+    pub(super) comparison: Comparison,
     request: u64,
     data: Option<Arc<Diff>>,
     rendered: Option<DiffNavigation>,
+    pub(super) stale: bool,
 }
 
 impl Buffer {
@@ -14,7 +15,7 @@ impl Buffer {
         let mut buffer = Self::named(&format!(
             "*magit-diff {}: {}*",
             comparison.kind.name(),
-            comparison.root.to_string_lossy().escape_debug()
+            comparison.repository.root.to_string_lossy().escape_debug()
         ));
         buffer.set_mode(crate::mode::ModeId::MAGIT_DIFF);
         {
@@ -25,6 +26,7 @@ impl Buffer {
                 request: 0,
                 data: None,
                 rendered: None,
+                stale: false,
             });
         }
         buffer
@@ -67,71 +69,19 @@ impl Buffer {
         &mut self,
         request: u64,
         data: Diff,
-        mut rendered: RenderedDiff,
+        rendered: RenderedDiff,
     ) -> Result<bool, String> {
         if !self.document.borrow().diff.as_ref().is_some_and(|session| {
             session.request == request && session.comparison == data.comparison
         }) {
             return Ok(false);
         }
-        let old = self.sections();
-        if let Some(old) = &old {
-            rendered.sections.restore(old);
-        }
-        let anchors: Vec<_> = self
-            .document
-            .borrow()
-            .points
-            .iter()
-            .filter_map(|point| point.upgrade())
-            .map(|point| {
-                let anchor = old
-                    .as_ref()
-                    .map(|sections| sections.anchor(&self.text(), ByteOffset(point.get())));
-                (point, anchor)
-            })
-            .collect();
-        self.apply_validated_edit(Edit {
-            snapshot: self.snapshot_id(),
-            range: ByteOffset(0)..ByteOffset(self.text().len()),
-            text: &rendered.text,
-            source: EditSource::Command,
-        });
+        self.install_projection(&rendered.text, rendered.sections, rendered.styles);
         let mut doc = self.document.borrow_mut();
-        for (point, anchor) in anchors {
-            point.set(anchor.map_or(0, |anchor| {
-                rendered.sections.resolve(&doc.snapshot.text, &anchor).0
-            }));
-        }
-        doc.modified = false;
-        doc.history = Default::default();
-        doc.sections = Some(Arc::new(rendered.sections));
-        doc.named_styles = rendered.styles.into();
         doc.diff.as_mut().unwrap().data = Some(Arc::new(data));
         doc.diff.as_mut().unwrap().rendered = Some(rendered.navigation);
+        doc.diff.as_mut().unwrap().stale = false;
         Ok(true)
-    }
-
-    pub(crate) fn toggle_section(&mut self) -> Result<(), String> {
-        let point = self.point();
-        let mut doc = self.document.borrow_mut();
-        let sections = doc.sections.as_mut().ok_or("No sections in this buffer")?;
-        let sections = Arc::make_mut(sections);
-        sections.toggle(sections.current(point))?;
-        let sections = doc.sections.as_ref().unwrap().clone();
-        for point in doc.points.iter().filter_map(|point| point.upgrade()) {
-            point.set(sections.collapse_point(ByteOffset(point.get())).0);
-        }
-        doc.touch();
-        Ok(())
-    }
-
-    pub(crate) fn reveal_section(&mut self, point: ByteOffset) {
-        let mut doc = self.document.borrow_mut();
-        if let Some(sections) = &mut doc.sections {
-            Arc::make_mut(sections).reveal(point);
-            doc.touch();
-        }
     }
 
     pub(crate) fn diff_visit(&self) -> Result<Visit, String> {

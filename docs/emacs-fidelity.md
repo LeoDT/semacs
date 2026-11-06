@@ -295,4 +295,38 @@
 - `RET` / `C-m` 在删除行访问旧侧，在新增 / 上下文行访问新侧并定位；heading 使用对应侧起始行。HEAD / index 使用本次 diff 的完整 blob 身份打开只读快照，不重解释为当前 index 或 worktree；unstaged 新侧复用普通文件 buffer，保留其未保存文本，行列超界时夹紧。不提供 C-RET 的跨版本行号映射。
 - Git 在后台以参数数组执行，关闭外部 diff / textconv，不运行 Git 写命令。每窗口最多一个 Git 读取，无请求队列；单次子进程 15 秒，stdout 16 MiB、stderr 64 KiB，diff 最多 4096 个文件 / 100000 行 patch，超限明确失败。禁止按需自动抓取缺失 blob；固定 worktree / git-dir，刷新不能意外回落到父仓库。刷新失败保留旧内容；结果校验目标及请求身份，不按完成时焦点重新定向。打开 / 版本访问期间焦点目标变化或进入读入会话时不抢回界面。
 
-首版不包含 status、transient、Git 写操作、任意 revision / range、patch 导入、untracked 浏览、结构化 / 部分 hunk 选择、词级差异、hunk 语法、递归折叠全套、兄弟导航、搜索自动展开、diff 参数修改或窗口恢复式 q；后续范围以计划为准。
+F1 不包含 status、transient、Git 写操作、任意 revision / range、patch 导入、untracked 浏览、结构化 / 部分 hunk 选择、词级差异、hunk 语法、递归折叠全套、兄弟导航、搜索自动展开、diff 参数修改或窗口恢复式 q；新增窄写入切片见下节。
+
+## 阶段 F2：status 与单文件 index 操作
+
+本节定义 F2 的产品行为；阶段 D / F1 的历史边界不变。当前工作见[计划](plan.md)，交付结论与证据边界见 [F2 归档](archive/f2-status.md)。
+
+F2 仅提供 status 与单文件整文件级 index 操作，不包含 hunk / 批量、discard、commit、冲突解决或 transient；不开放任意 Git / 进程 API、异步脚本或持久化 Job。
+
+### Status 与投影
+
+- `M-x magit-status` 打开只读生成 buffer，无新增全局绑定、不自动 split / 保存文件。普通文件从所在目录发现仓库，无文件路径时用窗口启动目录；status / diff 沿用固定仓库。规范化的完整 `(worktree root, git-dir)` 标识仓库，linked worktree 独立；同窗口复用唯一 status，bare 拒绝、固定目标失效不回落父仓库，不识别整体替换路径的历史身份。
+- 头部显示转义 worktree 路径、分支和完整 HEAD OID，明确 detached / unborn；不查询 commit message、upstream 或 remote。固定依次显示 `Untracked files`、`Unstaged changes`、`Staged changes`、`Unmerged paths` 和条目数量（空组仍显示）。未跟踪目录用 Git normal 粒度，不递归展开；两侧变化可重复列项，冲突单列。保留记录顺序和原始路径，显示 XY、rename 旧 → 新及 submodule 状态；非法 UTF-8 按字节转义，不以显示文本充当身份。
+- 组默认展开、文件为无正文叶节点，root 不可折叠，叶节点 TAB / C-i 无操作；section 导航、可见行翻页、水平查看和当前 section 样式复用 F1，长行不软换行。折叠共享，point / scroll 各 view 独立；刷新按组、路径及父链恢复，rename 旧节点消失，无匹配回退最近存活祖先。reload 不重建投影。
+- 确认仓库后、读取前在主线程绑定既有 buffer / 会话或新建意图；目标失效或新建冲突时丢弃，不在完成时重查并复活会话。打开还绑定发起 pane / buffer / 输入会话，目标变化、读入或 IME 时不抢焦点、不更新已有 status。`g` / `magit-refresh` 按当前 status 或 diff 类型刷新，按会话 / 请求号安装，无需仍选中，不切焦点；读取失败保留旧内容，不冒充 clean。
+- status 中的 staged / unstaged diff 命令查看整个固定仓库比较，不隐式按 point 过滤；F1 diff 不能 stage / unstage。status 不增加 RET 文件访问、`j`、窗口恢复式 `q` 或内嵌 hunk。
+- 关闭 view 不杀 buffer，kill 禁止迟到投影。status 另存成功后解除会话、section、mode 和只读限制，成为普通文件；保存失败不脱离。保存 V1 期间若已刷新到 V2，成功后磁盘为 V1、内存保留 V2 且 modified；若另存成功在先，迟到刷新拒绝安装。
+
+### 单文件写入与脚本
+
+- 随包 JS 在同一 registry / 运行时声明 `magit-stage` / `magit-unstage`，status 默认 `s` / `u`，可重新绑定或禁用，不可重名覆盖。空配置和配置失败回退均有真实 handler；运行时故障报告写入不可用，不绕过 JS，原生 status / diff / 刷新仍可用。
+- 仅操作 status 的一个可见文件叶节点，捕获组、原始路径、仓库、会话及投影版本；heading、目录、活动非空 region、批量或 diff 均拒绝。支持普通文件新增、修改（含 binary / executable bit）、删除、两侧变更及 unborn 的新增；stage 仅在 Untracked / Unstaged，unstage 仅在 Staged。rename / copy、symlink / 类型变化、submodule、冲突、sparse checkout / index、intent-to-add / skip-worktree / assume-unchanged 等特殊标记只显示且拒绝，不能用底层路径绕过。
+- stage 使用执行时磁盘内容和 Git 内建规范化，不自动保存 buffer，明确提示磁盘语义；unstage 只将该 index 路径恢复到预检固定的完整 HEAD OID，HEAD 无此路径 / unborn 时仅移除 index 条目，不改 worktree / HEAD / 引用。二者可能丢失仅存在于 index 的中间版本，常规操作不逐次确认，无自动 undo / 备份 / 回滚，不自动重试。
+- JS 通过同步、有界、冻结上下文返回至多一个类型化领域请求（status 打开 / 刷新、staged / unstaged diff 打开、stage、unstage），不接收任意路径、args、命令名或可伪造目标。能力布尔值不是授权；核心接受前复核命令代次、原目标、point / region、投影、会话及输入屏障，不能在返回时按新 point 选择。异常、超时、非法返回或 pending jobs 不接受任何操作；无 Promise、执行期 host-call 或完成回调。
+- 执行前复核状态记录、HEAD / index 身份与路径类型，变化则拒绝并要求刷新；XY 不保证磁盘字节未变。拒绝目录扩大、路径穿越、pathspec magic 或越界父符号链接，使用原始路径、参数数组及 literal pathspec。遵守正常 index 锁，不删锁、不强抢，不承诺与外部 Git 的跨进程事务，也不通过覆盖整个 index 回滚。
+- 过滤器筛查须先于任何可能触发 clean 的比较（含初次 status）；允许对已初始化子模块执行只读安全预检以及 Git 自身的 status 子进程，不展开递归清单、不写入子模块。发现参与比较的路径需要外部 clean / process filter 时，拒绝整次 status 读取；写入目标同样拒绝，不能静默禁用转换后产生错误状态或暂存错误字节。禁用 hook、外部 diff / textconv、fsmonitor、lazy fetch，不调用 shell；拒绝替代 index / 对象库的环境覆盖，不修改配置。这些限制不是不可信仓库沙箱。
+
+### 操作所有权、结果与退出
+
+- 每窗口一个 Git 操作槽，无队列，读取、写入及写后核对全程互斥；忙则拒绝。核心接受的写操作不属于 JS continuation、buffer 或 view；成功 reload 先发生则拒绝旧代返回，已接受写入则跨 reload / 关闭 view / kill / 另存继续，终态不依赖旧回调。
+- 结果区分未执行、成功、执行失败及结果不确定；非零退出不保证无副作用，启动后的超时 / 强杀 / wait 错误不冒充未执行或回滚，不自动重放。写进程终态后有界重读核对，最终状态不能反证不确定请求已成功；写入与刷新分别报告，写成功读失败明确报告“写入成功，刷新失败”。
+- 写进程一旦启动，或预检发现仓库变化，status / 同仓库 diff 标记过时；过时 status 禁止再写，新读取安装后才解除。只自动更新仍存活的原 status 会话；新建 / 脱离会话不自动安装，不切焦点。其他 diff 保留快照及过时标识，手动刷新。
+- 操作结果在核心及窗口消息历史保留，不因关闭 status 丢失；进程内最多保留 64 条已完成记录，活动记录不淘汰，各最多 64 KiB 诊断并明确截断。没有新增通用 Job / JS 查询 / 任务面板 / 持久化。
+- 首版没有取消写入 API。正常窗口 / 应用退出异步等待活动写入终态和有界核对；结果不确定须报告并确认退出，再走原有 dirty / 退出流程。子进程仍受安全时限约束，终止按不确定处理；不托管退出后进程，不承诺崩溃 / 强杀后的结果保留，重启只查询、不重放。
+- JS 沿用阶段 D 的时间 / 内存 / 栈限制；每子进程 15 秒、stdout 16 MiB、stderr 64 KiB，写后核对同样受限；这不是含发现 / 预检 / 写入 / 核对的全操作 15 秒保证。status / 写入端到端仅记基线，适用的绘制 / 滚动 / idle 预算不变，真实环境验证另行授权。
+- status 只读预检全操作累计 index 元数据最多 16 MiB、最多 4096 个仓库，单次属性 / 配置输出沿用子进程上限，超限拒绝读取。模型最多 4096 条文件记录（头部不计，一条可投影两组）、生成正文最多 16 MiB UTF-8，超限整次失败不截断清单；未知可选 porcelain 头部可忽略，未知记录类型、非法字段 / 路径及缺失 NUL 终止符失败。

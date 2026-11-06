@@ -64,6 +64,8 @@
 
 F1 diff 专项同样先作基线：打开、折叠 / 展开、导航、刷新、split 及同场景双 view ready 没有新增数值门限，不套普通正文冷打开 / ready 或单键门限。原生实际覆盖的 CPU draw、垂直滚动首次提交与 idle 沿用既有对应预算。`first_ms` 从最终确认 / 动作分发开始，到目标正文及折叠投影兼容的首次观测；headless 在 draw 后采样，原生取 journal 中经同帧 paint 验证的 CPU 提交终点。`selected_ready_ms` / `all_ready_ms` 分别要求选中 view / 同一场景所有 view 的当前完整索引与可见 shaping 就绪。Git / 解析 / 生成 / 安装和 section spans 是独立诊断区间，不相加推算端到端；磁盘缓存不受控，首次仓库发现与复用 comparison 的打开不可直接等同。显式 diff 完整诊断也覆盖 setup：draw >16 ms、滚动首次提交 >4 ms、idle 产生 draw 均如实标记超限后继续，不以跳过 setup 帧或调宽门限换取通过；idle 即使实际 draw 也不据此填入动作时延。逐帧分段及 CPU 提交仍不代表 GPU / 实际呈现。
 
+F2 status / 单文件写入端到端同样先作基线，不套普通正文 300 ms 或 JS 资源时限；原生绘制 / 滚动 / idle 的适用预算不变。headless `perf_status` 从最终确认或默认键分发开始，到 `run_until_parked` 后显式 draw 观察到目标投影，分别记录选中 / 全部 view 的完整就绪；测试调度器可能合并多个后台完成及 paint，因此首次观测和 ready 相同不证明原生逐帧时序。命令输入 / point 准备在计时外；显式 `probe_draw_max_ms` 不包含调度器内部 paint，不能当作全部 draw 的最大值或用于原生 draw 预算。文件缓存不受控，headless 结果不代替平台字体 / GPU / 实际呈现。
+
 ## 测量入口
 
 本地检查、headless 命令、用户运行 fish 的宿主分工及失败停止规则统一见 [验收流程](acceptance.md)。入口、参数和样本以 `examples/perf_*.rs`、`scripts/perf_native.py`、`scripts/perf_sample.py` 及 `examples/support/samples.rs` 为准。

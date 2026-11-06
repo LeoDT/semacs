@@ -115,6 +115,8 @@ Rust 负责权威状态、基础机制和性能保证，脚本负责策略、命
 - JavaScript 同时承担用户配置与扩展，运行时采用 rquickjs。配置执行后形成经过 Rust 校验的设置和 keymap；按键查找、布局和绘制读取已生效数据，不反复执行配置脚本。原生命令绑定保留直接执行路径。
 - 稳定脚本接口前先明确 buffer / view 所有权和多 view 输入边界；接口随实际功能逐步增加，不提前建设所有未来扩展原语。
 
+F2 的同步 workflow 仅返回类型化领域请求，由核心复核接受并持有操作、结果与后续投影；已接受的 Git 写入不依赖脚本回调、配置代次或目标 buffer 存活。它不是任意进程 API，也不作为通用 Job / 持久化框架的承诺，具体行为见 [F2 契约](emacs-fidelity.md#阶段-f2status-与单文件-index-操作)。
+
 配置热重载的难点是副作用的归属与清理，而不是配置对象的嵌套深度。设置 / 键位重载与任意模块、事件订阅、后台任务的卸载应分开设计；本决策不承诺任意脚本可完整热重载。配置重载范围与失败语义见[阶段 D 契约](emacs-fidelity.md#阶段-djs-配置与文本变换)。
 
 ## D27 内置语言与通用语法机制
@@ -129,6 +131,6 @@ Markdown 块级、行内和围栏，以及 HTML script / style 使用同一受�
 
 交互 mode 身份属于共享 buffer，独立于 tree-sitter 语言；命令执行所有者与适用上下文分离。mode 局部键位在配置阶段校验 / 合成，沿用统一命令注册和已有分层查找，运行时输入不调用 JS 判断 mode。身份采用可扩展的命名注册来源，不以封闭 Rust 枚举承诺未来扩展边界；当前不开放 JS mode 注册 / hook / 生命周期。mode 不限于特殊文本查看，也可承载语言编辑策略；JS 应能在受控查询 / 编辑等真实原语具备后实现轻量语言 mode，按实际需求递增 API，不预建完整插件体系。
 
-结构化生成内容仍使用原有 buffer / view / split。buffer 拥有 section 树、可见性和比较会话，view 保留 point / 滚动；显示索引映射真实可见行，不删改正文模拟折叠，也不另建平行 DiffWidget。diff 模型及 Git 行为集中于其模块，通用输入 / 绘制消费 section 与命名样式原语。Git 读取绑定明确 worktree 与 git-dir，刷新不得向父仓库重新发现目标；blob 访问使用完整内容身份。行为见 [F1 契约](emacs-fidelity.md#阶段-f1mode-与只读-magit-diff)。
+结构化生成内容仍使用原有 buffer / view / split。buffer 拥有 section 树、可见性和比较会话，view 保留 point / 滚动；显示索引映射真实可见行，不删改正文模拟折叠，也不另建平行 DiffWidget。diff 模型及 Git 行为集中于其模块，通用输入 / 绘制消费 section 与命名样式原语。Git 读取绑定明确 worktree 与 git-dir，刷新不得向父仓库重新发现目标；blob 访问使用完整内容身份。diff 行为见 [F1 契约](emacs-fidelity.md#阶段-f1mode-与只读-magit-diff)，status 及窄 index 操作见 [F2 契约](emacs-fidelity.md#阶段-f2status-与单文件-index-操作)。
 
 待确认或延期的工作统一在 [实施计划](plan.md) 维护，不在技术决策中另列待办；决策变更与文档维护遵循 [文档规则](README.md#维护规则)。

@@ -29,15 +29,30 @@ fn git(root: &Path, args: &[&str]) -> String {
     String::from_utf8(output.stdout).unwrap()
 }
 
+fn unique_path(timestamp: u128) -> PathBuf {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+    let id = NEXT
+        .try_update(Ordering::Relaxed, Ordering::Relaxed, |id| id.checked_add(1))
+        .expect("diff fixture identity exhausted");
+    Path::new(env!("CARGO_MANIFEST_DIR")).join(format!(
+        ".pi/tmp/diff-tool-test-{}-{timestamp}-{id}",
+        std::process::id()
+    ))
+}
+
+#[test]
+fn fixture_names_are_unique_even_when_the_clock_does_not_advance() {
+    assert_ne!(unique_path(0), unique_path(0));
+}
+
 pub fn create() -> PathBuf {
-    let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join(format!(
-        ".pi/tmp/diff-tool-test-{}-{}",
-        std::process::id(),
+    let fixture = unique_path(
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
-            .as_nanos()
-    ));
+            .as_nanos(),
+    );
     std::fs::create_dir(&fixture).unwrap();
     let fixture = fixture.canonicalize().unwrap();
     let repo = fixture.join("repo");

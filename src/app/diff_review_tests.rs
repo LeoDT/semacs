@@ -26,7 +26,16 @@ fn switching_comparison_cannot_rediscover_a_parent_repository(cx: &mut TestAppCo
     visual.read(|cx| {
         assert_eq!(shell.read(cx).active_view(), &origin);
         assert_eq!(origin.read(cx).buffer().text().to_string(), text);
-        assert_eq!(origin.read(cx).buffer().comparison().unwrap().root, child.0);
+        assert_eq!(
+            origin
+                .read(cx)
+                .buffer()
+                .comparison()
+                .unwrap()
+                .repository
+                .root,
+            child.0
+        );
         assert!(origin.read(cx).message().unwrap().contains("Git failed"));
     });
 }

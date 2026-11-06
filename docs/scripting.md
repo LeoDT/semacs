@@ -1,6 +1,6 @@
 # JS 配置
 
-行为契约见[阶段 D](emacs-fidelity.md#阶段-djs-配置与文本变换)。此处说明配置入口和 API，不记录实现 / 验收进度。
+行为契约见[阶段 D](emacs-fidelity.md#阶段-djs-配置与文本变换)及 [F2](emacs-fidelity.md#阶段-f2status-与单文件-index-操作)。此处说明配置入口和 API，不记录实现 / 验收进度。
 
 ## 配置入口
 
@@ -68,9 +68,43 @@ semacs.setStyle("syntax.comment", { italic: true });
 
 命令从 `M-x` 或自定义键位调用；读取活动 region，不获得 buffer、view、point 的可变引用，也不能直接调用原生命令或发起 I/O。必须返回字符串，不能返回 Promise。错误只显示诊断，不提交部分替换。
 
+### `semacs.registerWorkflowCommand(name, { modes?, run })`
+
+声明同步领域工作流，不改变文本变换接口。命名、重名检查、`M-x`、键位及 worker 与文本变换共用；不能覆盖原生命令或随包声明。`modes` 缺省适用全部正文 mode，提供时必须是非空、无重复的已知 mode 列表；局部键位、候选和直接名称执行一致检查适用性，通用键位不会绕过 mode 限制。
+
+`run(context)` 收到调用开始时深度冻结的值快照，不含路径、Git 参数、可变核心对象或可伪造目标句柄：
+
+- `mode`：`"fundamental" | "magit-diff" | "magit-status"`。
+- `status`：非 status 为 `null`，否则为 `{ selection }`。
+- `selection`：无可见文件叶节点时为 `null`，否则含 `group: "untracked" | "unstaged" | "staged" | "unmerged"` 及布尔值 `canStage` / `canUnstage`。能力只是提示；region、过时清单或不支持的目标不授予写入权，核心仍重新校验。
+
+返回 `null` 表示无请求，或返回以下一个严格对象（未知字段拒绝）：
+
+| 请求 | 行为 |
+|---|---|
+| `{ operation: "magit.status.open" }` | 沿调用目标的固定仓库或目录打开 status |
+| `{ operation: "magit.status.refresh" }` | 仅刷新捕获的 status 会话；非 status 拒绝 |
+| `{ operation: "magit.diff.open", comparison: "staged" | "unstaged" }` | 打开整个比较，不按 point 过滤 |
+| `{ operation: "magit.stage" }` / `{ operation: "magit.unstage" }` | 仅操作调用时捕获的一个 status 文件叶节点 |
+
+不接受数组、任意命令名 / payload / Git args、Promise、执行期 host-call 或完成回调。JS 异常、超时、非法返回或 pending jobs 均不启动核心操作。返回不等于 Git 完成；接受前重新验证原 view、输入会话、配置代次及目标，不在返回时重选 point。接受后的写入由核心持有，跨 reload / kill / 另存继续，终态和独立刷新结果记录在 `*Messages*`；不确定结果不自动重试。
+
+随包 JS 声明 `magit-stage` / `magit-unstage`，status 默认 `s` / `u`；空配置、配置失败回退也构建真实 handler。可重绑或用局部 `null` 禁用，不能重名覆盖。JS 故障时写入不可用，不改走原生写入；原生 status / diff / 刷新仍可用。
+
+**stage 使用执行时磁盘内容，不保存编辑 buffer；stage / unstage 可能丢失仅存于 index 的中间版本，没有自动 undo / 回滚。** 支持矩阵与退出规则见 F2 契约。
+
+```js
+semacs.registerWorkflowCommand("status-or-refresh", {
+    run: context => context.status
+        ? { operation: "magit.status.refresh" }
+        : { operation: "magit.status.open" },
+});
+semacs.bindKey("ctrl-c g", "status-or-refresh");
+```
+
 ### `semacs.bindKey(keys, commandName | null, options?)`
 
-绑定或取消一个正文键序列；可多次绑定不同键到同一命令。不传 `options` 保持正文通用绑定；传 `{ mode: "magit-diff" }` 或 `{ mode: "fundamental" }` 仅配置对应 mode 的局部层。未知 mode / 选项拒绝整份配置，当前没有 JS mode 注册 API。局部层优先于通用层；局部 `null` 屏蔽该 mode 内的低层回落，删除声明恢复默认。跨层前缀与上下文规则见 [F1 契约](emacs-fidelity.md#mode-与键位)。
+绑定或取消一个正文键序列；可多次绑定不同键到同一命令。不传 `options` 保持正文通用绑定；传 `{ mode: "magit-diff" }`、`{ mode: "magit-status" }` 或 `{ mode: "fundamental" }` 仅配置对应 mode 的局部层。未知 mode / 选项拒绝整份配置，当前没有 JS mode 注册 API。局部层优先于通用层；局部 `null` 屏蔽该 mode 内的低层回落，删除声明恢复默认。跨层前缀与上下文规则见 [F1 契约](emacs-fidelity.md#mode-与键位)。
 
 ```js
 semacs.bindKey("tab", "section-toggle", { mode: "magit-diff" });
@@ -121,7 +155,7 @@ rquickjs 只执行 JavaScript。不内置 TypeScript 转译器或类型检查器
 | 单次脚本命令 | 100 ms 执行期限 |
 | QuickJS 内存 / 栈 | 每个运行时 32 MiB / 256 KiB，不等于整个进程 RSS 上限 |
 | region 输入 / 返回文本 | 各最多 256 KiB UTF-8 字节 |
-| 脚本命令 / 自定义键位 | 每份配置最多 256 / 1024 条 |
+| 脚本命令 / 自定义键位 | 文本变换、随包及用户 workflow 合计最多 256 条；用户自定义键位最多 1024 条 |
 | 自定义主题 / 样式覆盖调用 | 每份配置最多 32 个 / 128 次；每个主题最多 30 个命名样式 |
 | 正文请求 | 每个窗口最多一个未完成的脚本命令及一个配置重载；重复请求立即报告忙，不累计 |
 | worker 请求队列 | 容量 1，发送不等待空位 |

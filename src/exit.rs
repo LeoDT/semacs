@@ -69,6 +69,7 @@ pub(crate) enum ExitStep {
 pub(crate) struct ExitFlow {
     remaining: VecDeque<BufferId>,
     waiting_save: Option<BufferId>,
+    pub uncertain_git_confirmed: bool,
 }
 
 impl ExitFlow {
@@ -76,6 +77,7 @@ impl ExitFlow {
         Self {
             remaining: remaining.into_iter().collect(),
             waiting_save: None,
+            uncertain_git_confirmed: false,
         }
     }
 

@@ -219,7 +219,7 @@ impl Keymap {
         let mut map = Self::for_scope(Scope::Application);
         for spec in COMMANDS
             .iter()
-            .filter(|spec| spec.scope == Scope::Edit && spec.mode.is_none())
+            .filter(|spec| spec.scope == Scope::Edit && spec.modes.is_empty())
         {
             for binding in spec.bindings {
                 map.bind(&parse_sequence(binding.keys).unwrap(), spec.command)
@@ -283,7 +283,7 @@ impl Keymap {
         }
         for spec in COMMANDS
             .iter()
-            .filter(|spec| spec.scope == scope && spec.mode.is_none())
+            .filter(|spec| spec.scope == scope && spec.modes.is_empty())
         {
             for binding in spec.bindings {
                 map.bind(

@@ -35,13 +35,39 @@ interface SemacsThemeDefinition {
     styles: SemacsThemeStyles;
 }
 
+type SemacsMode = "fundamental" | "magit-diff" | "magit-status";
+
+interface SemacsStatusSelection {
+    readonly group: "untracked" | "unstaged" | "staged" | "unmerged";
+    readonly canStage: boolean;
+    readonly canUnstage: boolean;
+}
+
+interface SemacsWorkflowContext {
+    readonly mode: SemacsMode;
+    readonly status: { readonly selection: SemacsStatusSelection | null } | null;
+}
+
+type SemacsWorkflowRequest =
+    | { operation: "magit.status.open" }
+    | { operation: "magit.status.refresh" }
+    | { operation: "magit.diff.open"; comparison: "staged" | "unstaged" }
+    | { operation: "magit.stage" }
+    | { operation: "magit.unstage" };
+
+interface SemacsWorkflowCommandDefinition {
+    modes?: readonly SemacsMode[];
+    run(context: SemacsWorkflowContext): SemacsWorkflowRequest | null;
+}
+
 interface SemacsConfigurationApi {
     defineTheme(name: string, definition: SemacsThemeDefinition): void;
     loadTheme(name: string): void;
     setStyle<N extends SemacsStyleName>(name: N, colors: SemacsStyleColors<N>): void;
     setFont(settings: SemacsFontSettings): void;
     registerCommand(name: string, transform: (text: string) => string): void;
-    bindKey(keys: string, commandName: string | null, options?: {mode: string}): void;
+    registerWorkflowCommand(name: string, definition: SemacsWorkflowCommandDefinition): void;
+    bindKey(keys: string, commandName: string | null, options?: {mode: SemacsMode}): void;
 }
 
 declare const semacs: Readonly<SemacsConfigurationApi>;

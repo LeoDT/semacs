@@ -1,27 +1,15 @@
 use super::AppShell;
+use super::git::{GitRead as GitWork, operation_id};
 use crate::buffer::Buffer;
 use crate::command::Command;
 use crate::diff::{Comparison, Diff, DiffKind, Visit};
 use crate::view::BufferView;
-use gpui_kit::{Context, Entity, Task, Window};
-use std::sync::{
-    Arc,
-    atomic::{AtomicBool, Ordering},
-};
+use gpui_kit::{Context, Entity, Window};
+use std::sync::{Arc, atomic::AtomicBool};
 
 #[cfg(test)]
 #[path = "diff_tests.rs"]
 mod tests;
-
-pub(super) struct GitWork {
-    cancelled: Arc<AtomicBool>,
-    _task: Task<()>,
-}
-impl Drop for GitWork {
-    fn drop(&mut self) {
-        self.cancelled.store(true, Ordering::Relaxed);
-    }
-}
 
 impl AppShell {
     pub(super) fn diff_command(
@@ -42,6 +30,9 @@ impl AppShell {
                 window,
                 cx,
             ),
+            Command::MagitRefresh if origin.read(cx).buffer().status_repository().is_some() => {
+                self.refresh_status(origin, window, cx)
+            }
             Command::MagitRefresh => self.refresh_diff(origin, window, cx),
             Command::MagitDiffVisit => self.visit_diff(origin, window, cx),
             Command::ScrollLeft | Command::ScrollRight => origin.update(cx, |view, cx| {
@@ -103,16 +94,7 @@ impl AppShell {
         }
     }
 
-    fn git_available(&mut self, origin: &Entity<BufferView>, cx: &mut Context<Self>) -> bool {
-        if self.git_task.is_some() {
-            self.show_message(origin, "A Git read is already running", cx);
-            false
-        } else {
-            true
-        }
-    }
-
-    fn open_diff(
+    pub(super) fn open_diff(
         &mut self,
         kind: DiffKind,
         origin: &Entity<BufferView>,
@@ -122,7 +104,8 @@ impl AppShell {
         if !self.git_available(origin, cx) {
             return;
         }
-        let comparison = origin.read(cx).buffer().comparison();
+        let repository = origin.read(cx).buffer().repository();
+        let operation = operation_id();
         let directory = self.default_directory_for(origin, cx);
         let input_session = origin.read(cx).display_snapshot().id().session;
         let origin = origin.clone();
@@ -136,17 +119,11 @@ impl AppShell {
                 .spawn(async move {
                     #[cfg(feature = "native-profiler")]
                     let _recording = trace.map(crate::preparation_trace::Context::enter);
-                    let comparison = if let Some(mut comparison) = comparison {
-                        comparison.kind = kind;
-                        comparison
-                    } else {
-                        let (root, git_dir) = crate::git::discover(&directory, &worker_cancelled)?;
-                        Comparison {
-                            root,
-                            git_dir,
-                            kind,
-                        }
+                    let repository = match repository {
+                        Some(repository) => repository,
+                        None => crate::git::discover(&directory, &worker_cancelled)?,
                     };
+                    let comparison = Comparison { repository, kind };
                     let diff = Diff::load(comparison, &worker_cancelled)?;
                     let rendered = diff.render()?;
                     Ok::<_, String>((diff, rendered))
@@ -154,7 +131,9 @@ impl AppShell {
                 .await;
             shell
                 .update_in(cx, |shell, window, cx| {
-                    shell.git_task = None;
+                    if !shell.finish_git_read(operation) {
+                        return;
+                    }
                     if shell.minibuffer.is_some()
                         || shell.active_view() != &origin
                         || origin.read(cx).display_snapshot().id().session != input_session
@@ -184,10 +163,11 @@ impl AppShell {
                 })
                 .ok();
         });
-        self.git_task = Some(GitWork {
+        self.git_task = Some(super::git::GitTask::Read(GitWork {
+            operation,
             cancelled,
             _task: task,
-        });
+        }));
     }
 
     fn refresh_diff(
@@ -210,6 +190,7 @@ impl AppShell {
             }
         };
         let id = self.buffers[index].id();
+        let operation = operation_id();
         let origin = origin.clone();
         let cancelled = Arc::new(AtomicBool::new(false));
         let worker_cancelled = cancelled.clone();
@@ -228,7 +209,9 @@ impl AppShell {
                 .await;
             shell
                 .update_in(cx, |shell, _, cx| {
-                    shell.git_task = None;
+                    if !shell.finish_git_read(operation) {
+                        return;
+                    }
                     let Some(index) = shell.buffers.index_of(id) else {
                         return;
                     };
@@ -243,10 +226,11 @@ impl AppShell {
                 })
                 .ok();
         });
-        self.git_task = Some(GitWork {
+        self.git_task = Some(super::git::GitTask::Read(GitWork {
+            operation,
             cancelled,
             _task: task,
-        });
+        }));
     }
 
     fn install_diff_result(
@@ -320,6 +304,7 @@ impl AppShell {
                 }
                 let origin = origin.clone();
                 let source = origin.read(cx).display_snapshot().id();
+                let operation = operation_id();
                 let cancelled = Arc::new(AtomicBool::new(false));
                 let worker_cancelled = cancelled.clone();
                 let task = cx.spawn_in(window, async move |shell, cx| {
@@ -332,7 +317,9 @@ impl AppShell {
                         .await;
                     shell
                         .update_in(cx, |shell, window, cx| {
-                            shell.git_task = None;
+                            if !shell.finish_git_read(operation) {
+                                return;
+                            }
                             if shell.minibuffer.is_some()
                                 || shell.active_view() != &origin
                                 || origin.read(cx).display_snapshot().id() != source
@@ -359,10 +346,11 @@ impl AppShell {
                         })
                         .ok();
                 });
-                self.git_task = Some(GitWork {
+                self.git_task = Some(super::git::GitTask::Read(GitWork {
+                    operation,
                     cancelled,
                     _task: task,
-                });
+                }));
             }
         }
     }

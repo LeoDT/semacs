@@ -33,7 +33,21 @@
             if (commands.length >= 256) throw new Error("At most 256 script commands are allowed");
             if (typeof name !== "string" || name.length > 128 || typeof run !== "function")
                 throw new TypeError("registerCommand expects a name and a function");
-            commands.push({name, run});
+            commands.push({name, run, kind: "transform", modes: null});
+        },
+        registerWorkflowCommand(name, definition) {
+            check();
+            if (commands.length >= 256) throw new Error("At most 256 script commands are allowed");
+            if (typeof name !== "string" || name.length > 128 || !object(definition) ||
+                Object.keys(definition).some(key => key !== "modes" && key !== "run") ||
+                typeof definition.run !== "function")
+                throw new TypeError("registerWorkflowCommand expects a name and {modes?, run}");
+            const modes = definition.modes;
+            if (modes !== undefined && (!Array.isArray(modes) || modes.length === 0 ||
+                modes.length > 3 || modes.some(mode => typeof mode !== "string" || mode.length > 64)))
+                throw new TypeError("Workflow modes must be a nonempty known mode list");
+            commands.push({name, run: definition.run, kind: "workflow",
+                modes: modes === undefined ? null : [...modes]});
         },
         bindKey(keys, command, options) {
             check();

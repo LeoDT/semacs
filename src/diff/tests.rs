@@ -27,15 +27,20 @@ impl Repository {
         repo.git(&["config", "user.email", "fixture@example.invalid"]);
         repo
     }
-    pub fn git(&self, args: &[&str]) -> Vec<u8> {
-        let result = Command::new("git")
-            .arg("-C")
-            .arg(&self.0)
+    pub fn command(&self) -> Command {
+        let mut command = Command::new("git");
+        command
+            .env_clear()
+            .env("PATH", std::env::var_os("PATH").unwrap_or_default())
+            .env("LC_ALL", "C")
             .env("GIT_CONFIG_NOSYSTEM", "1")
             .env("GIT_CONFIG_GLOBAL", "/dev/null")
-            .args(args)
-            .output()
-            .unwrap();
+            .arg("-C")
+            .arg(&self.0);
+        command
+    }
+    pub fn git(&self, args: &[&str]) -> Vec<u8> {
+        let result = self.command().args(args).output().unwrap();
         assert!(
             result.status.success(),
             "{:?}: {}",
@@ -54,8 +59,10 @@ impl Repository {
     pub fn load(&self, kind: DiffKind) -> Diff {
         Diff::load(
             Comparison {
-                root: self.0.clone(),
-                git_dir: self.0.join(".git"),
+                repository: crate::git::Repository {
+                    root: self.0.clone(),
+                    git_dir: self.0.join(".git"),
+                },
                 kind,
             },
             &AtomicBool::new(false),
@@ -67,6 +74,67 @@ impl Drop for Repository {
     fn drop(&mut self) {
         std::fs::remove_dir_all(&self.0).unwrap();
     }
+}
+
+#[test]
+fn fixture_commands_ignore_inherited_git_environment_child() {
+    if std::env::var_os("SEMACS_TEST_GIT_ENV_CHILD").is_none() {
+        return;
+    }
+    let repo = Repository::new();
+    repo.write("only-in-fixture", "fixture\n");
+    repo.commit();
+    let root = repo.git(&["rev-parse", "--show-toplevel"]);
+    assert_eq!(
+        Path::new(std::str::from_utf8(&root).unwrap().trim_end()),
+        repo.0
+    );
+    assert_eq!(repo.git(&["show", "HEAD:only-in-fixture"]), b"fixture\n");
+}
+
+#[test]
+fn fixture_commands_isolate_redirects_and_config_in_a_child_process() {
+    let decoy = Repository::new();
+    decoy.write("untouched", "untouched\n");
+    decoy.commit();
+    let index_before = std::fs::read(decoy.0.join(".git/index")).unwrap();
+    let head_before = decoy.git(&["rev-parse", "HEAD"]);
+    let result = Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--exact",
+            "diff::tests::fixture_commands_ignore_inherited_git_environment_child",
+            "--nocapture",
+        ])
+        .env("SEMACS_TEST_GIT_ENV_CHILD", "1")
+        .env("GIT_DIR", decoy.0.join(".git"))
+        .env("GIT_COMMON_DIR", decoy.0.join(".git"))
+        .env("GIT_WORK_TREE", &decoy.0)
+        .env("GIT_INDEX_FILE", decoy.0.join(".git/index"))
+        .env("GIT_OBJECT_DIRECTORY", decoy.0.join(".git/objects"))
+        .env(
+            "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+            decoy.0.join(".git/objects"),
+        )
+        .env("GIT_CONFIG_COUNT", "1")
+        .env("GIT_CONFIG_KEY_0", "core.bare")
+        .env("GIT_CONFIG_VALUE_0", "true")
+        .env("GIT_CONFIG_PARAMETERS", "invalid config injection")
+        .env("GIT_TRACE", decoy.0.join("SHOULD_NOT_EXIST"))
+        .output()
+        .unwrap();
+    assert!(
+        result.status.success(),
+        "{}\n{}",
+        String::from_utf8_lossy(&result.stdout),
+        String::from_utf8_lossy(&result.stderr)
+    );
+    assert_eq!(
+        std::fs::read(decoy.0.join(".git/index")).unwrap(),
+        index_before
+    );
+    assert_eq!(decoy.git(&["rev-parse", "HEAD"]), head_before);
+    assert!(!decoy.0.join("only-in-fixture").exists());
+    assert!(!decoy.0.join("SHOULD_NOT_EXIST").exists());
 }
 
 #[test]
@@ -262,10 +330,10 @@ fn worktree_gitdir_is_pinned_and_user_diff_drivers_cannot_execute() {
         "HEAD",
     ]);
     std::fs::write(linked.join("a"), "new\n\ncontext\n").unwrap();
-    let (root, git_dir) = crate::git::discover(&linked, &AtomicBool::new(false)).unwrap();
-    assert_eq!(root, linked);
-    assert!(git_dir.is_dir());
-    assert_ne!(git_dir, linked.join(".git"));
+    let repository = crate::git::discover(&linked, &AtomicBool::new(false)).unwrap();
+    assert_eq!(repository.root, linked);
+    assert!(repository.git_dir.is_dir());
+    assert_ne!(repository.git_dir, linked.join(".git"));
     repo.git(&["config", "diff.suppressBlankEmpty", "true"]);
     repo.git(&["config", "diff.outputIndicatorNew", "!"]);
     repo.git(&[
@@ -281,8 +349,7 @@ fn worktree_gitdir_is_pinned_and_user_diff_drivers_cannot_execute() {
     std::fs::write(linked.join(".gitattributes"), "a diff=evil\n").unwrap();
     let diff = Diff::load(
         Comparison {
-            root,
-            git_dir,
+            repository,
             kind: DiffKind::Unstaged,
         },
         &AtomicBool::new(false),
@@ -350,8 +417,10 @@ fn malformed_protocol_and_unsafe_paths_fail_closed() {
     assert!(
         Diff::load(
             Comparison {
-                root: repo.0.clone(),
-                git_dir: repo.0.join(".git"),
+                repository: crate::git::Repository {
+                    root: repo.0.clone(),
+                    git_dir: repo.0.join(".git"),
+                },
                 kind: DiffKind::Unstaged
             },
             &cancelled

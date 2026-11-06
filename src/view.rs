@@ -1354,6 +1354,14 @@ impl BufferView {
         cx.notify();
     }
 
+    pub(crate) fn git_write_ready(&self) -> bool {
+        self.accepting_input && self.git_open_ready()
+    }
+
+    pub(crate) fn git_open_ready(&self) -> bool {
+        !self.target.is_pending() && !self.target.input().is_composing()
+    }
+
     pub(crate) fn clear_pending(&mut self, cx: &mut Context<Self>) {
         self.target.clear_pending();
         self.clear_message(cx);

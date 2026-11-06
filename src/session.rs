@@ -46,6 +46,7 @@ pub enum ReadKind {
     },
     /// Dirty buffers remain after the per-buffer answers.
     ExitModified,
+    ExitUncertainGit,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -141,6 +142,9 @@ impl ReadKind {
             },
             ReadKind::ExitModified => {
                 "Modified buffers exist; exit anyway? (yes or no) ".to_owned()
+            }
+            ReadKind::ExitUncertainGit => {
+                "A Git write result is uncertain; inspect *Messages* and repository. Exit anyway? (yes or no) ".to_owned()
             }
         }
     }

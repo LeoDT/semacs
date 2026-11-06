@@ -215,7 +215,11 @@ impl AppShell {
                 let buffer = editor.read(cx).buffer();
                 let selected = *id == *self.panes.selected();
                 let mode_line = frame::mode_line(
-                    buffer.display_name(),
+                    if buffer.git_is_stale() {
+                        format!("{} [stale]", buffer.display_name())
+                    } else {
+                        buffer.display_name()
+                    },
                     buffer.format(),
                     buffer.is_modified(),
                     buffer.line_column(),

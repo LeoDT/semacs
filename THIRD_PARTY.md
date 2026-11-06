@@ -63,6 +63,14 @@
 - Include these dependency notices, including the bundled grammar query, in
   the dependency audit before distributing binaries.
 
+## Unix Git process cleanup dependency
+
+- The existing registry dependency `libc` 0.2.191 is now a direct Unix-only
+  dependency for terminating semacs-owned Git process groups. Its manifest
+  and MIT / Apache-2.0 license texts were reviewed; attribution is to
+  The Rust Project Developers. No source is vendored or patched. Include
+  its notices in the dependency audit before distributing binaries.
+
 ## JavaScript runtime dependency
 
 - `rquickjs`, `rquickjs-core` and `rquickjs-sys` 0.14.0 are registry

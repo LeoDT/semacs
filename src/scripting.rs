@@ -11,6 +11,10 @@ use crate::keymap::Keymap;
 #[cfg(test)]
 mod mode_tests;
 mod runtime;
+mod workflow;
+#[cfg(test)]
+mod workflow_tests;
+pub use workflow::{StatusSelection, WorkflowContext, WorkflowRequest};
 #[cfg(test)]
 mod tests;
 
@@ -63,13 +67,29 @@ pub struct LoadedConfiguration {
 
 pub struct ScriptHost {
     generation: u64,
-    requests: SyncSender<Transform>,
+    requests: SyncSender<Request>,
 }
 
-struct Transform {
-    command: ScriptCommand,
-    input: String,
-    reply: oneshot::Sender<Result<String, String>>,
+enum Request {
+    Transform {
+        command: ScriptCommand,
+        input: String,
+        reply: oneshot::Sender<Result<String, String>>,
+    },
+    Workflow {
+        command: ScriptCommand,
+        context: WorkflowContext,
+        reply: oneshot::Sender<Result<Option<WorkflowRequest>, String>>,
+    },
+}
+
+impl Request {
+    fn is_canceled(&self) -> bool {
+        match self {
+            Self::Transform { reply, .. } => reply.is_canceled(),
+            Self::Workflow { reply, .. } => reply.is_canceled(),
+        }
+    }
 }
 
 pub fn config_path() -> Result<PathBuf, String> {
@@ -91,18 +111,29 @@ fn config_path_from(xdg: Option<PathBuf>, home: Option<PathBuf>) -> Result<PathB
 }
 
 pub async fn load(path: PathBuf) -> Result<LoadedConfiguration, String> {
+    load_source(Some(path)).await
+}
+
+pub async fn load_defaults() -> Result<LoadedConfiguration, String> {
+    load_source(None).await
+}
+
+async fn load_source(path: Option<PathBuf>) -> Result<LoadedConfiguration, String> {
     let generation = NEXT_GENERATION
         .try_update(Ordering::Relaxed, Ordering::Relaxed, |value| {
             value.checked_add(1)
         })
         .expect("configuration generation exhausted");
-    let (requests, receiver) = sync_channel::<Transform>(1);
+    let (requests, receiver) = sync_channel::<Request>(1);
     let (reply, ready) = oneshot::channel();
     std::thread::Builder::new()
         .name("semacs-js".into())
         .spawn(move || {
-            let result = runtime::read_source(&path)
-                .and_then(|source| runtime::Engine::new(&source, &path, generation));
+            let result = match path {
+                Some(path) => runtime::read_source(&path)
+                    .and_then(|source| runtime::Engine::new(&source, &path, generation)),
+                None => runtime::Engine::new("", std::path::Path::new("<defaults>"), generation),
+            };
             let (mut engine, configuration) = match result {
                 Ok(loaded) => loaded,
                 Err(error) => {
@@ -114,11 +145,25 @@ pub async fn load(path: PathBuf) -> Result<LoadedConfiguration, String> {
                 return;
             }
             while let Ok(request) = receiver.recv() {
-                if request.reply.is_canceled() {
+                if request.is_canceled() {
                     continue;
                 }
-                let result = engine.transform(request.command, &request.input);
-                let _ = request.reply.send(result);
+                match request {
+                    Request::Transform {
+                        command,
+                        input,
+                        reply,
+                    } => {
+                        let _ = reply.send(engine.transform(command, &input));
+                    }
+                    Request::Workflow {
+                        command,
+                        context,
+                        reply,
+                    } => {
+                        let _ = reply.send(engine.workflow(command, context));
+                    }
+                }
             }
         })
         .map_err(|error| format!("Cannot start JavaScript worker: {error}"))?;
@@ -135,6 +180,34 @@ pub async fn load(path: PathBuf) -> Result<LoadedConfiguration, String> {
 }
 
 impl ScriptHost {
+    pub fn workflow(
+        &self,
+        command: ScriptCommand,
+        context: WorkflowContext,
+    ) -> Result<oneshot::Receiver<Result<Option<WorkflowRequest>, String>>, String> {
+        if command.generation != self.generation {
+            return Err("Script command belongs to an obsolete configuration".into());
+        }
+        let (reply, result) = oneshot::channel();
+        self.send(Request::Workflow {
+            command,
+            context,
+            reply,
+        })?;
+        Ok(result)
+    }
+
+    fn send(&self, request: Request) -> Result<(), String> {
+        self.requests
+            .try_send(request)
+            .map_err(|error| match error {
+                TrySendError::Full(_) => "JavaScript worker is busy".to_owned(),
+                TrySendError::Disconnected(_) => {
+                    "JavaScript worker stopped; reload configuration".to_owned()
+                }
+            })
+    }
+
     pub fn transform(
         &self,
         command: ScriptCommand,
@@ -147,18 +220,11 @@ impl ScriptHost {
             return Err("Region exceeds the 256 KiB script input limit".into());
         }
         let (reply, result) = oneshot::channel();
-        self.requests
-            .try_send(Transform {
-                command,
-                input,
-                reply,
-            })
-            .map_err(|error| match error {
-                TrySendError::Full(_) => "JavaScript worker is busy".to_owned(),
-                TrySendError::Disconnected(_) => {
-                    "JavaScript worker stopped; reload configuration".to_owned()
-                }
-            })?;
+        self.send(Request::Transform {
+            command,
+            input,
+            reply,
+        })?;
         Ok(result)
     }
 }

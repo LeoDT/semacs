@@ -7,6 +7,7 @@ mod parse;
 mod render;
 #[cfg(test)]
 pub(crate) mod tests;
+pub use crate::git::Repository;
 pub(crate) use render::{DiffNavigation, RenderedDiff};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -25,8 +26,7 @@ impl DiffKind {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Comparison {
-    pub root: PathBuf,
-    pub git_dir: PathBuf,
+    pub repository: Repository,
     pub kind: DiffKind,
 }
 
@@ -115,8 +115,8 @@ impl Diff {
             #[cfg(feature = "native-profiler")]
             let _span = crate::preparation_trace::Span::new("diff-git", 0);
             crate::git::read(
-                &comparison.root,
-                Some(&comparison.git_dir),
+                &comparison.repository.root,
+                Some(&comparison.repository.git_dir),
                 &args,
                 cancelled,
             )?
@@ -149,7 +149,7 @@ impl Diff {
         let path = if old { &file.old_path } else { &file.new_path };
         if !old && self.comparison.kind == DiffKind::Unstaged {
             return Ok(Visit::Worktree {
-                path: self.comparison.root.join(path),
+                path: self.comparison.repository.root.join(path),
                 line,
                 column,
             });
@@ -159,8 +159,8 @@ impl Diff {
             return Err("No file version exists on this side".into());
         }
         Ok(Visit::Blob {
-            root: self.comparison.root.clone(),
-            git_dir: self.comparison.git_dir.clone(),
+            root: self.comparison.repository.root.clone(),
+            git_dir: self.comparison.repository.git_dir.clone(),
             oid: oid.clone(),
             path: path.clone(),
             line,

@@ -25,6 +25,7 @@ mod saves;
 pub mod scripting;
 pub mod section;
 pub mod session;
+pub mod status;
 mod syntax;
 #[cfg(test)]
 mod test_support;

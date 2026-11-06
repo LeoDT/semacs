@@ -180,7 +180,7 @@ impl Buffer {
         let doc = self.document.borrow();
         SavePoint {
             buffer: doc.snapshot.id.buffer,
-            state: if doc.message_log {
+            state: if doc.message_log || doc.status.is_some() {
                 super::SaveBoundary::Generated(doc.snapshot.id.version)
             } else {
                 super::SaveBoundary::History(doc.history.current_state())

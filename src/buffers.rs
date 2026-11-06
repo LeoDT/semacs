@@ -47,6 +47,9 @@ impl BufferSet {
     pub fn iter(&self) -> impl Iterator<Item = &BufferSlot> {
         self.slots.iter()
     }
+    pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut BufferSlot> {
+        self.slots.iter_mut()
+    }
 
     pub fn push(&mut self, slot: BufferSlot) -> usize {
         let id = slot.id();

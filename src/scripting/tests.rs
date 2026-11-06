@@ -515,7 +515,7 @@ fn worker_request_queue_and_input_are_bounded_without_blocking() {
             .contains("busy")
     );
     drop(first);
-    assert!(receiver.recv().unwrap().reply.is_canceled());
+    assert!(receiver.recv().unwrap().is_canceled());
     drop(receiver);
     assert!(
         host.transform(command, "abc".into())

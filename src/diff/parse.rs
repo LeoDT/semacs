@@ -1,5 +1,5 @@
 use super::{DiffLine, FileDiff, Hunk};
-use std::path::PathBuf;
+use crate::git::relative_path as path;
 
 fn nul<'a>(bytes: &mut &'a [u8]) -> Result<&'a [u8], String> {
     let end = bytes
@@ -9,26 +9,6 @@ fn nul<'a>(bytes: &mut &'a [u8]) -> Result<&'a [u8], String> {
     let value = &bytes[..end];
     *bytes = &bytes[end + 1..];
     Ok(value)
-}
-fn path(bytes: &[u8]) -> Result<PathBuf, String> {
-    #[cfg(unix)]
-    let path: PathBuf = {
-        use std::os::unix::ffi::OsStringExt;
-        std::ffi::OsString::from_vec(bytes.to_vec()).into()
-    };
-    #[cfg(not(unix))]
-    let path: PathBuf = std::str::from_utf8(bytes)
-        .map_err(|_| "Git path is not UTF-8")?
-        .into();
-    if path.as_os_str().is_empty()
-        || path.is_absolute()
-        || path
-            .components()
-            .any(|part| !matches!(part, std::path::Component::Normal(_)))
-    {
-        return Err("Invalid repository-relative Git path".into());
-    }
-    Ok(path)
 }
 fn utf8(bytes: &[u8]) -> Result<&str, String> {
     std::str::from_utf8(bytes).map_err(|_| "Diff contains non-UTF-8 text".into())

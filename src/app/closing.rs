@@ -116,7 +116,7 @@ impl AppShell {
                 })
             })
             .collect();
-        if remaining.is_empty() {
+        if remaining.is_empty() && !self.git_write_active() && !self.git_writes.uncertain() {
             return true;
         }
         self.closing = Some(Closing::Exit(ExitFlow::new(remaining)));
@@ -125,9 +125,42 @@ impl AppShell {
     }
 
     pub(super) fn process_next_exit(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.exiting() {
+            return;
+        }
+        if self.git_write_active() {
+            self.show_message(
+                &self.active_view().clone(),
+                "Waiting for Git write and repository verification before exit",
+                cx,
+            );
+            return;
+        }
         let Some(flow) = self.closing.as_mut().and_then(Closing::exit_mut) else {
             return;
         };
+        if self.git_writes.uncertain() && !flow.uncertain_git_confirmed {
+            if self
+                .session
+                .as_ref()
+                .is_some_and(|session| matches!(session.kind(), ReadKind::ExitUncertainGit))
+            {
+                return;
+            }
+            let origin = self.active_view().clone();
+            if self
+                .begin_read(ReadKind::ExitUncertainGit, &origin, "", window, cx)
+                .is_none()
+            {
+                self.cancel_closing();
+                self.show_message(
+                    &origin,
+                    "Cannot confirm uncertain Git result; exit canceled",
+                    cx,
+                );
+            }
+            return;
+        }
         let step = flow.next(|id| {
             self.buffers.index_of(id).map(|index| {
                 if self.buffers[index].save.is_saving() {
@@ -174,6 +207,10 @@ impl AppShell {
     }
 
     pub(super) fn finish_exit(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.git_write_active() {
+            self.process_next_exit(window, cx);
+            return;
+        }
         self.cancel_closing();
         window.remove_window();
         cx.notify();

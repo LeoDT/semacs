@@ -3,9 +3,11 @@ use std::path::PathBuf;
 use gpui_kit::{Context, Entity, Window};
 
 use super::AppShell;
-use crate::command_registry::ScriptCommand;
+use crate::command_registry::{ScriptCommand, ScriptKind};
 use crate::scripting::{self, LoadedConfiguration};
 use crate::view::BufferView;
+
+mod workflow;
 
 impl AppShell {
     pub fn with_configuration(
@@ -15,20 +17,29 @@ impl AppShell {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
-        if let Ok(loaded) = &result {
+        let (loaded, diagnostic) = match result {
+            Ok(loaded) => (Some(loaded), None),
+            Err(error) => match gpui_kit::block_on(scripting::load_defaults()) {
+                Ok(defaults) => (
+                    Some(defaults),
+                    Some(format!("Configuration failed; using defaults: {error}")),
+                ),
+                Err(fallback) => (
+                    None,
+                    Some(format!(
+                        "Configuration failed: {error}; default JavaScript runtime unavailable: {fallback}"
+                    )),
+                ),
+            },
+        };
+        if let Some(loaded) = &loaded {
             cx.set_global(loaded.configuration.font.clone());
             loaded.configuration.theme.clone().install(cx);
         }
-        let mut shell = Self::new(buffer, window, cx);
+        let mut shell = Self::new_configured(buffer, loaded, window, cx);
         shell.config_path = path;
-        let origin = shell.active_view().clone();
-        match result {
-            Ok(loaded) => shell.apply_configuration(loaded, window, cx),
-            Err(error) => shell.show_message(
-                &origin,
-                format!("Configuration failed; using defaults: {error}"),
-                cx,
-            ),
+        if let Some(message) = diagnostic {
+            shell.show_message(&shell.active_view().clone(), message, cx);
         }
         shell
     }
@@ -116,7 +127,18 @@ impl AppShell {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let result = self.start_transform(command, origin, window, cx);
+        if !self.commands.available_in(
+            crate::command_registry::CommandId::Script(command),
+            origin.read(cx).buffer().mode(),
+        ) {
+            self.show_message(origin, "Script command is unavailable in this mode", cx);
+            return;
+        }
+        let result = match self.commands.script_kind(command) {
+            Some(ScriptKind::Transform) => self.start_transform(command, origin, window, cx),
+            Some(ScriptKind::Workflow) => self.start_workflow(command, origin, window, cx),
+            None => Err("Unknown script command".into()),
+        };
         if let Err(error) = result {
             self.show_message(origin, error, cx);
         }

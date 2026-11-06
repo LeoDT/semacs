@@ -54,7 +54,7 @@ fn default_bindings_match_the_emacs_reference_or_approved_contracts() {
     let session = Keymap::for_scope(Scope::ReadSession);
     let body = [&application, &edit];
     let minibuffer = [&session, &edit];
-    for spec in COMMANDS.iter().filter(|spec| spec.mode.is_none()) {
+    for spec in COMMANDS.iter().filter(|spec| spec.modes.is_empty()) {
         let (layers, reference): (&[&Keymap], _) = match spec.scope {
             Scope::Application | Scope::Edit => (&body, &body_reference),
             Scope::ReadSession => (&minibuffer, &session_reference),

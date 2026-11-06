@@ -6137,6 +6137,7 @@ dependencies = [
  "gpui-kit",
  "gpui-pre-wgpu",
  "heapless",
+ "libc",
  "log",
  "nucleo-matcher",
  "proptest",

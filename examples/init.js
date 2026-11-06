@@ -18,3 +18,13 @@ semacs.registerCommand("lowercase-region", text => text.toLowerCase());
 semacs.bindKey("ctrl-c u", "uppercase-region");
 semacs.bindKey("ctrl-c U", "uppercase-region");
 semacs.bindKey("ctrl-c l", "lowercase-region");
+
+semacs.registerWorkflowCommand("status-or-refresh", {
+    run: context => context.status
+        ? { operation: "magit.status.refresh" }
+        : { operation: "magit.status.open" },
+});
+semacs.bindKey("ctrl-c g", "status-or-refresh");
+
+// Bundled magit-stage / magit-unstage already use s / u in status mode.
+semacs.bindKey("S", "magit-stage", { mode: "magit-status" });

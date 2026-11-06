@@ -128,6 +128,9 @@ impl Sections {
             return Err("The root section cannot be hidden".into());
         }
         let node = self.nodes.get_mut(index).ok_or("No section here")?;
+        if node.body == node.range.end {
+            return Ok(());
+        }
         node.collapsed = !node.collapsed;
         self.remembered.insert(node.key.clone(), node.collapsed);
         self.rebuild();

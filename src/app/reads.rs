@@ -405,6 +405,21 @@ impl AppShell {
                     }
                 }
             }
+            ReadKind::ExitUncertainGit => {
+                if answer == Answer::Yes {
+                    if let Some(flow) = self
+                        .closing
+                        .as_mut()
+                        .and_then(crate::exit::Closing::exit_mut)
+                    {
+                        flow.uncertain_git_confirmed = true;
+                    }
+                    self.process_next_exit(window, cx);
+                } else {
+                    self.cancel_closing();
+                    self.show_message(&target, "Canceled", cx);
+                }
+            }
             ReadKind::ExitModified => {
                 if answer == Answer::Yes {
                     self.finish_exit(window, cx);

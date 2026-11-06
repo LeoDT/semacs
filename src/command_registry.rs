@@ -22,11 +22,30 @@ impl From<Command> for CommandId {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ScriptKind {
+    Transform,
+    Workflow,
+}
+
 #[derive(Clone, Debug)]
 pub struct RegisteredCommand {
     pub id: CommandId,
     pub name: String,
     pub annotation: String,
+    script: Option<(ScriptKind, Option<Vec<crate::mode::ModeId>>)>,
+}
+
+impl RegisteredCommand {
+    fn available_in(&self, mode: crate::mode::ModeId) -> bool {
+        match self.id {
+            CommandId::Native(command) => command.available_in(mode),
+            CommandId::Script(_) => self
+                .script
+                .as_ref()
+                .is_some_and(|(_, modes)| modes.as_ref().is_none_or(|modes| modes.contains(&mode))),
+        }
+    }
 }
 
 pub struct CommandRegistry {
@@ -45,6 +64,7 @@ impl Default for CommandRegistry {
                 .iter()
                 .filter(|spec| spec.scope != Scope::ReadSession)
                 .map(|spec| RegisteredCommand {
+                    script: None,
                     id: spec.command.into(),
                     name: spec.name.into(),
                     annotation: spec
@@ -61,6 +81,40 @@ impl Default for CommandRegistry {
 
 impl CommandRegistry {
     pub fn register_script(&mut self, name: &str, id: ScriptCommand) -> Result<(), String> {
+        self.register(name, id, ScriptKind::Transform, None)
+    }
+
+    pub fn register_workflow(
+        &mut self,
+        name: &str,
+        id: ScriptCommand,
+        modes: Option<Vec<crate::mode::ModeId>>,
+    ) -> Result<(), String> {
+        if let Some(modes) = &modes {
+            let unique: std::collections::HashSet<_> = modes.iter().collect();
+            if modes.is_empty() || unique.len() != modes.len() {
+                return Err("Workflow modes must be nonempty and unique".into());
+            }
+        }
+        self.register(name, id, ScriptKind::Workflow, modes)
+    }
+
+    fn register(
+        &mut self,
+        name: &str,
+        id: ScriptCommand,
+        kind: ScriptKind,
+        modes: Option<Vec<crate::mode::ModeId>>,
+    ) -> Result<(), String> {
+        if self
+            .commands
+            .iter()
+            .filter(|entry| entry.script.is_some())
+            .count()
+            >= 256
+        {
+            return Err("At most 256 script commands are allowed".into());
+        }
         if name.is_empty()
             || name.len() > 128
             || !name
@@ -76,6 +130,7 @@ impl CommandRegistry {
             return Err(format!("Command already registered: {name}"));
         }
         self.commands.push(RegisteredCommand {
+            script: Some((kind, modes)),
             id: CommandId::Script(id),
             name: name.into(),
             annotation: String::new(),
@@ -90,16 +145,33 @@ impl CommandRegistry {
             .map(|command| command.id)
     }
 
+    pub fn script_kind(&self, id: ScriptCommand) -> Option<ScriptKind> {
+        self.commands
+            .iter()
+            .find(|entry| entry.id == CommandId::Script(id))?
+            .script
+            .as_ref()
+            .map(|(kind, _)| *kind)
+    }
+
+    pub fn available_in(&self, id: CommandId, mode: crate::mode::ModeId) -> bool {
+        match id {
+            CommandId::Native(command) => command.available_in(mode),
+            CommandId::Script(_) => self
+                .commands
+                .iter()
+                .find(|entry| entry.id == id)
+                .is_some_and(|entry| entry.available_in(mode)),
+        }
+    }
+
     pub fn commands_for(
         &self,
         mode: crate::mode::ModeId,
     ) -> impl Iterator<Item = RegisteredCommand> + '_ {
         self.commands
             .iter()
-            .filter(move |entry| match entry.id {
-                CommandId::Native(command) => command.available_in(mode),
-                CommandId::Script(_) => true,
-            })
+            .filter(move |entry| entry.available_in(mode))
             .map(move |entry| {
                 let mut entry = entry.clone();
                 if let Some(annotations) = self.mode_annotations.get(&mode) {

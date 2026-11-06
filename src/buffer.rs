@@ -16,8 +16,10 @@ mod annotations;
 pub(crate) use annotations::Annotations;
 pub use annotations::{LineBackground, StyledRange};
 mod diff;
+mod generated;
 mod history;
 mod selection;
+mod status;
 pub(crate) use history::EditGroup;
 use history::HistoryState;
 pub(crate) use selection::RegionId;
@@ -121,6 +123,7 @@ struct Document {
     sections: Option<std::sync::Arc<crate::section::Sections>>,
     named_styles: std::sync::Arc<[(Range<ByteOffset>, crate::theme::StyleRole)]>,
     diff: Option<diff::DiffSession>,
+    status: Option<status::StatusSession>,
 }
 
 impl Document {
@@ -191,6 +194,7 @@ impl Buffer {
             sections: None,
             named_styles: std::sync::Arc::from([]),
             diff: None,
+            status: None,
             revision: 0,
             last_edit: None,
             points,

@@ -8,12 +8,13 @@ use std::time::Instant;
 use gpui_kit::px;
 use rquickjs::{Array, Context, Ctx, Function, Object, Persistent, Runtime, Value};
 
+use super::workflow::{WorkflowContext, WorkflowRequest};
 use super::{
     COMMAND_TIMEOUT, CONFIG_TIMEOUT, Configuration, MAX_SOURCE_BYTES, MAX_TEXT_BYTES, MEMORY_LIMIT,
     STACK_LIMIT,
 };
 use crate::appearance::FontSettings;
-use crate::command_registry::{CommandRegistry, ScriptCommand};
+use crate::command_registry::{CommandRegistry, ScriptCommand, ScriptKind};
 use crate::keymap::Keymap;
 use crate::theme::{StyleOverride, StyleRole, ThemeSettings};
 
@@ -35,6 +36,8 @@ pub(super) fn read_source(path: &Path) -> Result<String, String> {
 
 pub(super) struct Engine {
     functions: Vec<Persistent<Function<'static>>>,
+    kinds: Vec<ScriptKind>,
+    freeze: Persistent<Function<'static>>,
     context: Context,
     runtime: Runtime,
     deadline: Rc<Cell<Instant>>,
@@ -42,7 +45,7 @@ pub(super) struct Engine {
     asynchronous: bool,
 }
 
-fn js_error(ctx: &Ctx<'_>, error: rquickjs::Error) -> String {
+pub(super) fn js_error(ctx: &Ctx<'_>, error: rquickjs::Error) -> String {
     let message = rquickjs::CaughtError::from_error(ctx, error).to_string();
     message.chars().take(1024).collect()
 }
@@ -61,11 +64,19 @@ impl Engine {
         runtime.set_interrupt_handler(Some(Box::new(move || Instant::now() >= interrupt.get())));
         let context = Context::full(&runtime).map_err(|error| error.to_string())?;
         let mut functions = Vec::new();
+        let mut kinds = Vec::new();
+        let freeze = context
+            .with(|ctx| {
+                ctx.eval::<Function, _>("Object.freeze")
+                    .map(|function| Persistent::save(&ctx, function))
+            })
+            .map_err(|error| error.to_string())?;
         let configuration = context.with(|ctx| {
             let result = (|| -> rquickjs::Result<Object<'_>> {
                 let builder: Object = ctx.eval(include_str!("bootstrap.js"))?;
                 ctx.globals()
                     .set("semacs", builder.get::<_, Object>("api")?)?;
+                ctx.eval::<(), _>(include_str!("bundled.js"))?;
                 let mut options = rquickjs::context::EvalOptions::default();
                 options.filename = Some(path.to_string_lossy().into_owned());
                 let result: Value = ctx.eval_with_options(source, options)?;
@@ -80,7 +91,7 @@ impl Engine {
                 finish.call(())
             })()
             .map_err(|error| js_error(&ctx, error))?;
-            Self::configuration(&ctx, result, generation, &mut functions)
+            Self::configuration(&ctx, result, generation, &mut functions, &mut kinds)
         });
         if Instant::now() >= deadline.get() {
             return Err("JavaScript configuration exceeded its 500 ms execution limit".into());
@@ -92,6 +103,8 @@ impl Engine {
         Ok((
             Self {
                 functions,
+                kinds,
+                freeze,
                 context,
                 runtime,
                 deadline,
@@ -107,6 +120,7 @@ impl Engine {
         manifest: Object<'js>,
         generation: u64,
         functions: &mut Vec<Persistent<Function<'static>>>,
+        kinds: &mut Vec<ScriptKind>,
     ) -> Result<Configuration, String> {
         let parse = || -> rquickjs::Result<(Array<'js>, Array<'js>, Object<'js>)> {
             Ok((
@@ -123,7 +137,36 @@ impl Engine {
         for (index, command) in commands.iter::<Object>().enumerate() {
             let command = command.map_err(|error| js_error(ctx, error))?;
             let name: String = command.get("name").map_err(|error| js_error(ctx, error))?;
-            registry.register_script(&name, ScriptCommand { generation, index })?;
+            let kind: String = command.get("kind").map_err(|error| js_error(ctx, error))?;
+            let kind = match kind.as_str() {
+                "transform" => {
+                    registry.register_script(&name, ScriptCommand { generation, index })?;
+                    ScriptKind::Transform
+                }
+                "workflow" => {
+                    let modes: Option<Vec<String>> =
+                        command.get("modes").map_err(|error| js_error(ctx, error))?;
+                    let modes = modes
+                        .map(|modes| {
+                            modes
+                                .into_iter()
+                                .map(|name| {
+                                    crate::mode::ModeId::named(&name)
+                                        .ok_or_else(|| format!("Unknown mode: {name}"))
+                                })
+                                .collect::<Result<Vec<_>, _>>()
+                        })
+                        .transpose()?;
+                    registry.register_workflow(
+                        &name,
+                        ScriptCommand { generation, index },
+                        modes,
+                    )?;
+                    ScriptKind::Workflow
+                }
+                _ => return Err("Unknown script command kind".into()),
+            };
+            kinds.push(kind);
             let function: Function = command.get("run").map_err(|error| js_error(ctx, error))?;
             functions.push(Persistent::save(ctx, function));
         }
@@ -258,13 +301,7 @@ impl Engine {
         command: ScriptCommand,
         input: &str,
     ) -> Result<String, String> {
-        if command.generation != self.generation || command.index >= self.functions.len() {
-            return Err("Unknown or obsolete script command".into());
-        }
-        if self.asynchronous {
-            return Err("Asynchronous jobs are not supported; reload configuration".into());
-        }
-        self.deadline.set(Instant::now() + COMMAND_TIMEOUT);
+        self.begin(command, ScriptKind::Transform)?;
         let result = self.context.with(|ctx| {
             let function = self.functions[command.index]
                 .clone()
@@ -283,6 +320,61 @@ impl Engine {
             drop(bytes);
             output.to_string().map_err(|error| js_error(&ctx, error))
         });
+        self.finish(result)
+    }
+
+    pub(super) fn workflow(
+        &mut self,
+        command: ScriptCommand,
+        context: WorkflowContext,
+    ) -> Result<Option<WorkflowRequest>, String> {
+        self.begin(command, ScriptKind::Workflow)?;
+        let result = self.context.with(|ctx| {
+            let invoke = || -> rquickjs::Result<Value<'_>> {
+                let freeze = self.freeze.clone().restore(&ctx)?;
+                let snapshot = Object::new(ctx.clone())?;
+                snapshot.set("mode", context.mode.name())?;
+                if context.mode == crate::mode::ModeId::MAGIT_STATUS {
+                    let status = Object::new(ctx.clone())?;
+                    if let Some(selection) = context.selection {
+                        let value = Object::new(ctx.clone())?;
+                        value.set("group", selection.group.key())?;
+                        value.set("canStage", selection.can_stage)?;
+                        value.set("canUnstage", selection.can_unstage)?;
+                        let value: Object = freeze.call((value,))?;
+                        status.set("selection", value)?;
+                    } else {
+                        status.set("selection", Value::new_null(ctx.clone()))?;
+                    }
+                    let status: Object = freeze.call((status,))?;
+                    snapshot.set("status", status)?;
+                } else {
+                    snapshot.set("status", Value::new_null(ctx.clone()))?;
+                }
+                let snapshot: Object = freeze.call((snapshot,))?;
+                self.functions[command.index]
+                    .clone()
+                    .restore(&ctx)?
+                    .call((snapshot,))
+            };
+            let value = invoke().map_err(|error| js_error(&ctx, error))?;
+            super::workflow::parse(&ctx, value)
+        });
+        self.finish(result)
+    }
+
+    fn begin(&self, command: ScriptCommand, kind: ScriptKind) -> Result<(), String> {
+        if command.generation != self.generation || self.kinds.get(command.index) != Some(&kind) {
+            return Err("Unknown, obsolete or mismatched script command".into());
+        }
+        if self.asynchronous {
+            return Err("Asynchronous jobs are not supported; reload configuration".into());
+        }
+        self.deadline.set(Instant::now() + COMMAND_TIMEOUT);
+        Ok(())
+    }
+
+    fn finish<T>(&mut self, result: Result<T, String>) -> Result<T, String> {
         self.asynchronous = self.runtime.is_job_pending();
         if Instant::now() >= self.deadline.get() {
             return Err("Script command exceeded its 100 ms execution limit".into());

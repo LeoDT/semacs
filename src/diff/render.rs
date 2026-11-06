@@ -61,7 +61,7 @@ pub(super) fn render(diff: &Diff) -> Result<RenderedDiff, String> {
         &format!(
             "{}: {}",
             diff.comparison.kind.name(),
-            label(&diff.comparison.root)
+            label(&diff.comparison.repository.root)
         ),
     );
     let mut nodes = vec![Section {

@@ -34,7 +34,11 @@ impl Keymap {
     ) -> Result<Self, String> {
         let mut effective = HashMap::new();
         for spec in COMMANDS.iter().filter(|spec| {
-            spec.scope != Scope::ReadSession && spec.mode == mode.map(|mode| mode.name())
+            spec.scope != Scope::ReadSession
+                && match mode {
+                    Some(mode) => spec.modes.contains(&mode.name()),
+                    None => spec.modes.is_empty(),
+                }
         }) {
             for binding in spec.bindings {
                 effective.insert(
@@ -50,6 +54,14 @@ impl Keymap {
             let keys = Self::canonical_sequence(&parse_sequence(keys).unwrap());
             effective.insert(keys.clone(), (command.into(), label(&keys)));
         }
+        if mode == Some(crate::mode::ModeId::MAGIT_STATUS) {
+            for (keys, name) in [("s", "magit-stage"), ("u", "magit-unstage")] {
+                if let Some(command) = registry.named(name) {
+                    let keys = parse_sequence(keys).unwrap();
+                    effective.insert(keys.clone(), (command, label(&keys)));
+                }
+            }
+        }
         let mut custom = Vec::new();
         let mut seen = HashSet::new();
         for (source, name) in bindings {
@@ -61,9 +73,15 @@ impl Keymap {
             }
             let command = name
                 .map(|name| {
-                    registry
+                    let command = registry
                         .named(&name)
-                        .ok_or_else(|| format!("Unknown or unavailable command: {name}"))
+                        .ok_or_else(|| format!("Unknown or unavailable command: {name}"))?;
+                    if let Some(mode) = mode
+                        && !registry.available_in(command, mode)
+                    {
+                        return Err(format!("Command {name} is unavailable in {}", mode.name()));
+                    }
+                    Ok(command)
                 })
                 .transpose()?;
             let replaced_command = effective.remove(&keys).is_some();

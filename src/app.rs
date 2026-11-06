@@ -22,11 +22,18 @@ mod candidates;
 mod closing;
 mod diff;
 mod documents;
+mod git;
+#[cfg(test)]
+mod git_test_support;
+mod index_write;
+pub use git::records::{GitWritePhase, GitWriteRecord};
+pub use index_write::StatusWriteTarget;
 mod messages;
 mod reads;
 mod scripting;
 #[cfg(test)]
 mod scripting_tests;
+mod status;
 mod windows;
 
 impl Global for KillRing {}
@@ -64,7 +71,16 @@ pub struct AppShell {
     config_path: Option<PathBuf>,
     reload_task: Option<Task<()>>,
     script_task: Option<Task<()>>,
-    git_task: Option<diff::GitWork>,
+    git_task: Option<git::GitTask>,
+    git_writes: git::records::WriteRecords,
+    #[cfg(test)]
+    index_write_gate: Option<futures_channel::oneshot::Receiver<()>>,
+    #[cfg(test)]
+    index_verify_gate: Option<futures_channel::oneshot::Receiver<()>>,
+    #[cfg(test)]
+    status_read_gate: Option<futures_channel::oneshot::Receiver<()>>,
+    #[cfg(test)]
+    workflow_return_gate: Option<futures_channel::oneshot::Receiver<()>>,
     startup_directory: PathBuf,
     minibuffer: Option<MinibufferMount>,
     session: Option<ReadSession>,
@@ -77,6 +93,21 @@ pub struct AppShell {
 
 impl AppShell {
     pub fn new(buffer: Buffer, window: &mut Window, cx: &mut Context<Self>) -> Self {
+        Self::with_configuration(
+            buffer,
+            None,
+            gpui_kit::block_on(crate::scripting::load_defaults()),
+            window,
+            cx,
+        )
+    }
+
+    fn new_configured(
+        buffer: Buffer,
+        loaded: Option<crate::scripting::LoadedConfiguration>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
         let registry_buffer = buffer.new_view();
         let buffer_id = buffer.snapshot_id().buffer;
         let view = Self::create_view(buffer, window, cx);
@@ -110,7 +141,10 @@ impl AppShell {
                 .unwrap_or(true)
         });
         view.update(cx, |view, cx| view.restore_input(window, cx));
-        let configuration = crate::scripting::Configuration::default();
+        let (configuration, script_host) = match loaded {
+            Some(loaded) => (loaded.configuration, Some(loaded.host)),
+            None => (crate::scripting::Configuration::default(), None),
+        };
         Self {
             buffers: BufferSet::new(BufferSlot::new(registry_buffer)),
             messages: crate::messages::Messages::default(),
@@ -121,12 +155,21 @@ impl AppShell {
             body_keymap: configuration.body_keymap,
             mode_keymaps: configuration.mode_keymaps,
             commands: configuration.commands,
-            script_host: None,
-            config_generation: 0,
+            script_host,
+            config_generation: configuration.generation,
             config_path: None,
             reload_task: None,
             script_task: None,
             git_task: None,
+            git_writes: Default::default(),
+            #[cfg(test)]
+            index_write_gate: None,
+            #[cfg(test)]
+            index_verify_gate: None,
+            #[cfg(test)]
+            status_read_gate: None,
+            #[cfg(test)]
+            workflow_return_gate: None,
             startup_directory: std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
             minibuffer: None,
             session: None,
@@ -251,6 +294,7 @@ impl AppShell {
             Command::ExecuteExtendedCommand => {
                 self.begin_read(ReadKind::Command, origin, "", window, cx);
             }
+            Command::MagitStatus => self.open_status(origin, window, cx),
             Command::MagitDiffStaged
             | Command::MagitDiffUnstaged
             | Command::SectionToggle

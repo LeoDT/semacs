@@ -2,26 +2,17 @@
 
 本文是当前工作和跨会话待办的唯一入口；维护与归档规则见 [文档说明](README.md#维护规则)。范围见 [需求](requirements.md)，行为见 [保真度契约](emacs-fidelity.md)。里程碑按可验收行为划分，不按工期估算。
 
-## 当前状态：基础阶段已归档，下一实现范围待确认
+## 当前状态：F2 已完成，下一阶段待确认
 
-R0–M3、A–E3、日常编辑增强及 F1 只读 Magit diff 已按各自确认范围完成；详细结论和历史测试数量见 [已完成阶段归档](archive/completed-through-f1.md)，批次证据见 [冻结记录索引](records/README.md)。归档不表示所有性能预算、真实 IME 或 GPU / 实际呈现均已通过；下列暂缓项和原预算保持不变。
+R0–M3、A–E3、日常编辑增强及 F1 只读 Magit diff 已按各自确认范围完成，见 [R0–F1 归档](archive/completed-through-f1.md)。F2 status / 单文件 stage / unstage 也已按批准范围完成，见 [F2 归档](archive/f2-status.md)；具体本地 / 宿主证据见 [冻结记录索引](records/README.md)。
 
-本轮文档整理已完成，未开始 Magit、脚本 API 或任务系统实现。下一步先确认脚本扩展边界与首个 Magit 切片，再形成实施规格；不自动进入 Git 写操作、完整 Magit、LSP 或完整 Durable workflow。
+用户确认现有 headless 基线、隔离自动化和单窗口宿主功能证据足以收尾 F2，不追加原生性能、GPU 或 IME 测试。status / 写入端到端仍只记基线，不表示任意仓库的时延保证，也不宣布所有原生性能预算通过；下列历史暂缓项与原预算不变。F2 没有已知阻塞性遗留事项。
 
-## 下一步：脚本扩展边界与 Magit 切片
+## 下一步：按实际需求确认范围
 
-现有有效边界仍见 [D26](decisions.md#d26-rust-核心与脚本扩展)、[D28](decisions.md#d28-buffer-mode-与结构化显示)及 [JS 配置](scripting.md)。后续设计材料：
+当前没有启动新的实施阶段。F2 的长期边界见 [行为契约](emacs-fidelity.md#阶段-f2status-与单文件-index-操作)、[D26](decisions.md#d26-rust-核心与脚本扩展)、[D28](decisions.md#d28-buffer-mode-与结构化显示)及 [JS 配置](scripting.md)。
 
-- [脚本扩展与热重载调研](work/scripting-extension-research.md)：现状、Chord 参照、Magit / LSP 能力分析，以及 [Job 与恢复的讨论共识](work/scripting-extension-research.md#8-job-与可恢复任务讨论共识及实施边界)。方向已讨论，具体 API、会话归属、重载行为矩阵及实施范围仍需确认。
-- [Magit 上游行为参考](work/f-magit-reference.md)：固定外部参照，不是已批准的 semacs 规格。
-
-建议下一次定范围时依次确认：
-
-1. **脚本与核心边界**：哪些状态随脚本代次失效、哪些任务 / 会话由核心持有；必要查询、操作请求、取消、限额与迟到结果规则。
-2. **首个可验收切片**：候选为最小 JS 工作流能力加只读 status，复用已有 diff / section；尚未批准具体功能清单，不先开放所有扩展原语。
-3. **后续依赖**：Git 写操作与 transient 另定范围；核心 Job 按实际异步工作需求引入，跨重启持久化和完整 Durable workflow 不作为 Magit 前置条件。
-
-以上是后续设计入口，不是实现排期或测试授权。
+后续更多 Magit 操作 / transient、脚本扩展 / async、LSP 或 Job 持久化都需另行确认范围与依赖，不因 F2 完成自动开放。可按需参考 [脚本扩展与热重载调研](work/scripting-extension-research.md) 和 [Magit 上游参照](work/f-magit-reference.md)，两者不是新阶段的实施授权。
 
 ## 已知问题与未排期事项
 

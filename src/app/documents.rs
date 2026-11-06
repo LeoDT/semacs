@@ -344,7 +344,7 @@ impl AppShell {
         }
     }
 
-    fn finish_save(
+    pub(super) fn finish_save(
         &mut self,
         completion: SaveCompletion,
         window: &mut Window,
@@ -378,23 +378,32 @@ impl AppShell {
             }
             Ok(SaveOutcome::Written(stamp)) => {
                 let update_path = matches!(request.intent, SaveIntent::WriteFile(_));
-                {
+                let generated_boundary = {
                     let buffer = &mut self.buffers[index].buffer;
+                    let boundary = (update_path && buffer.status_repository().is_some())
+                        .then(|| buffer.save_point());
                     if update_path {
                         buffer.set_path(path.clone());
                     }
                     buffer.set_disk_stamp(Some(stamp));
                     let _ = buffer.mark_saved_at(request.save_point);
+                    if update_path {
+                        buffer.detach_status();
+                    }
                     if update_path && buffer.is_message_log() {
                         buffer.detach_message_log();
                     }
-                }
+                    boundary
+                };
                 self.refresh_buffer(self.buffers[index].id(), cx);
                 if update_path {
                     self.reset_message_log(buffer);
                     self.rename_buffer(index, cx);
                 }
-                if let Some(pending) = self.buffers[index].save.take_pending() {
+                if let Some(mut pending) = self.buffers[index].save.take_pending() {
+                    if generated_boundary == Some(pending.save_point) {
+                        pending.save_point = self.buffers[index].buffer.begin_save();
+                    }
                     self.start_save(index, pending, window, cx);
                     return;
                 }
