@@ -96,8 +96,8 @@ fn accepted_write_refreshes_only_status_keeps_diff_stale_and_uses_shared_slot(
     visual.update(|window, cx| {
         shell.update(cx, |shell, cx| {
             assert!(shell.git_write_active());
-            assert!(!shell.finish_git_read(id));
-            assert!(!shell.finish_git_read(id + 1));
+            assert!(!shell.finish_git_read(id, window, cx));
+            assert!(!shell.finish_git_read(id + 1, window, cx));
             assert!(status.read(cx).buffer().git_is_stale());
             assert!(diff.read(cx).buffer().git_is_stale());
             assert!(shell.capture_status_write(&status, cx).is_err());

@@ -85,6 +85,13 @@ impl BufferSet {
         }
     }
 
+    pub fn bury(&mut self, id: BufferId) {
+        if self.index_of(id).is_some() {
+            self.mru.retain(|existing| *existing != id);
+            self.mru.push(id);
+        }
+    }
+
     pub fn ids_in_mru(&self) -> &[BufferId] {
         &self.mru
     }

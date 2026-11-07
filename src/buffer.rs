@@ -18,6 +18,7 @@ pub use annotations::{LineBackground, StyledRange};
 mod diff;
 mod generated;
 mod history;
+mod process;
 mod selection;
 mod status;
 pub(crate) use history::EditGroup;
@@ -98,6 +99,7 @@ pub enum EditError {
     InvalidRange,
     ReadOnly,
     TextReadOnly,
+    EditingInhibited(&'static str),
 }
 
 struct Document {
@@ -107,6 +109,7 @@ struct Document {
     points: Vec<Weak<TrackedPoint>>,
     mark: TrackedMark,
     read_only: bool,
+    edit_inhibition: Option<&'static str>,
     message_log: bool,
     mode: crate::mode::ModeId,
     read_only_prefix: ByteOffset,
@@ -124,6 +127,7 @@ struct Document {
     named_styles: std::sync::Arc<[(Range<ByteOffset>, crate::theme::StyleRole)]>,
     diff: Option<diff::DiffSession>,
     status: Option<status::StatusSession>,
+    process: Option<process::ProcessSession>,
 }
 
 impl Document {
@@ -195,11 +199,13 @@ impl Buffer {
             named_styles: std::sync::Arc::from([]),
             diff: None,
             status: None,
+            process: None,
             revision: 0,
             last_edit: None,
             points,
             mark: TrackedMark::default(),
             read_only: false,
+            edit_inhibition: None,
             message_log: false,
             mode: crate::mode::ModeId::default(),
             read_only_prefix: ByteOffset(0),
@@ -266,6 +272,12 @@ impl Buffer {
             doc.read_only = true;
         }
         buffer
+    }
+
+    pub(crate) fn repository(&self) -> Option<crate::git::Repository> {
+        self.process_repository()
+            .or_else(|| self.status_repository())
+            .or_else(|| self.comparison().map(|comparison| comparison.repository))
     }
 
     pub fn sections(&self) -> Option<std::sync::Arc<crate::section::Sections>> {
@@ -342,10 +354,8 @@ impl Buffer {
     }
     pub fn check_writable_range(&self, range: Range<ByteOffset>) -> Result<(), EditError> {
         self.validate_range(&range)?;
+        self.check_editable()?;
         let doc = self.document.borrow();
-        if doc.read_only {
-            return Err(EditError::ReadOnly);
-        }
         if range.start < doc.read_only_prefix {
             return Err(EditError::TextReadOnly);
         }
@@ -434,6 +444,23 @@ impl Buffer {
             doc.touch();
         }
     }
+    pub fn edit_inhibition(&self) -> Option<&'static str> {
+        self.document.borrow().edit_inhibition
+    }
+    pub(crate) fn set_edit_inhibition(&mut self, reason: Option<&'static str>) {
+        let mut doc = self.document.borrow_mut();
+        doc.edit_inhibition = reason;
+        doc.touch();
+    }
+    pub(crate) fn check_editable(&self) -> Result<(), EditError> {
+        if let Some(reason) = self.edit_inhibition() {
+            return Err(EditError::EditingInhibited(reason));
+        }
+        if self.is_read_only() {
+            return Err(EditError::ReadOnly);
+        }
+        Ok(())
+    }
     pub fn is_read_only(&self) -> bool {
         self.document.borrow().read_only
     }
@@ -488,6 +515,39 @@ impl Buffer {
         d.path = Some(path);
         d.touch();
     }
+    #[cfg(unix)]
+    pub(crate) fn reload_visited(&mut self, loaded: crate::files::LoadedFile) {
+        let points: Vec<_> = self
+            .document
+            .borrow()
+            .points
+            .iter()
+            .filter_map(Weak::upgrade)
+            .map(|point| {
+                let offset = loaded
+                    .file
+                    .text
+                    .floor_char_boundary(point.get().min(loaded.file.text.len()));
+                (point, offset)
+            })
+            .collect();
+        self.apply_validated_edit(Edit {
+            snapshot: self.snapshot_id(),
+            range: ByteOffset(0)..ByteOffset(self.text().len()),
+            text: &loaded.file.text,
+            source: EditSource::Command,
+        });
+        self.set_disk_stamp(loaded.stamp);
+        let mut doc = self.document.borrow_mut();
+        doc.format = loaded.file.format;
+        doc.modified = false;
+        doc.history = Default::default();
+        doc.mark.set(None, false);
+        for (point, offset) in points {
+            point.set(offset);
+        }
+    }
+
     pub fn format(&self) -> FileFormat {
         self.document.borrow().format
     }

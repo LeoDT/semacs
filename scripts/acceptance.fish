@@ -8,8 +8,8 @@ function fail
     exit 1
 end
 
-if test (count $argv) -ne 3; or not contains -- $argv[1] perf display-perf split-perf ime split-ime manual candidates scripting messages themes syntax languages flicker styles magit magit-status diff-perf diff-diagnostic styles-perf syntax-perf open-diagnostic; or test "$argv[3]" != --consent
-    echo "Usage: fish scripts/acceptance.fish <perf|display-perf|split-perf|ime|split-ime|manual|candidates|scripting|messages|themes|syntax|languages|flicker|styles|magit|magit-status|diff-perf|diff-diagnostic|styles-perf|syntax-perf|open-diagnostic> NEW_OUTPUT_DIRECTORY --consent" >&2
+if test (count $argv) -ne 3; or not contains -- $argv[1] perf display-perf split-perf ime split-ime manual candidates scripting messages themes syntax languages flicker styles magit magit-status magit-commit diff-perf diff-diagnostic styles-perf syntax-perf open-diagnostic; or test "$argv[3]" != --consent
+    echo "Usage: fish scripts/acceptance.fish <perf|display-perf|split-perf|ime|split-ime|manual|candidates|scripting|messages|themes|syntax|languages|flicker|styles|magit|magit-status|magit-commit|diff-perf|diff-diagnostic|styles-perf|syntax-perf|open-diagnostic> NEW_OUTPUT_DIRECTORY --consent" >&2
     exit 2
 end
 set -l mode $argv[1]
@@ -50,7 +50,7 @@ echo "Output: $output"
 echo "Build logs are saved; hard failures stop without retries; explicit diagnostics record budget failures and continue."
 if contains -- "$mode" diff-perf diff-diagnostic
     echo "The diff driver archives and builds its actual probe in the new diff subdirectory."
-else if contains -- "$mode" candidates scripting messages themes syntax languages flicker styles magit magit-status
+else if contains -- "$mode" candidates scripting messages themes syntax languages flicker styles magit magit-status magit-commit
     cargo build --release --bin semacs --target-dir "$root/target" > "$output/build.log" 2>&1
 else if test "$mode" = split-ime
     cargo build --release --bin semacs --example native_split_ime --target-dir "$root/target" > "$output/build.log" 2>&1
@@ -187,6 +187,20 @@ else if test "$mode" = scripting
     echo "Any failure stops the batch and terminates only the child test app; all artifacts are kept."
     python3 -B scripts/scripting_manual.py "$output/scripting" --binary "$root/target/release/semacs" --consent
     or fail "scripting smoke stopped; keep and report $output, do not rerun"
+else if test "$mode" = magit-commit
+    begin
+        uname -a
+        rustc --version
+        git --version
+        printf 'WAYLAND_DISPLAY=%s\nXDG_SESSION_TYPE=%s\nXDG_CURRENT_DESKTOP=%s\nLANG=%s\n' "$WAYLAND_DISPLAY" "$XDG_SESSION_TYPE" "$XDG_CURRENT_DESKTOP" "$LANG"
+        fc-match monospace
+        fc-match monospace:style=Bold
+    end > "$output/environment.txt" 2>&1
+    echo "F3: one manual window, disposable Git state, isolated empty configuration and helper runtime."
+    echo "No OS key injection, IME changes, screenshots, daily hooks/keys or performance measurements."
+    echo "Follow each printed group; cancellation, active OS-close refusal and successful commit have independent checkpoints."
+    python3 -B scripts/magit_commit_manual.py "$output/commit" --binary "$root/target/release/semacs" --consent
+    or fail "F3 manual commit check stopped; keep and report this directory, do not rerun"
 else if test "$mode" = magit-status
     begin
         uname -a

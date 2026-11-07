@@ -20,7 +20,8 @@ STEPS = (
     ("status-display-focus", "base", """
 1. Status 显示 / 导航 / 双 view 焦点
    初始打开 00-main.txt，正文应为 WORKTREE current；不要编辑或保存。
-   M-x magit-status RET，等待清单；应依次看到：
+   M-x magit-status RET，等待清单；当前版默认下方临时分屏（空间不足时当前 window）。
+   C-x 1 只保留 status，作为下面固定双 view 操作的起点；应依次看到：
    Untracked files (1): 30-untracked.txt
    Unstaged changes (1): 00-main.txt
    Staged changes (1): 10-staged.txt
@@ -37,12 +38,14 @@ STEPS = (
     ("status-stage-stale", "stage", """
 2. 默认 s / stage 与 diff 过时标识（仅执行一次 s）
    回窗口，当前应为右侧 status、point 在 Unstaged 的 00-main.txt。
-   C-x o 到左侧，M-x magit-diff-unstaged RET；左侧应显示 -HEAD base / +WORKTREE current。
-   C-x o 回右侧；确认当前 section 是 Unstaged changes 下的文件 00-main.txt，
+   C-x o 到左侧，M-x magit-diff-unstaged RET；当前版在左侧下方新建临时 diff，
+   左上仍是 status、左下 diff 应显示 -HEAD base / +WORKTREE current、右侧仍是 status。
+   若窗口太小未新建下方 diff，停止本批并答 no，不临时改变操作流程。
+   C-x o 到右侧；确认当前 section 是 Unstaged changes 下的文件 00-main.txt，
    不是 heading、其他路径或选区；按一次 s，等待成功消息和清单刷新。
    右侧应自动变为 Unstaged changes (0)、Staged changes (2)，包含 00-main.txt / 10-staged.txt；
    Untracked (1) / Unmerged (0) 不变，右侧 status 不应带 [stale]。
-   左侧 diff 保留旧快照，mode line 应出现可读的 [stale]；焦点仍在右侧，不抢左侧。
+   左下 diff 保留旧快照，mode line 应出现可读的 [stale]；焦点仍在右侧，不抢左下。
    没有逐次确认弹窗；不要再次按 s，不要手动刷新左侧，也不要执行 u。
    等待完成后保持窗口打开，回终端确认；驱动会立即独立核对整个 index。
 """),
@@ -52,7 +55,8 @@ STEPS = (
    确认不是组 heading、不是 Untracked 文件、没有活动选区；按一次 u 并等待完成。
    右侧应恢复 Unstaged changes (1): 00-main.txt、Staged changes (1): 10-staged.txt；
    Untracked (1) / Unmerged (0) 不变。00-main.txt 磁盘正文不应被恢复为 HEAD。
-   左侧 diff 仍带 [stale]；C-x o 到左侧，按 g 并等待刷新，[stale] 应消失，
+   左下 diff 仍带 [stale]；C-x o 到左上 status，再 C-x o 到左下 diff，
+   按 g 并等待刷新，[stale] 应消失，
    diff 仍为 -HEAD base / +WORKTREE current；刷新不切到右侧。
    C-x o 回右侧，确认仍为 status、point 合理，按键 / 焦点没有串到另一侧。
    不再执行 s/u，不编辑、不保存；保持窗口打开，回终端确认。

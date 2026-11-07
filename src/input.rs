@@ -359,9 +359,7 @@ impl InputSession {
 
     fn guard_writable(&self, buffer: &Buffer, token: SessionToken) -> Result<(), InputError> {
         self.validate(buffer, token)?;
-        if buffer.is_read_only() {
-            return Err(EditError::ReadOnly.into());
-        }
+        buffer.check_editable()?;
         Ok(())
     }
 

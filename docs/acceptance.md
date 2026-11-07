@@ -1,6 +1,6 @@
 # 验收流程
 
-本文维护验证范围的选择、本地 / 宿主分工、可执行入口与安全规则。行为见 [保真度契约](emacs-fidelity.md)，预算与指标见 [性能预算](performance.md)，当前工作从 [计划](plan.md) 查阅，历史结论见 [R0–F1 归档](archive/completed-through-f1.md)、[F2 归档](archive/f2-status.md)和 [冻结记录索引](records/README.md)，不在本文逐阶段累积覆盖清单或批次结论。
+本文维护验证范围的选择、本地 / 宿主分工、可执行入口与安全规则。行为见 [保真度契约](emacs-fidelity.md)，预算与指标见 [性能预算](performance.md)，当前工作从 [计划](plan.md) 查阅，历史结论见 [R0–F1 归档](archive/completed-through-f1.md)、[F2 归档](archive/f2-status.md)、[F3 归档](archive/f3-window-commit.md)和 [冻结记录索引](records/README.md)，不在本文逐阶段累积覆盖清单或批次结论。
 
 ## 宿主验证的适用条件
 
@@ -38,6 +38,7 @@
 | 人工 fixture / 字节核对工具 | `python3 -B -m unittest discover -s scripts -p 'test_m2_manual.py' -v`；Magit profile 另跑 `python3 -B -m unittest discover -s scripts -p 'test_magit_fixture.py' -v`；F2 单窗口入口另跑 `python3 -B -m unittest discover -s scripts -p 'test_magit_status_manual.py' -v` |
 | 脚本配置冒烟驱动 | `python3 -B -m unittest discover -s scripts -p 'test_scripting_manual.py' -v` |
 | split IME 驱动 | `python3 -B -m unittest discover -s scripts -p 'test_split_ime.py' -v`，不访问桌面 |
+| F3 单窗口 commit 入口 / fixture | `python3 -B -m unittest discover -s scripts -p 'test_magit_commit_manual.py' -v`；与 F2 / F1 共用入口变更时补相应工具回归，不启动桌面 |
 | fish 入口 | `fish --no-execute scripts/acceptance.fish` |
 | JS 示例 / 类型声明 | 本地已有 tsc 时运行 `tsc --allowJs --checkJs --noEmit --strict --target es2020 --lib es2020 examples/init.js types/semacs.d.ts`；它不是运行依赖 |
 
@@ -95,11 +96,16 @@ fish scripts/acceptance.fish MODE NEW_OUTPUT_DIRECTORY --consent
 | `syntax-perf` | Markdown（含 HTML→JS/CSS）/ HTML 各约 256 KiB、各三轮原生 CPU 输入 / 绘制；布局与语法 ready 分开记录，不外推大文件全矩阵 |
 | `diff-perf` / `diff-diagnostic` | F1 diff 原生 CPU / 提交专项，约 256 KiB patch 三轮，每轮一个窗口及内部左右分屏；前者超限即停，后者显式完整诊断、记录性能超限后继续，见 [专项说明](acceptance/profiles.md#f1-diff-专项性能) |
 | `magit` | 一个窗口，隔离配置与临时 Git 仓库；四组 diff 显示 / 折叠导航、分屏刷新、长行水平查看、旧侧 / index / worktree 访问，见 [fixture 说明](../scripts/magit_fixture.py) |
+| `magit-commit` | 一个窗口及内部分屏，独立空配置与临时仓库；临时显示 / `q`、消息与 companion / 进程焦点、取消、活动提交的 OS 关闭拒绝、保存成功 / 刷新及独立 Git / 消息检查，见 [F3 定向流程](acceptance/profiles.md#f3-最小定向验证) |
 | `magit-status` | 一个窗口及内部分屏，独立空配置和临时仓库；status 可读性 / 焦点、默认 `s` / `u` 与 diff `[stale]`，每组后独立核对完整 index，见 [F2 定向流程](acceptance/profiles.md#f2-最小定向验证) |
 | `styles` | 一个窗口，隔离 rich / plain 主题下的 Rust / Markdown 字体、装饰、背景与换行，用户手动做两处 IME 取消 / 提交；四组观察及独立字节核对 |
 | `styles-perf` | mixed 约 8 MiB 三轮，再 Markdown 约 256 KiB 三轮；至多六个顺序窗口，复用原生 CPU 驱动，不展开全矩阵 |
 
-人工模式先读终端提示；`scripting` / `messages` / `themes` / `syntax` / `flicker` / `magit` / `magit-status` 使用英文输入，不自动注键、不改变 IME、不截图，不测原生性能。`languages` / `styles` 由用户在指定两处手动使用日常中文输入法；脚本不注键、不切换输入法、不截图，其 IME 结论来自用户观察及保存字节，不是自动状态断言或时延测量。详细键序列只在驱动中维护，不在本文再复制。不要直接照抄历史批次目录名。
+人工模式先读终端提示；`scripting` / `messages` / `themes` / `syntax` / `flicker` / `magit` / `magit-status` / `magit-commit` 使用英文输入，不自动注键、不改变 IME、不截图，不测原生性能。`languages` / `styles` 由用户在指定两处手动使用日常中文输入法；脚本不注键、不切换输入法、不截图，其 IME 结论来自用户观察及保存字节，不是自动状态断言或时延测量。详细键序列只在驱动中维护，不在本文再复制。不要直接照抄历史批次目录名。
+
+### F3 最小定向验证
+
+`magit-commit` 的单窗口范围、分组 Git / 消息检查与停止规则见 [F3 定向流程](acceptance/profiles.md#f3-最小定向验证)。
 
 ### F2 最小定向验证
 

@@ -6,12 +6,43 @@ use crate::view::BufferView;
 use gpui_kit::{Context, Entity, Window};
 
 impl AppShell {
+    pub(super) fn active_commits(&self) -> bool {
+        #[cfg(unix)]
+        {
+            self.commit_records().any(|record| record.phase.is_active())
+        }
+        #[cfg(not(unix))]
+        {
+            false
+        }
+    }
+
     pub(super) fn exiting(&self) -> bool {
         self.closing.as_ref().is_some_and(Closing::is_exit)
     }
 
     pub(super) fn cancel_closing(&mut self) {
+        #[cfg(unix)]
+        if self.exiting() {
+            for session in &mut self.commits {
+                session.exit_termination_requested = false;
+            }
+        }
         self.closing = None;
+    }
+
+    pub(super) fn waiting_commit_exit(&self) -> bool {
+        matches!(&self.closing, Some(Closing::Exit(flow)) if flow.commits_confirmed)
+    }
+
+    pub(super) fn cancel_commit_exit(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.waiting_commit_exit() {
+            return;
+        }
+        self.cancel_closing();
+        self.schedule_repository_refresh(window, cx);
+        #[cfg(unix)]
+        self.present_commit_prompt(window, cx);
     }
 
     pub(super) fn wait_for_save(&mut self, buffer: BufferId) {
@@ -46,6 +77,8 @@ impl AppShell {
         cx: &mut Context<Self>,
     ) {
         let buffer = view.read(cx).buffer().snapshot_id().buffer;
+        #[cfg(unix)]
+        let message = self.after_commit_save(buffer, saved, message, window, cx);
         let modified = self
             .buffers
             .index_of(buffer)
@@ -67,6 +100,7 @@ impl AppShell {
             }
             AfterSave::Message => self.show_message(view, message, cx),
         }
+        self.schedule_repository_refresh(window, cx);
     }
 
     pub(super) fn save_then_kill(
@@ -116,7 +150,11 @@ impl AppShell {
                 })
             })
             .collect();
-        if remaining.is_empty() && !self.git_write_active() && !self.git_writes.uncertain() {
+        if remaining.is_empty()
+            && !self.git_write_active()
+            && !self.git_writes.uncertain()
+            && !self.active_commits()
+        {
             return true;
         }
         self.closing = Some(Closing::Exit(ExitFlow::new(remaining)));
@@ -126,6 +164,15 @@ impl AppShell {
 
     pub(super) fn process_next_exit(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if !self.exiting() {
+            return;
+        }
+        if self.session.is_some()
+            || self
+                .closing
+                .as_mut()
+                .and_then(Closing::exit_mut)
+                .is_some_and(|flow| flow.is_waiting())
+        {
             return;
         }
         if self.git_write_active() {
@@ -140,13 +187,6 @@ impl AppShell {
             return;
         };
         if self.git_writes.uncertain() && !flow.uncertain_git_confirmed {
-            if self
-                .session
-                .as_ref()
-                .is_some_and(|session| matches!(session.kind(), ReadKind::ExitUncertainGit))
-            {
-                return;
-            }
             let origin = self.active_view().clone();
             if self
                 .begin_read(ReadKind::ExitUncertainGit, &origin, "", window, cx)
@@ -190,7 +230,10 @@ impl AppShell {
                 }
             }
             ExitStep::CheckRemaining => {
-                if self.buffers.iter().any(|slot| slot.buffer.is_modified()) {
+                if self.buffers.iter().any(|slot| {
+                    slot.buffer.is_modified()
+                        && !flow.modified_confirmed.contains(&slot.buffer.snapshot_id())
+                }) {
                     let origin = self.active_view().clone();
                     if self
                         .begin_read(ReadKind::ExitModified, &origin, "", window, cx)
@@ -209,6 +252,10 @@ impl AppShell {
     pub(super) fn finish_exit(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.git_write_active() {
             self.process_next_exit(window, cx);
+            return;
+        }
+        #[cfg(unix)]
+        if !self.prepare_commit_exit(window, cx) {
             return;
         }
         self.cancel_closing();

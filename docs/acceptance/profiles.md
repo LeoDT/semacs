@@ -1,6 +1,18 @@
 # 专项验证流程
 
-本文保留 F2 / F1 / E3 / E2 的有效专项操作说明，不记录历史批次结论，也不产生新的测试授权。先按 [验收主流程](../acceptance.md#宿主验证的适用条件)选择受影响的最小范围，取得本批同意后再使用 [fish 入口](../acceptance.md#宿主-fish-入口)；通用安全、停止和证据规则仍以主流程为准。
+本文保留 F3 / F2 / F1 / E3 / E2 的有效专项操作说明，不记录历史批次结论，也不产生新的测试授权。先按 [验收主流程](../acceptance.md#宿主验证的适用条件)选择受影响的最小范围，取得本批同意后再使用 [fish 入口](../acceptance.md#宿主-fish-入口)；通用安全、停止和证据规则仍以主流程为准。
+
+## F3 最小定向验证
+
+`magit-commit` 只启动一个窗口、独立空配置和可丢弃仓库，检查临时显示 / 局部 `q`、消息与 staged companion 的焦点、进程 buffer 查看 / 返回、提交取消、活动消息编辑时 OS 关闭的拒绝与继续编辑、保存完成及终态刷新。四组人工英文键序列只在 [驱动](../../scripts/magit_commit_manual.py) 维护，终端逐组打印；不自动注键、不切换输入法、不截图，不测试密码 / passphrase 或日常 hooks / 密钥。
+
+fixture 只有普通 tracked / untracked 文件及已知 HEAD / index / worktree 差异，清除继承的 `GIT_*` 覆盖，隔离全局 / 系统 Git 配置、默认 ignore / attributes，仓库内配置测试身份与不签名的普通提交。Git 用空 template 初始化，无用户 hooks；子进程显式绑定 fixture cwd / 文件、独立 `XDG_CONFIG_HOME`，`TMPDIR` 只指向本批 runtime，实际 semacs helper 仍使用产品入口及私有 IPC，不用 shell editor 替代。
+
+每组确认后独立核对全部 worktree 字节、空 JS / Git 配置、symbolic HEAD、完整 refs、index 的 path / mode / blob / stage、完整 HEAD tree、消息文件和 helper 目录生命周期。成功提交还须满足 parent 为初始 HEAD、完整 tree 等于预置 index、消息为固定主题；不能用最终 HEAD 变化代替中间取消或拒绝关闭的检查点。blob OID 从已知字节独立计算，正常 Git 新增对象 / reflog 与 index 缓存字节不要求不变。fixture 校验不修改或修复仓库。
+
+fish 入口保留构建日志、源码差异（含 untracked）、环境及二进制身份；驱动保留 `fixture.json`、`instructions.txt`、`result.json`、每组检查点和窗口 stdout / stderr。任何 no / 未观察、异常退出、身份 / 字节错误或超时立即停止后续动作，不重试；失败时仅提示取消仍活动的消息并正常关闭同一窗口，最多等 120 秒，未退出才终止测试子进程并标记强制清理，保留所有产物，不将清理当回滚或通过。
+
+全部观察及检查点通过后，正常关闭同一窗口并再核对磁盘；用户记录大致窗口尺寸、文字 / 光标可读性。回传整个输出目录，人工焦点 / 平台关闭观察与独立 Git / 消息检查分别解释；这不是原生 CPU 性能、真实 IME、外部签名交互、GPU / 呈现或完整平台矩阵通过。
 
 ## F2 最小定向验证
 

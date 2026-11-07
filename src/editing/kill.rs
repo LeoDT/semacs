@@ -40,6 +40,9 @@ impl EditTarget {
     ) -> Result<CommandOutcome, RouteError> {
         let point = self.buffer.point();
         let copy = command == Command::KillRingSave;
+        if !copy && let Some(reason) = self.buffer.edit_inhibition() {
+            return Err(EditError::EditingInhibited(reason).into());
+        }
         let (range, prepend) = match command {
             Command::KillWord | Command::BackwardKillWord => {
                 let forward = command == Command::KillWord;
@@ -83,9 +86,7 @@ impl EditTarget {
     }
 
     pub(super) fn yank(&mut self, token: SessionToken) -> Result<CommandOutcome, RouteError> {
-        if self.buffer.is_read_only() {
-            return Err(EditError::ReadOnly.into());
-        }
+        self.buffer.check_editable()?;
         let point = self.buffer.point();
         let active = self.buffer.mark_active();
         self.buffer.set_mark(point)?;

@@ -114,7 +114,7 @@ impl Workload {
             .open(report)
             .unwrap();
         writeln!(output, "# TestPlatform / TestTextSystem; release={}; Lilex 16px/24px; requested=960x640; no soft wrap; no explicit font warmup; setup source painted before open; OS cache uncontrolled", !cfg!(debug_assertions)).unwrap();
-        writeln!(output, "# first/ready observed after run_until_parked + draw; scheduler can coalesce readiness; command/point preparation outside timers; probe draw excludes scheduler-internal paints; no native draw/idle measurement").unwrap();
+        writeln!(output, "# first/ready observed after run_until_parked + draw; scheduler can coalesce readiness; command/point preparation outside timers; open uses temporary display, then single status window before remaining actions; probe draw excludes scheduler-internal paints; no native draw/idle measurement").unwrap();
         writeln!(output, "phase,views,action_cpu_ms,first_ms,selected_ready_ms,all_ready_ms,probe_draw_max_ms,frames,min_visible_rows,bytes,projection_rows,write_records,verified").unwrap();
         output.flush().unwrap();
         let source = shell.read(cx).active_view().clone();
@@ -169,7 +169,11 @@ impl Workload {
                     );
                 }
             }
-            "navigate" => self.locate(0, "Unstaged changes (", window, cx),
+            "navigate" => {
+                key(window, cx, "ctrl-x");
+                key(window, cx, "1");
+                self.locate(0, "Unstaged changes (", window, cx);
+            }
             "scroll" => self.locate(0, "Status: ", window, cx),
             "collapse" => {
                 self.locate(0, " MM both-0001.txt", window, cx);

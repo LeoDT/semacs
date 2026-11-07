@@ -47,6 +47,35 @@ pub enum ReadKind {
     /// Dirty buffers remain after the per-buffer answers.
     ExitModified,
     ExitUncertainGit,
+    ExitActiveCommits,
+    CommitInterrupt {
+        operation: u64,
+    },
+    CommitSecondLine,
+    #[cfg(unix)]
+    CommitReload {
+        snapshot: crate::buffer::SnapshotId,
+        modified: bool,
+        outcome: Option<crate::commit::EditorOutcome>,
+    },
+    CommitAll {
+        repository: crate::git::Repository,
+        pane: u64,
+        buffer: crate::buffer::BufferId,
+    },
+    CommitMerge {
+        repository: crate::git::Repository,
+    },
+    CommitYesNo {
+        operation: u64,
+        request: u64,
+        prompt: String,
+    },
+    CommitUsername {
+        operation: u64,
+        request: u64,
+        prompt: String,
+    },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -100,7 +129,13 @@ impl ReadKind {
     pub fn is_single_key(&self) -> bool {
         matches!(
             self,
-            Self::Overwrite(_) | Self::KillBufferConfirm { .. } | Self::ExitSave { .. }
+            Self::Overwrite(_)
+                | Self::KillBufferConfirm { .. }
+                | Self::ExitSave { .. }
+                | Self::CommitSecondLine
+                | Self::CommitAll { .. }
+                | Self::CommitMerge { .. }
+                | Self::CommitInterrupt { .. }
         )
     }
 
@@ -140,8 +175,24 @@ impl ReadKind {
                 Some(path) => format!("Save file {}? (y or n) ", path.display()),
                 None => format!("Save buffer {name}? (y or n) "),
             },
+            ReadKind::CommitYesNo { prompt, .. } | ReadKind::CommitUsername { prompt, .. } => prompt.clone(),
+            ReadKind::CommitInterrupt { .. } => "Kill process? (y or n) ".to_owned(),
+            ReadKind::CommitSecondLine => "Second line is not empty. Commit anyway? (y or n) ".to_owned(),
+            #[cfg(unix)]
+            ReadKind::CommitReload { modified, .. } => {
+                if *modified {
+                    "Git editor file changed on disk. Discard your edits and reread? (yes or no) "
+                } else {
+                    "Git editor file changed on disk. Reread from disk? (yes or no) "
+                }.to_owned()
+            }
+            ReadKind::CommitAll { .. } => "Nothing staged.  Commit all uncommitted changes? (y or n) ".to_owned(),
+            ReadKind::CommitMerge { .. } => "Proceed with merge despite unstaged changes? (y or n) ".to_owned(),
             ReadKind::ExitModified => {
                 "Modified buffers exist; exit anyway? (yes or no) ".to_owned()
+            }
+            ReadKind::ExitActiveCommits => {
+                "Active Git processes exist; kill them and exit anyway? (yes or no) ".to_owned()
             }
             ReadKind::ExitUncertainGit => {
                 "A Git write result is uncertain; inspect *Messages* and repository. Exit anyway? (yes or no) ".to_owned()

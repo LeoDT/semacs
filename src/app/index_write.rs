@@ -195,6 +195,7 @@ impl AppShell {
                     cx,
                 );
                 shell.git_task = None;
+                shell.schedule_repository_refresh(window, cx);
                 if shell.exiting() {
                     shell.process_next_exit(window, cx);
                 }

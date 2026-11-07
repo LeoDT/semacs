@@ -284,7 +284,7 @@ class SessionTests(unittest.TestCase):
 
     def test_fish_entry_builds_only_the_application_and_propagates_failure(self):
         source = (Path(manual.__file__).parent / "acceptance.fish").read_text()
-        self.assertIn('styles magit magit-status\n    cargo build --release --bin semacs --target-dir', source)
+        self.assertIn('styles magit magit-status magit-commit\n    cargo build --release --bin semacs --target-dir', source)
         block = source.split('else if test "$mode" = magit-status\n')[1].split('else if contains -- "$mode" themes')[0]
         self.assertEqual(block.count("scripts/magit_status_manual.py"), 1)
         self.assertIn('--binary "$root/target/release/semacs" --consent\n    or fail ', block)

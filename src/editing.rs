@@ -66,6 +66,9 @@ impl fmt::Display for RouteError {
             Self::Input(InputError::Edit(EditError::ReadOnly)) => {
                 f.write_str("Buffer is read-only")
             }
+            Self::Input(InputError::Edit(EditError::EditingInhibited(reason))) => {
+                f.write_str(reason)
+            }
             Self::Input(InputError::Edit(EditError::TextReadOnly)) => {
                 f.write_str("Text is read-only")
             }
@@ -92,6 +95,7 @@ pub struct CommandOutcome {
     pub message: Option<String>,
     pub reveal_point: bool,
     pub viewport: Option<ViewportRequest>,
+    pub quit: bool,
 }
 
 impl CommandOutcome {
@@ -582,11 +586,17 @@ impl EditTarget {
             }
             Command::KeyboardQuit => {
                 self.buffer.deactivate_mark();
-                return Ok(CommandOutcome::message("Quit"));
+                return Ok(CommandOutcome {
+                    quit: true,
+                    ..CommandOutcome::message("Quit")
+                });
             }
             Command::KeyboardEscapeQuit => {
                 self.buffer.deactivate_mark();
-                return Ok(CommandOutcome::default());
+                return Ok(CommandOutcome {
+                    quit: true,
+                    ..CommandOutcome::default()
+                });
             }
             Command::KillWord
             | Command::BackwardKillWord

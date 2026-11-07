@@ -13,8 +13,13 @@ pub(super) struct DiffSession {
 impl Buffer {
     pub(crate) fn diff(comparison: Comparison) -> Self {
         let mut buffer = Self::named(&format!(
-            "*magit-diff {}: {}*",
+            "*magit-diff {}{}: {}*",
             comparison.kind.name(),
+            if comparison.environment == crate::diff::ReadEnvironment::Commit {
+                " [commit]"
+            } else {
+                ""
+            },
             comparison.repository.root.to_string_lossy().escape_debug()
         ));
         buffer.set_mode(crate::mode::ModeId::MAGIT_DIFF);
@@ -65,15 +70,21 @@ impl Buffer {
         Ok((session.comparison.clone(), session.request))
     }
 
+    pub(crate) fn diff_request_matches(&self, request: u64, comparison: &Comparison) -> bool {
+        self.document
+            .borrow()
+            .diff
+            .as_ref()
+            .is_some_and(|session| session.request == request && &session.comparison == comparison)
+    }
+
     pub(crate) fn install_diff(
         &mut self,
         request: u64,
         data: Diff,
         rendered: RenderedDiff,
     ) -> Result<bool, String> {
-        if !self.document.borrow().diff.as_ref().is_some_and(|session| {
-            session.request == request && session.comparison == data.comparison
-        }) {
+        if !self.diff_request_matches(request, &data.comparison) {
             return Ok(false);
         }
         self.install_projection(&rendered.text, rendered.sections, rendered.styles);

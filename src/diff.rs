@@ -7,19 +7,21 @@ mod parse;
 mod render;
 #[cfg(test)]
 pub(crate) mod tests;
-pub use crate::git::Repository;
+pub use crate::git::{ReadEnvironment, Repository};
 pub(crate) use render::{DiffNavigation, RenderedDiff};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DiffKind {
     Staged,
     Unstaged,
+    Worktree,
 }
 impl DiffKind {
     pub fn name(self) -> &'static str {
         match self {
             Self::Staged => "staged",
             Self::Unstaged => "unstaged",
+            Self::Worktree => "worktree",
         }
     }
 }
@@ -28,6 +30,7 @@ impl DiffKind {
 pub struct Comparison {
     pub repository: Repository,
     pub kind: DiffKind,
+    pub environment: ReadEnvironment,
 }
 
 #[derive(Clone, Debug)]
@@ -80,8 +83,46 @@ pub(crate) enum Visit {
     },
 }
 
+fn worktree_base(
+    repository: &Repository,
+    cancelled: &AtomicBool,
+    environment: crate::git::ReadEnvironment,
+) -> Result<String, String> {
+    let head = environment.execute(
+        repository,
+        &[
+            "rev-parse".as_ref(),
+            "--verify".as_ref(),
+            "--quiet".as_ref(),
+            "HEAD".as_ref(),
+        ],
+        cancelled,
+    )?;
+    let bytes = match head.status.code() {
+        Some(0) => head.bytes,
+        Some(1) => environment.read(
+            repository,
+            &[
+                "hash-object".as_ref(),
+                "-t".as_ref(),
+                "tree".as_ref(),
+                "--stdin".as_ref(),
+            ],
+            cancelled,
+        )?,
+        _ => {
+            return Err(format!(
+                "Cannot read HEAD ({}): {}",
+                head.status, head.diagnostic
+            ));
+        }
+    };
+    String::from_utf8(bytes).map_err(|error| error.to_string())
+}
+
 impl Diff {
     pub(crate) fn load(comparison: Comparison, cancelled: &AtomicBool) -> Result<Self, String> {
+        let environment = comparison.environment;
         let mut args = vec![
             "diff",
             "--raw",
@@ -106,20 +147,27 @@ impl Diff {
             "--output-indicator-old=-",
             "--output-indicator-context= ",
         ];
+        let base = if comparison.kind == DiffKind::Worktree {
+            Some(worktree_base(
+                &comparison.repository,
+                cancelled,
+                environment,
+            )?)
+        } else {
+            None
+        };
         if comparison.kind == DiffKind::Staged {
             args.push("--cached");
+        }
+        if let Some(base) = &base {
+            args.push(base.trim());
         }
         args.push("--");
         let args: Vec<_> = args.into_iter().map(std::ffi::OsStr::new).collect();
         let bytes = {
             #[cfg(feature = "native-profiler")]
             let _span = crate::preparation_trace::Span::new("diff-git", 0);
-            crate::git::read(
-                &comparison.repository.root,
-                Some(&comparison.repository.git_dir),
-                &args,
-                cancelled,
-            )?
+            environment.read(&comparison.repository, &args, cancelled)?
         };
         #[cfg(feature = "native-profiler")]
         let _span = crate::preparation_trace::Span::new("diff-parse", bytes.len());
@@ -147,7 +195,7 @@ impl Diff {
         let old = new_line.is_none() && old_line.is_some() || file.status == 'D';
         let line = if old { old_line } else { new_line }.unwrap_or(1).max(1);
         let path = if old { &file.old_path } else { &file.new_path };
-        if !old && self.comparison.kind == DiffKind::Unstaged {
+        if !old && self.comparison.kind != DiffKind::Staged {
             return Ok(Visit::Worktree {
                 path: self.comparison.repository.root.join(path),
                 line,

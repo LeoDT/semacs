@@ -8,6 +8,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 pub(crate) struct Repository(pub PathBuf);
 impl Repository {
     pub fn new() -> Self {
+        Self::with_format("sha1")
+    }
+    fn with_format(format: &str) -> Self {
         static NEXT: AtomicU64 = AtomicU64::new(0);
         let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join(".pi/tmp")
@@ -22,7 +25,7 @@ impl Repository {
             ));
         std::fs::create_dir(&root).unwrap();
         let repo = Self(root);
-        repo.git(&["init", "-q"]);
+        repo.git(&["init", "-q", &format!("--object-format={format}")]);
         repo.git(&["config", "user.name", "Fixture"]);
         repo.git(&["config", "user.email", "fixture@example.invalid"]);
         repo
@@ -64,6 +67,7 @@ impl Repository {
                     git_dir: self.0.join(".git"),
                 },
                 kind,
+                environment: ReadEnvironment::Projection,
             },
             &AtomicBool::new(false),
         )
@@ -73,6 +77,42 @@ impl Repository {
 impl Drop for Repository {
     fn drop(&mut self) {
         std::fs::remove_dir_all(&self.0).unwrap();
+    }
+}
+
+#[test]
+fn head_to_worktree_includes_both_sides_of_the_index_and_visits_disk() {
+    let repo = Repository::new();
+    repo.write("a", "base\n");
+    repo.commit();
+    repo.write("a", "staged\n");
+    repo.git(&["add", "a"]);
+    repo.write("a", "worktree\n");
+    repo.write("untracked", "not included\n");
+    let diff = repo.load(DiffKind::Worktree);
+    assert_eq!(diff.files.len(), 1);
+    let text = diff.render().unwrap().text;
+    assert!(text.contains("-base"));
+    assert!(text.contains("+worktree"));
+    assert!(!text.contains("+staged"));
+    assert!(
+        matches!(diff.visit(0, None, Some(1), 0).unwrap(), Visit::Worktree { path, .. } if path == repo.0.join("a"))
+    );
+    assert!(
+        matches!(diff.visit(0, Some(1), None, 0).unwrap(), Visit::Blob { oid, .. } if oid == diff.files[0].old_oid)
+    );
+}
+
+#[test]
+fn head_to_worktree_uses_the_repository_empty_tree_for_unborn_sha1_and_sha256() {
+    for format in ["sha1", "sha256"] {
+        let repo = Repository::with_format(format);
+        repo.write("a", "initial\n");
+        repo.git(&["add", "-N", "a"]);
+        let diff = repo.load(DiffKind::Worktree);
+        assert_eq!(diff.files.len(), 1);
+        assert_eq!(diff.files[0].status, 'A');
+        assert!(diff.render().unwrap().text.contains("+initial"));
     }
 }
 
@@ -347,16 +387,19 @@ fn worktree_gitdir_is_pinned_and_user_diff_drivers_cannot_execute() {
         "sh -c 'touch SHOULD_NOT_EXIST; exit 1'",
     ]);
     std::fs::write(linked.join(".gitattributes"), "a diff=evil\n").unwrap();
-    let diff = Diff::load(
-        Comparison {
-            repository,
-            kind: DiffKind::Unstaged,
-        },
-        &AtomicBool::new(false),
-    )
-    .unwrap();
-    assert_eq!(diff.files.len(), 1);
-    assert!(diff.render().unwrap().text.contains("+new"));
+    for environment in [ReadEnvironment::Projection, ReadEnvironment::Commit] {
+        let diff = Diff::load(
+            Comparison {
+                repository: repository.clone(),
+                kind: DiffKind::Unstaged,
+                environment,
+            },
+            &AtomicBool::new(false),
+        )
+        .unwrap();
+        assert_eq!(diff.files.len(), 1);
+        assert!(diff.render().unwrap().text.contains("+new"));
+    }
     assert!(!linked.join("SHOULD_NOT_EXIST").exists());
 }
 
@@ -421,7 +464,8 @@ fn malformed_protocol_and_unsafe_paths_fail_closed() {
                     root: repo.0.clone(),
                     git_dir: repo.0.join(".git"),
                 },
-                kind: DiffKind::Unstaged
+                kind: DiffKind::Unstaged,
+                environment: ReadEnvironment::Projection,
             },
             &cancelled
         )

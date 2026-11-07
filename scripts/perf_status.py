@@ -155,7 +155,7 @@ def main():
                 "new_process_each_run": True, "explicit_font_warmup": False,
                 "observation": "after run_until_parked + draw; scheduler may coalesce readiness",
                 "probe_draw": "explicit draw calls only; excludes scheduler-internal paints",
-                "preparation": "M-x command entry and point positioning outside phase timers",
+                "preparation": "M-x command entry, point positioning and single-status-window normalization after open outside phase timers",
                 "cache": "OS page cache uncontrolled; fixture setup precedes measurement",
                 "native_draw_scroll_idle": "unmeasured", "gpu_presentation": "unmeasured",
                 "uname": list(os.uname())}

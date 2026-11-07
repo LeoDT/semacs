@@ -2,7 +2,7 @@
 
 use std::collections::VecDeque;
 
-use crate::buffer::BufferId;
+use crate::buffer::{BufferId, SnapshotId};
 
 pub(crate) enum Closing {
     Kill(BufferId),
@@ -70,6 +70,8 @@ pub(crate) struct ExitFlow {
     remaining: VecDeque<BufferId>,
     waiting_save: Option<BufferId>,
     pub uncertain_git_confirmed: bool,
+    pub modified_confirmed: Vec<SnapshotId>,
+    pub commits_confirmed: bool,
 }
 
 impl ExitFlow {
@@ -78,6 +80,8 @@ impl ExitFlow {
             remaining: remaining.into_iter().collect(),
             waiting_save: None,
             uncertain_git_confirmed: false,
+            modified_confirmed: Vec::new(),
+            commits_confirmed: false,
         }
     }
 
@@ -101,6 +105,10 @@ impl ExitFlow {
 
     pub fn clear_waiting_save(&mut self) {
         self.waiting_save = None;
+    }
+
+    pub fn is_waiting(&self) -> bool {
+        self.waiting_save.is_some()
     }
 
     fn is_waiting_for(&self, buffer: BufferId) -> bool {

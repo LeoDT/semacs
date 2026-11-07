@@ -8,6 +8,10 @@ use semacs::buffer::Buffer;
 use semacs::files::{self, ReadError};
 
 fn main() -> ExitCode {
+    #[cfg(unix)]
+    if let Some(status) = semacs::commit::run_helper_if_requested(std::env::args_os().skip(1)) {
+        return status;
+    }
     let path = match parse_args() {
         Ok(path) => path,
         Err(message) => {
@@ -43,7 +47,18 @@ fn main() -> ExitCode {
             };
             cx.update(|cx| {
                 gpui_kit::open_window(options, cx, move |window, cx| {
-                    cx.new(|cx| AppShell::with_configuration(buffer, path.ok(), result, window, cx))
+                    cx.new(|cx| {
+                        let mut shell =
+                            AppShell::with_configuration(buffer, path.ok(), result, window, cx);
+                        #[cfg(unix)]
+                        match semacs::commit::Runtime::current() {
+                            Ok(runtime) => shell.set_commit_runtime(runtime),
+                            Err(error) => {
+                                eprintln!("semacs: Git editor helper unavailable: {error}")
+                            }
+                        }
+                        shell
+                    })
                 })
                 .expect("failed to open semacs window");
             });

@@ -35,7 +35,7 @@ interface SemacsThemeDefinition {
     styles: SemacsThemeStyles;
 }
 
-type SemacsMode = "fundamental" | "magit-diff" | "magit-status";
+type SemacsMode = "fundamental" | "magit-diff" | "magit-status" | "git-commit" | "magit-process";
 
 interface SemacsStatusSelection {
     readonly group: "untracked" | "unstaged" | "staged" | "unmerged";

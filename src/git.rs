@@ -18,6 +18,53 @@ pub struct Repository {
     pub git_dir: PathBuf,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ReadEnvironment {
+    Projection,
+    Commit,
+}
+
+impl ReadEnvironment {
+    pub(crate) fn read(
+        self,
+        repository: &Repository,
+        args: &[&std::ffi::OsStr],
+        cancelled: &AtomicBool,
+    ) -> Result<Vec<u8>, String> {
+        successful(self.execute(repository, args, cancelled)?)
+    }
+
+    pub(crate) fn execute(
+        self,
+        repository: &Repository,
+        args: &[&std::ffi::OsStr],
+        cancelled: &AtomicBool,
+    ) -> Result<process::Output, String> {
+        let access = match self {
+            Self::Projection => Access::Read(cancelled),
+            Self::Commit => Access::CommitRead(cancelled),
+        };
+        execute(
+            &repository.root,
+            Some(&repository.git_dir),
+            args,
+            None,
+            access,
+        )
+        .map_err(|failure| failure.diagnostic)
+    }
+}
+
+fn successful(output: process::Output) -> Result<Vec<u8>, String> {
+    if !output.status.success() {
+        return Err(format!(
+            "Git failed ({}): {}",
+            output.status, output.diagnostic
+        ));
+    }
+    Ok(output.bytes)
+}
+
 pub(crate) fn read(
     directory: &Path,
     git_dir: Option<&Path>,
@@ -36,13 +83,7 @@ pub(crate) fn read_input(
 ) -> Result<Vec<u8>, String> {
     let output = execute(directory, git_dir, args, input, Access::Read(cancelled))
         .map_err(|failure| failure.diagnostic)?;
-    if !output.status.success() {
-        return Err(format!(
-            "Git failed ({}): {}",
-            output.status, output.diagnostic
-        ));
-    }
-    Ok(output.bytes)
+    successful(output)
 }
 
 pub(crate) fn discover(directory: &Path, cancelled: &AtomicBool) -> Result<Repository, String> {

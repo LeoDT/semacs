@@ -7,6 +7,8 @@ impl ModeId {
     pub const FUNDAMENTAL: Self = Self("fundamental");
     pub const MAGIT_DIFF: Self = Self("magit-diff");
     pub const MAGIT_STATUS: Self = Self("magit-status");
+    pub const GIT_COMMIT: Self = Self("git-commit");
+    pub const MAGIT_PROCESS: Self = Self("magit-process");
 
     pub fn name(self) -> &'static str {
         self.0
@@ -34,9 +36,41 @@ pub const MODES: &[ModeId] = &[
     ModeId::FUNDAMENTAL,
     ModeId::MAGIT_DIFF,
     ModeId::MAGIT_STATUS,
+    ModeId::GIT_COMMIT,
+    ModeId::MAGIT_PROCESS,
 ];
 
 const MODE_BINDINGS: &[(ModeId, &str, crate::command::Command)] = &[
+    (
+        ModeId::MAGIT_DIFF,
+        "$",
+        crate::command::Command::MagitProcessBuffer,
+    ),
+    (
+        ModeId::MAGIT_STATUS,
+        "$",
+        crate::command::Command::MagitProcessBuffer,
+    ),
+    (
+        ModeId::MAGIT_PROCESS,
+        "$",
+        crate::command::Command::MagitProcessBuffer,
+    ),
+    (
+        ModeId::MAGIT_PROCESS,
+        "space",
+        crate::command::Command::ScrollUp,
+    ),
+    (
+        ModeId::MAGIT_PROCESS,
+        "backspace",
+        crate::command::Command::ScrollDown,
+    ),
+    (
+        ModeId::MAGIT_PROCESS,
+        "shift-space",
+        crate::command::Command::ScrollDown,
+    ),
     (
         ModeId::MAGIT_STATUS,
         "space",

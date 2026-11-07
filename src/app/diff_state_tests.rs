@@ -174,11 +174,17 @@ fn unstaged_visit_reuses_editable_worktree_and_mode_keys_stay_out_of_minibuffer(
     command(&mut visual, &shell, Command::MagitDiffVisit);
     wait(&mut visual, &shell);
     visual.read(|cx| {
-        assert_eq!(shell.read(cx).active_view(), &worktree);
-        assert!(!worktree.read(cx).buffer().is_read_only());
+        let active = shell.read(cx).active_view().read(cx);
+        assert_eq!(
+            active.buffer().snapshot_id().buffer,
+            worktree.read(cx).buffer().snapshot_id().buffer
+        );
+        assert!(!active.buffer().is_read_only());
+        assert_eq!(active.buffer().text().to_string(), "old\n");
+        assert_eq!(active.buffer().point(), crate::text::ByteOffset(1));
         assert_eq!(
             worktree.read(cx).buffer().point(),
-            crate::text::ByteOffset(1)
+            crate::text::ByteOffset(0)
         );
     });
     visual.update(|window, cx| {

@@ -87,6 +87,7 @@ fn refresh_keeps_shared_folds_and_each_view_position_without_focus_steal(cx: &mu
     command(&mut visual, &shell, Command::MagitStatus);
     wait(&mut visual, &shell);
     let first = visual.read(|cx| shell.read(cx).active_view().clone());
+    let first_pane = visual.read(|cx| *shell.read(cx).panes.selected());
     command(&mut visual, &shell, Command::SplitWindowRight);
     command(&mut visual, &shell, Command::OtherWindow);
     let second = visual.read(|cx| shell.read(cx).active_view().clone());
@@ -120,7 +121,9 @@ fn refresh_keeps_shared_folds_and_each_view_position_without_focus_steal(cx: &mu
     until(&mut visual, &shell, |shell| {
         shell.status_read_gate.is_none()
     });
-    command(&mut visual, &shell, Command::OtherWindow);
+    visual.update(|window, cx| {
+        shell.update(cx, |shell, cx| shell.select_pane(first_pane, window, cx))
+    });
     release.send(()).unwrap();
     wait(&mut visual, &shell);
     visual.read(|cx| {
@@ -174,15 +177,13 @@ fn open_bound_to_existing_status_never_resurrects_killed_or_detached_target(
         let repo = repo();
         let (mut visual, shell) = open(&repo, cx);
         let origin = visual.read(|cx| shell.read(cx).active_view().clone());
+        let origin_pane = visual.read(|cx| *shell.read(cx).panes.selected());
         command(&mut visual, &shell, Command::MagitStatus);
         wait(&mut visual, &shell);
         let status = visual.read(|cx| shell.read(cx).active_view().clone());
         let repository = visual.read(|cx| status.read(cx).buffer().status_repository().unwrap());
         visual.update(|window, cx| {
-            shell.update(cx, |shell, cx| {
-                let index = shell.buffer_index(&origin, cx).unwrap();
-                shell.activate(index, window, cx);
-            })
+            shell.update(cx, |shell, cx| shell.select_pane(origin_pane, window, cx))
         });
         let release = gate(&mut visual, &shell);
         command(&mut visual, &shell, Command::MagitStatus);
@@ -554,10 +555,10 @@ fn refresh_failure_preserves_content_and_old_completion_cannot_clear_new_slot(
     until(&mut visual, &shell, |shell| {
         shell.status_read_gate.is_none()
     });
-    visual.update(|_, cx| {
-        shell.update(cx, |shell, _| {
+    visual.update(|window, cx| {
+        shell.update(cx, |shell, cx| {
             let operation = shell.git_task.as_ref().unwrap().operation();
-            assert!(!shell.finish_git_read(operation + 1));
+            assert!(!shell.finish_git_read(operation + 1, window, cx));
             assert!(shell.git_task.is_some());
         })
     });

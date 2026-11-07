@@ -20,6 +20,12 @@ impl AppShell {
         if self.session.is_some() {
             return None;
         }
+        if kind == ReadKind::WriteFile
+            && let Some(reason) = target.read(cx).buffer().edit_inhibition()
+        {
+            self.show_message(target, reason, cx);
+            return None;
+        }
         self.cancel_file_open();
         let prompt = kind.prompt();
         self.mount_minibuffer(&prompt, initial, window, cx)?;
@@ -163,11 +169,23 @@ impl AppShell {
             return None;
         }
         self.remove_minibuffer(cx);
+        #[cfg(unix)]
+        cx.defer_in(window, |shell, window, cx| {
+            shell.present_commit_prompt(window, cx);
+            shell.schedule_repository_refresh(window, cx);
+            if shell.waiting_commit_exit() {
+                shell.process_next_exit(window, cx);
+            }
+        });
         self.update_selected_views(cx);
         let target = session.origin().clone();
         let active = self.active_view().clone();
         active.update(cx, |view, cx| view.restore_input(window, cx));
         cx.notify();
+        if self.buffer_index(&target, cx).is_none() {
+            self.show_message(&active, "Read target no longer exists", cx);
+            return None;
+        }
         Some(target)
     }
 
@@ -318,6 +336,15 @@ impl AppShell {
                 let input = self.session_input(cx).unwrap_or_default();
                 self.confirm_font_family(id, &input, window, cx);
             }
+            ReadKind::CommitUsername {
+                operation, request, ..
+            } => {
+                let input = self.session_input(cx).unwrap_or_default();
+                if let Some(target) = self.end_session(id, window, cx) {
+                    #[cfg(unix)]
+                    self.answer_commit_prompt(operation, request, input, &target, window, cx);
+                }
+            }
             ReadKind::FindFile => self.confirm_find_file(id, window, cx),
             ReadKind::WriteFile => self.confirm_write_file(id, window, cx),
             ReadKind::SwitchToBuffer { default } => {
@@ -374,6 +401,74 @@ impl AppShell {
             return;
         };
         match kind {
+            ReadKind::CommitAll {
+                repository,
+                pane,
+                buffer,
+            } => {
+                #[cfg(unix)]
+                self.answer_commit_all(
+                    repository,
+                    (pane, buffer),
+                    answer == Answer::Yes,
+                    window,
+                    cx,
+                );
+            }
+            ReadKind::CommitMerge { repository } =>
+            {
+                #[cfg(unix)]
+                if answer == Answer::Yes {
+                    self.launch_commit(repository, crate::commit::Scope::Staged, window, cx);
+                }
+            }
+            ReadKind::CommitYesNo {
+                operation, request, ..
+            } => {
+                #[cfg(unix)]
+                self.answer_commit_prompt(
+                    operation,
+                    request,
+                    if answer == Answer::Yes { "yes" } else { "no" }.into(),
+                    &target,
+                    window,
+                    cx,
+                );
+            }
+            #[cfg(unix)]
+            ReadKind::CommitReload {
+                snapshot, outcome, ..
+            } => {
+                #[cfg(unix)]
+                self.answer_commit_reload(
+                    &target,
+                    snapshot,
+                    answer == Answer::Yes,
+                    outcome,
+                    window,
+                    cx,
+                );
+            }
+            ReadKind::CommitSecondLine =>
+            {
+                #[cfg(unix)]
+                if answer == Answer::Yes {
+                    self.finish_commit_editor(
+                        &target,
+                        crate::commit::EditorOutcome::Finish,
+                        true,
+                        window,
+                        cx,
+                    );
+                }
+            }
+            ReadKind::CommitInterrupt { operation } =>
+            {
+                #[cfg(unix)]
+                if answer == Answer::Yes {
+                    self.signal_commit(operation, false, &target, cx);
+                }
+            }
             ReadKind::Overwrite(_) | ReadKind::ExternalChange(_) => {
                 if answer == Answer::Yes {
                     self.resume_save(&target, window, cx);
@@ -420,9 +515,25 @@ impl AppShell {
                     self.show_message(&target, "Canceled", cx);
                 }
             }
-            ReadKind::ExitModified => {
+            ReadKind::ExitModified | ReadKind::ExitActiveCommits => {
                 if answer == Answer::Yes {
-                    self.finish_exit(window, cx);
+                    if let Some(flow) = self
+                        .closing
+                        .as_mut()
+                        .and_then(crate::exit::Closing::exit_mut)
+                    {
+                        if kind == ReadKind::ExitModified {
+                            flow.modified_confirmed = self
+                                .buffers
+                                .iter()
+                                .filter(|slot| slot.buffer.is_modified())
+                                .map(|slot| slot.buffer.snapshot_id())
+                                .collect();
+                        } else {
+                            flow.commits_confirmed = true;
+                        }
+                    }
+                    self.process_next_exit(window, cx);
                 } else {
                     self.cancel_closing();
                     self.show_message(&target, "Canceled", cx);
@@ -433,11 +544,29 @@ impl AppShell {
     }
 
     fn cancel_session(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(id) = self.session.as_ref().map(ReadSession::id) else {
+        let Some(session) = self.session.as_ref() else {
             return;
+        };
+        let id = session.id();
+        #[cfg(unix)]
+        let process = match session.kind() {
+            ReadKind::CommitYesNo { operation, .. }
+            | ReadKind::CommitUsername { operation, .. } => Some(*operation),
+            _ => None,
         };
         self.cancel_save_confirmation(cx);
         if let Some(target) = self.end_session(id, window, cx) {
+            #[cfg(unix)]
+            if let Some(operation) = process {
+                if let Some(session) = self
+                    .commits
+                    .iter_mut()
+                    .find(|session| session.record.operation == operation)
+                {
+                    session.interaction.clear();
+                }
+                self.signal_commit(operation, true, &target, cx);
+            }
             self.cancel_closing();
             self.show_message(&target, "Quit", cx);
         }

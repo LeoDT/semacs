@@ -20,6 +20,20 @@ mod appearance;
 mod buffer_commands;
 mod candidates;
 mod closing;
+#[cfg(unix)]
+mod commit_editor;
+#[cfg(unix)]
+mod commit_exit;
+#[cfg(unix)]
+mod commit_process;
+#[cfg(unix)]
+mod commit_prompt;
+#[cfg(unix)]
+mod commit_start;
+#[cfg(unix)]
+mod commits;
+#[cfg(unix)]
+pub use commits::{CommitPhase, CommitRecord};
 mod diff;
 mod documents;
 mod git;
@@ -34,6 +48,7 @@ mod scripting;
 #[cfg(test)]
 mod scripting_tests;
 mod status;
+mod temporary;
 mod windows;
 
 impl Global for KillRing {}
@@ -73,12 +88,26 @@ pub struct AppShell {
     script_task: Option<Task<()>>,
     git_task: Option<git::GitTask>,
     git_writes: git::records::WriteRecords,
+    git_changes: HashMap<crate::git::Repository, u64>,
+    git_refreshes: std::collections::VecDeque<git::refresh::Target>,
+    #[cfg(unix)]
+    commit_editors: HashMap<crate::buffer::BufferId, commit_editor::Editor>,
+    #[cfg(unix)]
+    commits: Vec<commits::Session>,
+    #[cfg(unix)]
+    commit_runtime: Option<crate::commit::Runtime>,
+    #[cfg(test)]
+    save_gate: Option<futures_channel::oneshot::Receiver<()>>,
     #[cfg(test)]
     index_write_gate: Option<futures_channel::oneshot::Receiver<()>>,
     #[cfg(test)]
     index_verify_gate: Option<futures_channel::oneshot::Receiver<()>>,
     #[cfg(test)]
     status_read_gate: Option<futures_channel::oneshot::Receiver<()>>,
+    #[cfg(test)]
+    commit_start_gate: Option<futures_channel::oneshot::Receiver<()>>,
+    #[cfg(test)]
+    repository_refresh_gate: Option<futures_channel::oneshot::Receiver<()>>,
     #[cfg(test)]
     workflow_return_gate: Option<futures_channel::oneshot::Receiver<()>>,
     startup_directory: PathBuf,
@@ -162,12 +191,26 @@ impl AppShell {
             script_task: None,
             git_task: None,
             git_writes: Default::default(),
+            git_changes: HashMap::new(),
+            git_refreshes: Default::default(),
+            #[cfg(unix)]
+            commit_editors: HashMap::new(),
+            #[cfg(unix)]
+            commits: Vec::new(),
+            #[cfg(unix)]
+            commit_runtime: None,
+            #[cfg(test)]
+            save_gate: None,
             #[cfg(test)]
             index_write_gate: None,
             #[cfg(test)]
             index_verify_gate: None,
             #[cfg(test)]
             status_read_gate: None,
+            #[cfg(test)]
+            commit_start_gate: None,
+            #[cfg(test)]
+            repository_refresh_gate: None,
             #[cfg(test)]
             workflow_return_gate: None,
             startup_directory: std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
@@ -266,6 +309,12 @@ impl AppShell {
         match route {
             KeyRoute::Unhandled => false,
             KeyRoute::Handled => true,
+            KeyRoute::Quit => {
+                #[cfg(unix)]
+                self.cancel_commit_preparation(window, cx);
+                self.cancel_commit_exit(window, cx);
+                true
+            }
             KeyRoute::Requested(command) => {
                 if let CommandId::Native(command) = command
                     && command.scope() == Scope::ReadSession
@@ -295,6 +344,20 @@ impl AppShell {
                 self.begin_read(ReadKind::Command, origin, "", window, cx);
             }
             Command::MagitStatus => self.open_status(origin, window, cx),
+            #[cfg(unix)]
+            Command::MagitCommitCreate => self.prepare_commit(origin, window, cx),
+            #[cfg(unix)]
+            Command::MagitProcessBuffer => self.view_commit_process(origin, window, cx),
+            #[cfg(unix)]
+            Command::MagitProcessKill => self.request_commit_interrupt(origin, window, cx),
+            #[cfg(unix)]
+            Command::CommitFinish
+            | Command::CommitCancel
+            | Command::CommitSaveMessage
+            | Command::CommitPreviousMessage
+            | Command::CommitNextMessage => {
+                self.commit_editor_command(command, origin, window, cx);
+            }
             Command::MagitDiffStaged
             | Command::MagitDiffUnstaged
             | Command::SectionToggle
@@ -306,6 +369,7 @@ impl AppShell {
             | Command::MagitDiffVisit
             | Command::ScrollLeft
             | Command::ScrollRight => self.diff_command(command, origin, window, cx),
+            Command::MagitModeBuryBuffer => self.quit_temporary(window, cx),
             Command::ViewEchoAreaMessages => self.view_messages(window, cx),
             Command::ReloadConfiguration => self.reload_configuration(origin, window, cx),
             Command::LoadTheme => {
@@ -335,6 +399,20 @@ impl AppShell {
                 self.begin_read(ReadKind::SwitchToBuffer { default }, origin, "", window, cx);
             }
             Command::KillBuffer => {
+                #[cfg(unix)]
+                if self
+                    .commit_editors
+                    .contains_key(&origin.read(cx).buffer().snapshot_id().buffer)
+                {
+                    self.finish_commit_editor(
+                        origin,
+                        crate::commit::EditorOutcome::Cancel,
+                        true,
+                        window,
+                        cx,
+                    );
+                    return;
+                }
                 let default = origin.read(cx).buffer().display_name();
                 self.begin_read(ReadKind::KillBuffer { default }, origin, "", window, cx);
             }
@@ -377,7 +455,15 @@ impl AppShell {
             return;
         }
         match command.scope() {
-            Scope::Edit => target.update(cx, |view, cx| view.execute_command(command, window, cx)),
+            Scope::Edit => {
+                if target.update(cx, |view, cx| view.execute_command(command, window, cx))
+                    == KeyRoute::Quit
+                {
+                    #[cfg(unix)]
+                    self.cancel_commit_preparation(window, cx);
+                    self.cancel_commit_exit(window, cx);
+                }
+            }
             Scope::Application => self.execute_application(command, target, window, cx),
             Scope::ReadSession => debug_assert!(false, "{} is not runnable here", command.name()),
         }

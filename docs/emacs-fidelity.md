@@ -295,7 +295,7 @@
 - `RET` / `C-m` 在删除行访问旧侧，在新增 / 上下文行访问新侧并定位；heading 使用对应侧起始行。HEAD / index 使用本次 diff 的完整 blob 身份打开只读快照，不重解释为当前 index 或 worktree；unstaged 新侧复用普通文件 buffer，保留其未保存文本，行列超界时夹紧。不提供 C-RET 的跨版本行号映射。
 - Git 在后台以参数数组执行，关闭外部 diff / textconv，不运行 Git 写命令。每窗口最多一个 Git 读取，无请求队列；单次子进程 15 秒，stdout 16 MiB、stderr 64 KiB，diff 最多 4096 个文件 / 100000 行 patch，超限明确失败。禁止按需自动抓取缺失 blob；固定 worktree / git-dir，刷新不能意外回落到父仓库。刷新失败保留旧内容；结果校验目标及请求身份，不按完成时焦点重新定向。打开 / 版本访问期间焦点目标变化或进入读入会话时不抢回界面。
 
-F1 不包含 status、transient、Git 写操作、任意 revision / range、patch 导入、untracked 浏览、结构化 / 部分 hunk 选择、词级差异、hunk 语法、递归折叠全套、兄弟导航、搜索自动展开、diff 参数修改或窗口恢复式 q；新增窄写入切片见下节。
+F1 不包含 status、transient、Git 写操作、任意 revision / range、patch 导入、untracked 浏览、结构化 / 部分 hunk 选择、词级差异、hunk 语法、递归折叠全套、兄弟导航、搜索自动展开、diff 参数修改或窗口恢复式 q；新增窄写入切片见下节，后续 window 行为见 [F3](#阶段-f3临时-window-与普通-commit)。
 
 ## 阶段 F2：status 与单文件 index 操作
 
@@ -330,3 +330,43 @@ F2 仅提供 status 与单文件整文件级 index 操作，不包含 hunk / 批
 - 首版没有取消写入 API。正常窗口 / 应用退出异步等待活动写入终态和有界核对；结果不确定须报告并确认退出，再走原有 dirty / 退出流程。子进程仍受安全时限约束，终止按不确定处理；不托管退出后进程，不承诺崩溃 / 强杀后的结果保留，重启只查询、不重放。
 - JS 沿用阶段 D 的时间 / 内存 / 栈限制；每子进程 15 秒、stdout 16 MiB、stderr 64 KiB，写后核对同样受限；这不是含发现 / 预检 / 写入 / 核对的全操作 15 秒保证。status / 写入端到端仅记基线，适用的绘制 / 滚动 / idle 预算不变，真实环境验证另行授权。
 - status 只读预检全操作累计 index 元数据最多 16 MiB、最多 4096 个仓库，单次属性 / 配置输出沿用子进程上限，超限拒绝读取。模型最多 4096 条文件记录（头部不计，一条可投影两组）、生成正文最多 16 MiB UTF-8，超限整次失败不截断清单；未知可选 porcelain 头部可忽略，未知记录类型、非法字段 / 路径及缺失 NUL 终止符失败。
+
+## 阶段 F3：临时 window 与普通 commit
+
+本节定义 F3 已确认的行为，扩展 F1 / F2 的历史范围；不是实现完成声明。当前进度与待决细节见[计划](plan.md)，静态核对入口与来源身份见 [F3 上游参照](work/f3-window-commit.md)。
+
+### 临时显示与退出
+
+- status / diff 沿用既有 buffer / view / split；目标已显示时复用，否则默认尝试下方 split，空间不足或布局尚不能 split 时使用当前 window。不是新 OS frame 或浮动对话框，不自动保存普通文件。
+- `q` / `magit-mode-bury-buffer` 是 status / diff 的 mode 局部命令，bury 而不 kill。关闭本次创建且无需保留局部 buffer 历史的临时 window，或恢复本次替换的 buffer / 来源焦点；被替换的既有 view 保留 point / 滚动。没有本次显示记录时使用局部历史及可用 buffer 回退，不无条件删除 window。
+- 只撤销本次显示的局部变化，不恢复整棵旧布局；用户后来创建的其他 split 保留。临时 window 已被用户用于其他 buffer 时优先恢复局部历史，最后一个 window 不删除，已关闭来源不复活；原 buffer 已 kill 时回退到存活 buffer，必要时创建 scratch。
+- 显示策略只在异步结果仍属于原目标且输入允许时执行；切换目标、进入读入、前缀等待或 IME 时不抢焦点、不追加临时 window。刷新仍不切焦点；配置 reload 不抹掉显示归属。
+
+### 普通 staged commit：已确认方向
+
+- `M-x magit-commit-create` 从当前 Magit 仓库或发起文件目录创建普通提交；不自动保存编辑 buffer。已有 staged 时提交 index；没有 staged、但有已跟踪 unstaged 改动时，采用 Magit 默认 verbose 流程：先显示 unstaged diff，再以 `y` / `n` 询问是否提交全部已跟踪改动，确认才启动 `git commit --all`，不自动加入 untracked。正常答复后收起预览；`C-g` 不启动 Git、保留预览。普通仓库仅有 untracked 或没有变化时报告 `Nothing staged (or unstaged)`。已有 merge message 时沿用上游的 merge 创建提交分支；没有 staged 而仍有 unstaged 时询问是否继续 merge，不擅自改用 `--all`。
+- 先启动真实 `git commit`；Git 请求 editor 时打开它给定的可编辑消息文件并显示提交 diff，尽量复用已有 Magit window。普通 staged 使用 index diff，`--all` 使用 HEAD → worktree（unborn 使用对应对象格式的空 tree）；查看不冻结提交内容。不能用“先编辑，再执行 `git commit -F`”替代。
+- `C-c C-c` 保存消息，成功结束 editor，让等待中的 Git 继续；`C-c C-k` 保存消息并以失败结束 editor，取消提交；`q` 仍输入文字。Git 自己处理消息 cleanup、hooks 时序、锁与最终提交。
+- **已批准差异：结束编辑期间的输入**。Emacs 同步执行结束编辑命令，后续输入等命令结束后再处理；semacs 继续使用异步保存，仅在 finish / cancel 的保存及 editor 答复期间暂时禁止该消息 buffer 的修改、重复结束及新保存 / 另存请求，覆盖所有共享 view。被拒绝的操作明确提示，不排队重放；已有保存 / 另存队列先完成，保存失败或确认被取消则恢复编辑、保留 editor 请求。GUI、导航、保存确认及进程输出不阻塞；普通保存不变，限制不延长到 Git 后续 hook / 签名或整个进程生命周期。理由是用户已明确结束编辑，避免为此引入输入暂存 / 重放机制；不以 commit 通常较快为时限依据。
+- **范围边界**：密码 / passphrase 提示与保密读入不属于 F3，不作为阶段完成条件；不以普通文本读入替代。F3 支持已知 yes/no 与用户名提示；需要 semacs 代收密码的路径不在本阶段验收范围，等待输入时仍可查看输出和主动中断。这不表示禁止外部工具自行处理密码。
+- 正常运行 hooks、遵循签名配置、允许相关外部工具交互；不静默禁用 hooks / 签名，不给 commit 固定 15 秒或 120 秒超时。不冻结编辑开始时的 HEAD / index，也不在完成编辑时额外比较并拒绝；staged diff 不承诺是不可变化的提交快照。F2 的 index 操作限制不自动套给 commit。
+- 结束编辑后按局部 window 策略收起本次编辑界面并返回 status；Git 进程终态后刷新。完成消息编辑不等于提交成功；编辑前失败可能没有消息 window，编辑后失败不强制重新打开原 window，但保留消息供恢复 / 重试，并可查看诊断。
+- 提供进程输出查看与主动中断，以上游 `$` 查看进程 buffer、`k` 先 interrupt、再次调用 kill 为交互参照；中断不是回滚，不自动重放。取消编辑也不回滚此前 hook 副作用。
+- 正常退出先处理修改文件，再以完整 yes / no 询问活动 Git 进程；拒绝 / `C-g` 保留会话。确认后采用 Emacs 的 SIGHUP，不自动升级 SIGKILL，不设终止期限，也不向 editor 答复成功。结合已确认的“不托管退出后 commit”边界，semacs 异步等待实际终态及 helper 回收后再关闭窗口，启动中的会话也保留本次挂断归属；未结束时仍可查看输出、显式 `k` 控制，或用 `C-g` 取消退出等待。取消不能撤回已发送的信号，再次退出重新询问并发起新的挂断。显式强杀与失去必要所有权的强制回收不改用 SIGHUP。
+- 首版不包含 amend / fixup、hunk / 部分行 / 批量、discard、完整 transient、任意进程 API、通用异步 Job 或持久化恢复；必要偏离先确认后登记。
+
+### 消息文件与恢复
+
+- 访问 Git 传入的真实路径，支持 hook 请求的其他消息文件，不假定总是 `.git/COMMIT_EDITMSG`。复用已访问文件时若磁盘已变化，按上游询问是否重读，dirty 文案明确会放弃编辑；拒绝保留草稿，后续保存仍走既有外部修改确认。后台载入不替换其他读入，未决重读在该消息 buffer 结束编辑前处理；确认后出现的新编辑不被旧答复覆盖。
+- 隐藏 / 关闭 view 或配置 reload 不结束 editor 请求。当前消息的 `kill-buffer` 命令按 cancel 处理，其他直接删除活动 editor buffer 的路径拒绝并提示使用 cancel；重复请求复用消息 buffer，各自答复其 helper。
+- `write-file` 改变当前访问路径，finish / cancel 保存当前访问文件；Git 等待的原文件路径不因此重定向，不禁止另存，也不偷偷回写原路径。
+- 消息 ring 在进程内跨窗口共享，默认 32 条；开始 / 结束编辑保存消息，`C-c M-s` 显式保存，`M-p` / `M-n` 用逐编辑会话的位置浏览，浏览前保留新草稿。去重并移到前端，忽略纯空白 / 注释及 scissors 后正文；恢复替换消息部分、保留 Git 注释并可 undo。不改写交付给 Git 的消息文件，不承诺跨重启。
+- finish 默认在第二行非空时询问是否仍提交；这是上游样式询问，不替代 Git 的消息有效性或 cleanup 判定。保存失败 / 拒绝保存确认不答复 editor 成功，也不收起编辑界面；Git 后续失败不强制重开界面，可在下一次编辑从 ring 恢复消息。
+
+### 仓库进程与终态
+
+- 进程属于 Rust commit 会话而非显示 buffer；隐藏 / 删除进程 buffer、另存导出或配置 reload 不结束进程，导出后不再接受实时投影。消息 buffer 的进程查看命令使用所属会话仓库，不从消息文件目录重新猜测仓库。
+- 输出 / 诊断 / 真实终态分别保留，可导航、折叠及局部 `q`；PTY 答复不自动回显到输出。传输背压等待，不截断连续输出、不因输出多而杀 Git。每仓库默认保留 32 个进程 section，新增后超限移除较旧的一半，活动进程从不移除；不是按字节截断活动输出。
+- 已知非密码 yes/no 与用户名提示支持跨输出块识别；yes/no 要求完整答复后发送工具请求的词形，用户名空答使用当前登录名。已有读入先完成，不递归进入 minibuffer；提示 / 答复绑定进程和请求，`C-g` 强杀所属进程，终态只解除自己的提示。输入失败单独诊断，不自动重发。
+- 终态刷新仍存活的发起 Magit buffer 及对应 status，其他 diff 保留 stale 快照；短 Git 槽忙时延后，不抢焦点、不复活已删除 / 导出的投影，终态前的迟到读取不能覆盖新状态。刷新失败不改变真实提交结果。commit 预检 / companion 保留实际 Git 环境（含替代 index），与 F1 / F2 投影区分身份；机器解析用 diff 固定必要输出格式，不改变真实 commit 的 hooks / 签名环境。
+- 异步退出等待期间新出现的 dirty 文本须重新经过已有退出确认，旧的放弃保存答复只覆盖当时已确认的文本状态；不改变上述 SIGHUP 和显式进程控制语义。

@@ -1,12 +1,13 @@
 use super::AppShell;
 use crate::view::BufferView;
-use gpui_kit::{Context, Entity, Task};
+use gpui_kit::{Context, Entity, Task, Window};
 use std::sync::{
     Arc,
     atomic::{AtomicBool, AtomicU64, Ordering},
 };
 
 pub(super) mod records;
+pub(super) mod refresh;
 
 pub(super) fn operation_id() -> u64 {
     static NEXT: AtomicU64 = AtomicU64::new(1);
@@ -16,7 +17,12 @@ pub(super) fn operation_id() -> u64 {
 
 pub(super) enum GitTask {
     Read(GitRead),
-    IndexWrite { operation: u64, _task: Task<()> },
+    #[cfg(unix)]
+    CommitPrepare(GitRead),
+    IndexWrite {
+        operation: u64,
+        _task: Task<()>,
+    },
 }
 
 impl GitTask {
@@ -24,6 +30,8 @@ impl GitTask {
     pub fn operation(&self) -> u64 {
         match self {
             Self::Read(read) => read.operation,
+            #[cfg(unix)]
+            Self::CommitPrepare(read) => read.operation,
             Self::IndexWrite { operation, .. } => *operation,
         }
     }
@@ -59,14 +67,25 @@ impl AppShell {
     }
 
     pub(super) fn owns_git_read(&self, operation: u64) -> bool {
-        matches!(&self.git_task, Some(GitTask::Read(work)) if work.operation == operation)
+        match &self.git_task {
+            Some(GitTask::Read(work)) => work.operation == operation,
+            #[cfg(unix)]
+            Some(GitTask::CommitPrepare(work)) => work.operation == operation,
+            _ => false,
+        }
     }
 
-    pub(super) fn finish_git_read(&mut self, operation: u64) -> bool {
+    pub(super) fn finish_git_read(
+        &mut self,
+        operation: u64,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
         if !self.owns_git_read(operation) {
             return false;
         }
         self.git_task = None;
+        self.schedule_repository_refresh(window, cx);
         true
     }
 

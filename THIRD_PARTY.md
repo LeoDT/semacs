@@ -63,10 +63,23 @@
 - Include these dependency notices, including the bundled grammar query, in
   the dependency audit before distributing binaries.
 
+## Magit / Emacs behavior reference
+
+- Magit snapshot `942d61d5de37c89a3a7c6cf693696b900b1d97b0`,
+  supplemental with-editor package revision `a1f92a26e530`, and Emacs 31.1
+  window / file / server / log-edit sources were read for temporary-window
+  exit, Git editor lifecycle, commit-message recovery and process prompt behavior. Source
+  identity and static-reading boundaries are recorded in
+  `docs/work/f3-window-commit.md`.
+- semacs implements its own pane-local display history, restoration and
+  commit-message recovery model. No Emacs Lisp implementation was copied or
+  translated, and these packages are not runtime dependencies.
+
 ## Unix Git process cleanup dependency
 
 - The existing registry dependency `libc` 0.2.191 is now a direct Unix-only
-  dependency for terminating semacs-owned Git process groups. Its manifest
+  dependency for semacs-owned Git process groups and the F3 controlling PTY
+  / terminal-mode / descriptor polling transport. Its manifest
   and MIT / Apache-2.0 license texts were reviewed; attribution is to
   The Rust Project Developers. No source is vendored or patched. Include
   its notices in the dependency audit before distributing binaries.

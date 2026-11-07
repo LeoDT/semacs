@@ -104,6 +104,7 @@ fn undefined_suffix_does_not_invoke_top_level_quit_or_deactivate_the_region() {
     assert_eq!(route.disposition, InputDisposition::Handled);
     let outcome = route.outcome;
     assert_eq!(outcome.message.as_deref(), Some("C-x C-g is undefined"));
+    assert!(!outcome.quit);
     assert_eq!(target.buffer().mark(), Some(ByteOffset(0)));
     assert!(target.buffer().mark_active());
     assert!(!target.is_pending());
@@ -111,6 +112,7 @@ fn undefined_suffix_does_not_invoke_top_level_quit_or_deactivate_the_region() {
     assert_eq!(route.disposition, InputDisposition::Handled);
     let outcome = route.outcome;
     assert_eq!(outcome.message.as_deref(), Some("Quit"));
+    assert!(outcome.quit);
     assert_eq!(target.buffer().mark(), Some(ByteOffset(0)));
     assert!(!target.buffer().mark_active());
 }

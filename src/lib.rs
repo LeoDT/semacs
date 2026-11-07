@@ -4,6 +4,8 @@ pub mod buffer;
 mod buffers;
 pub mod command;
 pub mod command_registry;
+#[cfg(unix)]
+pub mod commit;
 pub mod completion;
 pub mod diff;
 pub mod display;

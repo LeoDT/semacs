@@ -180,7 +180,7 @@ impl Buffer {
         let doc = self.document.borrow();
         SavePoint {
             buffer: doc.snapshot.id.buffer,
-            state: if doc.message_log || doc.status.is_some() {
+            state: if doc.message_log || doc.status.is_some() || doc.process.is_some() {
                 super::SaveBoundary::Generated(doc.snapshot.id.version)
             } else {
                 super::SaveBoundary::History(doc.history.current_state())
@@ -270,9 +270,7 @@ impl Buffer {
     }
 
     fn replay(&mut self, redo: bool) -> Result<Option<AppliedEdit>, EditError> {
-        if self.is_read_only() {
-            return Err(EditError::ReadOnly);
-        }
+        self.check_editable()?;
         self.break_history_group();
         let mut group = {
             let mut doc = self.document.borrow_mut();
@@ -423,6 +421,42 @@ mod tests {
         assert!(!buffer.is_modified());
         buffer.redo().unwrap().unwrap();
         assert_eq!(buffer.text().to_string(), "中");
+    }
+
+    #[test]
+    fn temporary_inhibition_preserves_shared_history_and_saved_state() {
+        let mut first = Buffer::scratch();
+        edit(&mut first, 0..0, "a", EditGroup::Isolated);
+        let saved = first.begin_save();
+        first.mark_saved_at(saved).unwrap();
+        edit(&mut first, 1..1, "b", EditGroup::Isolated);
+        first.undo().unwrap();
+        let mut second = first.new_view();
+        let snapshot = first.snapshot_id();
+        first.set_edit_inhibition(Some("finishing"));
+        for buffer in [&mut first, &mut second] {
+            assert!(!buffer.is_modified());
+            assert!(!buffer.is_read_only());
+            assert_eq!(buffer.undo(), Err(EditError::EditingInhibited("finishing")));
+            assert_eq!(buffer.redo(), Err(EditError::EditingInhibited("finishing")));
+            assert_eq!(
+                buffer.edit(Edit {
+                    snapshot,
+                    range: ByteOffset(0)..ByteOffset(1),
+                    text: "bad",
+                    source: EditSource::Command,
+                }),
+                Err(EditError::EditingInhibited("finishing"))
+            );
+            assert_eq!(buffer.snapshot_id(), snapshot);
+        }
+        first.set_edit_inhibition(None);
+        second.redo().unwrap().unwrap();
+        assert_eq!(first.text().to_string(), "ab");
+        assert!(first.is_modified());
+        first.undo().unwrap().unwrap();
+        assert_eq!(second.text().to_string(), "a");
+        assert!(!second.is_modified());
     }
 
     #[test]

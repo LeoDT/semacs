@@ -2,17 +2,17 @@
 
 本文是当前工作和跨会话待办的唯一入口；维护与归档规则见 [文档说明](README.md#维护规则)。范围见 [需求](requirements.md)，行为见 [保真度契约](emacs-fidelity.md)。里程碑按可验收行为划分，不按工期估算。
 
-## 当前状态：F2 已完成，下一阶段待确认
+## 当前状态：F3 已按确认范围完成，下一阶段待确认
 
-R0–M3、A–E3、日常编辑增强及 F1 只读 Magit diff 已按各自确认范围完成，见 [R0–F1 归档](archive/completed-through-f1.md)。F2 status / 单文件 stage / unstage 也已按批准范围完成，见 [F2 归档](archive/f2-status.md)；具体本地 / 宿主证据见 [冻结记录索引](records/README.md)。
+R0–M3、A–E3、日常编辑增强及 F1 只读 Magit diff 的交付结论见 [R0–F1 归档](archive/completed-through-f1.md)，F2 status / 单文件 stage / unstage 见 [F2 归档](archive/f2-status.md)。F3 临时 window 与普通 commit 已完成实现、集中审查修复、本地验证及获准的单窗口宿主功能验证，见 [F3 归档](archive/f3-window-commit.md)；固定源码 / 环境、结果和未测边界见[冻结记录索引](records/README.md)。
 
-用户确认现有 headless 基线、隔离自动化和单窗口宿主功能证据足以收尾 F2，不追加原生性能、GPU 或 IME 测试。status / 写入端到端仍只记基线，不表示任意仓库的时延保证，也不宣布所有原生性能预算通过；下列历史暂缓项与原预算不变。F2 没有已知阻塞性遗留事项。
+F3 没有已知阻塞性遗留项；密码 / passphrase 读入已由用户明确排除于 F3，不因它继续维持阶段未完成。原性能预算、历史非阻塞观察及各阶段未测边界不变，不把功能收尾解释为全部性能预算通过。
 
-## 下一步：按实际需求确认范围
+## 下一步
 
-当前没有启动新的实施阶段。F2 的长期边界见 [行为契约](emacs-fidelity.md#阶段-f2status-与单文件-index-操作)、[D26](decisions.md#d26-rust-核心与脚本扩展)、[D28](decisions.md#d28-buffer-mode-与结构化显示)及 [JS 配置](scripting.md)。
+目前没有另行批准的新实施阶段。先由实际需要确认优先级与范围，再开始下方未排期事项；不自动追加宿主矩阵，不代用户提交现有工作区。
 
-后续更多 Magit 操作 / transient、脚本扩展 / async、LSP 或 Job 持久化都需另行确认范围与依赖，不因 F2 完成自动开放。可按需参考 [脚本扩展与热重载调研](work/scripting-extension-research.md) 和 [Magit 上游参照](work/f-magit-reference.md)，两者不是新阶段的实施授权。
+后续更多 Magit 操作 / 完整 transient、脚本扩展 / async、LSP 或 Job 持久化均需另行确认。按需参考 [脚本扩展与热重载调研](work/scripting-extension-research.md) 和 [Magit 上游参照](work/f-magit-reference.md)，两者不额外授权其他范围。有效用户行为仍见[保真度契约](emacs-fidelity.md)，不会改写 F1 / F2 的历史排除范围。
 
 ## 已知问题与未排期事项
 
@@ -28,6 +28,7 @@ R0–M3、A–E3、日常编辑增强及 F1 只读 Magit diff 已按各自确认
 
 ### 未排期需求
 
+- **密码 / passphrase 交互（F3 之外）**：用户已确认排除于 F3；保留后续按 Magit 细化提示识别、保密读入（遮蔽与历史隔离）、取消及进程归属的需求。需先落实输入基础设施并确认实施范围，不使用普通文本读入冒充支持；该需求不属于已交付的 F3 范围。
 - **任务持久化与恢复**：认可核心 Job、跨 reload 存活和分级恢复的方向，尚未批准实现或存储方案；具体待决项见[调研](work/scripting-extension-research.md#9-待确认事项)。先由实际任务推动，不能把自动重跑视为安全恢复。
 - **日常编辑增强**：isearch、`M-y`、`C-u`、occur 等，实际需要时再确认优先级与范围。
 - **自动保存与备份**：保留为数据安全增强需求；排期前先确认触发、写入位置与恢复行为。

@@ -345,7 +345,7 @@ impl Workload {
             .create_new(true)
             .open(report.with_extension("spans.csv"))
             .unwrap();
-        writeln!(output, "# mode={mode}-diff; release={}; Lilex 16px/24px; 960x640 requested; section projection, no soft wrap; diff latency baseline only; OS cache uncontrolled", !cfg!(debug_assertions)).unwrap();
+        writeln!(output, "# mode={mode}-diff; release={}; Lilex 16px/24px; 960x640 requested; open uses temporary display, then single diff window before remaining actions; section projection, no soft wrap; diff latency baseline only; OS cache uncontrolled", !cfg!(debug_assertions)).unwrap();
         writeln!(output, "kind,phase,step,views,action_cpu_ms,first_ms,selected_ready_ms,all_ready_ms,draw_cpu_max_ms,frames,missing_observations,blank_frames,idle_ticks,min_visible_rows,fully_indexed_views,bytes,projection_rows,width_px,height_px,target_display,text_verified,projection_verified,status,observed_elapsed_ms,selected_view,target_point,before_point,before_scroll_y,budget_violations").unwrap();
         writeln!(
             spans,
@@ -393,6 +393,10 @@ impl Workload {
     }
 
     pub fn prepare(&self, window: &mut Window, cx: &mut App) {
+        if self.step % ACTIONS.len() == 1 {
+            key(window, cx, "ctrl-x");
+            key(window, cx, "1");
+        }
         if ACTIONS[self.step % ACTIONS.len()] != "open" {
             return;
         }

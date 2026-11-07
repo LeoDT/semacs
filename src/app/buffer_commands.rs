@@ -117,6 +117,16 @@ impl AppShell {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        #[cfg(unix)]
+        if self.commit_editors.contains_key(&self.buffers[index].id()) {
+            let target = self.buffer_target(index, window, cx);
+            self.show_message(
+                &target,
+                "Use with-editor-cancel to end this editor session",
+                cx,
+            );
+            return;
+        }
         let buffer = &self.buffers[index].buffer;
         let (modified, name) = (buffer.is_modified(), buffer.display_name());
         if modified {
@@ -146,7 +156,7 @@ impl AppShell {
         self.body_panes
             .get_mut(self.panes.selected())
             .unwrap()
-            .current = id;
+            .show_buffer(id);
         self.buffers.touch(id);
         self.update_selected_views(cx);
         view.update(cx, |view, cx| {
@@ -164,6 +174,16 @@ impl AppShell {
         cx: &mut Context<Self>,
     ) {
         let id = self.buffers[index].id();
+        #[cfg(unix)]
+        if self.commit_editors.contains_key(&id) {
+            let target = self.buffer_target(index, window, cx);
+            self.show_message(
+                &target,
+                "Use with-editor-cancel to end this editor session",
+                cx,
+            );
+            return;
+        }
         self.cancel_file_open();
         if matches!(&self.closing, Some(Closing::Kill(target)) if *target == id) {
             self.closing = None;
@@ -189,20 +209,31 @@ impl AppShell {
                 self.cache_view(pane_id, replacement, view.clone(), cx);
                 view
             };
-            self.body_panes.get_mut(&pane_id).unwrap().current = replacement;
+            self.body_panes
+                .get_mut(&pane_id)
+                .unwrap()
+                .show_buffer(replacement);
             view.update(cx, |view, cx| {
                 view.invalidate_split_geometry();
                 view.resume_accepting_input(cx);
             });
         }
         for pane in self.body_panes.values_mut() {
+            pane.previous.retain(|previous| *previous != id);
+            pane.quit_restore.retain(|restore| restore.buffer != id);
             if let Some(mount) = pane.editors.remove(&id) {
                 mount.view.update(cx, |view, cx| view.suspend_input(cx));
             }
         }
         self.update_selected_views(cx);
         let active = self.active_view().clone();
-        active.update(cx, |view, cx| view.restore_input(window, cx));
+        if self.minibuffer.is_none() {
+            active.update(cx, |view, cx| view.restore_input(window, cx));
+        } else {
+            for view in self.all_views() {
+                view.update(cx, |view, cx| view.suspend_input(cx));
+            }
+        }
         cx.notify();
     }
 

@@ -105,7 +105,7 @@ impl AppShell {
         if old != view {
             old.update(cx, |view, cx| view.suspend_input(cx));
         }
-        self.body_panes.get_mut(&pane).unwrap().current = id;
+        self.body_panes.get_mut(&pane).unwrap().show_buffer(id);
         self.update_selected_views(cx);
         view.update(cx, |view, cx| {
             view.show_end(cx);

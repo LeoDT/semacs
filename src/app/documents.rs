@@ -4,7 +4,7 @@ use crate::files::{self, ReadError};
 use crate::saves::{SaveCompletion, SaveIntent, SaveOutcome, SaveRequest};
 use crate::session::ReadKind;
 use crate::view::{BufferView, InitialViewport};
-use gpui_kit::{App, AppContext, Bounds, Context, Entity, Pixels, Window};
+use gpui_kit::{AppContext, Bounds, Context, Entity, Pixels, Window};
 use std::io;
 use std::path::PathBuf;
 
@@ -216,6 +216,10 @@ impl AppShell {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if let Some(reason) = target.read(cx).buffer().edit_inhibition() {
+            self.show_message(target, reason, cx);
+            return;
+        }
         self.enqueue_save(target, SaveIntent::WriteFile(path), window, cx);
     }
 
@@ -228,6 +232,10 @@ impl AppShell {
         let Some(index) = self.buffer_index(target, cx) else {
             return false;
         };
+        if let Some(reason) = self.buffers[index].buffer.edit_inhibition() {
+            self.show_message(target, reason, cx);
+            return false;
+        }
         let saving = self.buffers[index].save.is_saving();
         let buffer = &self.buffers[index].buffer;
         if !saving && !buffer.is_modified() {
@@ -243,7 +251,7 @@ impl AppShell {
         true
     }
 
-    fn enqueue_save(
+    pub(super) fn enqueue_save(
         &mut self,
         target: &Entity<BufferView>,
         intent: SaveIntent,
@@ -298,7 +306,13 @@ impl AppShell {
         };
         let stamp = buffer.disk_stamp();
         self.buffers[index].save.start(&request);
+        #[cfg(test)]
+        let gate = self.save_gate.take();
         cx.spawn_in(window, async move |shell, cx| {
+            #[cfg(test)]
+            if let Some(gate) = gate {
+                let _ = gate.await;
+            }
             let completion = cx
                 .background_executor()
                 .spawn(async move {
@@ -333,14 +347,20 @@ impl AppShell {
         }
     }
 
-    pub(super) fn cancel_save_confirmation(&mut self, cx: &App) {
+    pub(super) fn cancel_save_confirmation(&mut self, cx: &mut Context<Self>) {
         if let Some(target) = self
             .session
             .as_ref()
             .map(|session| session.origin().clone())
             && let Some(index) = self.buffer_index(&target, cx)
         {
-            self.buffers[index].save.cancel_confirmation();
+            let canceled = self.buffers[index].save.cancel_confirmation();
+            #[cfg(unix)]
+            if canceled {
+                self.cancel_commit_ending(index, cx);
+            }
+            #[cfg(not(unix))]
+            let _ = canceled;
         }
     }
 
@@ -380,8 +400,10 @@ impl AppShell {
                 let update_path = matches!(request.intent, SaveIntent::WriteFile(_));
                 let generated_boundary = {
                     let buffer = &mut self.buffers[index].buffer;
-                    let boundary = (update_path && buffer.status_repository().is_some())
-                        .then(|| buffer.save_point());
+                    let boundary = (update_path
+                        && (buffer.status_repository().is_some()
+                            || buffer.process_repository().is_some()))
+                    .then(|| buffer.save_point());
                     if update_path {
                         buffer.set_path(path.clone());
                     }
@@ -389,6 +411,7 @@ impl AppShell {
                     let _ = buffer.mark_saved_at(request.save_point);
                     if update_path {
                         buffer.detach_status();
+                        buffer.detach_process();
                     }
                     if update_path && buffer.is_message_log() {
                         buffer.detach_message_log();

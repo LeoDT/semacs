@@ -24,6 +24,8 @@ pub(super) struct EditorMount {
 pub(super) struct BodyPane {
     pub current: BufferId,
     pub editors: HashMap<BufferId, EditorMount>,
+    pub previous: Vec<BufferId>,
+    pub quit_restore: Vec<super::temporary::QuitRestore>,
 }
 
 impl BodyPane {
@@ -35,6 +37,8 @@ impl BodyPane {
     ) -> Self {
         Self {
             current,
+            previous: Vec::new(),
+            quit_restore: Vec::new(),
             editors: HashMap::from([(
                 current,
                 EditorMount {
@@ -43,6 +47,14 @@ impl BodyPane {
                     _feedback_subscription: feedback,
                 },
             )]),
+        }
+    }
+
+    pub fn show_buffer(&mut self, buffer: BufferId) {
+        if self.current != buffer {
+            self.previous.retain(|previous| *previous != buffer);
+            self.previous.insert(0, self.current);
+            self.current = buffer;
         }
     }
 
@@ -108,8 +120,11 @@ impl AppShell {
         }
     }
 
-    fn select_pane(&mut self, pane: u64, window: &mut Window, cx: &mut Context<Self>) {
-        if self.minibuffer.is_some() || pane == *self.panes.selected() {
+    pub(super) fn select_pane(&mut self, pane: u64, window: &mut Window, cx: &mut Context<Self>) {
+        if self.minibuffer.is_some()
+            || pane == *self.panes.selected()
+            || !self.body_panes.contains_key(&pane)
+        {
             return;
         }
         let old = self.active_view().clone();
@@ -149,22 +164,9 @@ impl AppShell {
                 }
                 self.cancel_file_open();
                 let (buffer, scroll) = source.read(cx).split_state();
-                let id = buffer.snapshot_id().buffer;
                 let view = Self::create_view(buffer, window, cx);
                 view.update(cx, |view, cx| view.initialize_scroll(scroll, cx));
-                let pane = self.next_pane;
-                self.next_pane = self
-                    .next_pane
-                    .checked_add(1)
-                    .expect("pane identity exhausted");
-                let subscription = cx.observe(&view, Self::view_changed);
-                let feedback = cx.subscribe(&view, Self::feedback);
-                self.body_panes
-                    .insert(pane, BodyPane::new(id, view, subscription, feedback));
-                self.panes.split(pane, axis);
-                source.update(cx, |view, _| view.invalidate_split_geometry());
-                self.update_selected_views(cx);
-                cx.notify();
+                self.split_selected(view, axis, cx);
             }
             Command::OtherWindow => {
                 let mut traversal = self.panes.clone();
@@ -206,6 +208,31 @@ impl AppShell {
             }
             _ => unreachable!(),
         }
+    }
+
+    pub(super) fn split_selected(
+        &mut self,
+        view: Entity<BufferView>,
+        axis: Axis,
+        cx: &mut Context<Self>,
+    ) -> u64 {
+        let buffer = view.read(cx).buffer().snapshot_id().buffer;
+        let pane = self.next_pane;
+        self.next_pane = self
+            .next_pane
+            .checked_add(1)
+            .expect("pane identity exhausted");
+        let subscription = cx.observe(&view, Self::view_changed);
+        let feedback = cx.subscribe(&view, Self::feedback);
+        self.body_panes
+            .insert(pane, BodyPane::new(buffer, view, subscription, feedback));
+        self.active_view()
+            .clone()
+            .update(cx, |view, _| view.invalidate_split_geometry());
+        self.panes.split(pane, axis);
+        self.update_selected_views(cx);
+        cx.notify();
+        pane
     }
 
     pub(super) fn render_panes(&self, pane: &Pane<u64>, cx: &mut Context<Self>) -> AnyElement {

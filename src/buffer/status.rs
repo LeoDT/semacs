@@ -35,18 +35,6 @@ impl Buffer {
         self.document.borrow().status.as_ref()?.data.clone()
     }
 
-    pub(crate) fn repository(&self) -> Option<Repository> {
-        let doc = self.document.borrow();
-        doc.status
-            .as_ref()
-            .map(|session| session.repository.clone())
-            .or_else(|| {
-                doc.diff
-                    .as_ref()
-                    .map(|session| session.comparison.repository.clone())
-            })
-    }
-
     pub(crate) fn begin_status_request(&mut self) -> Result<(Repository, u64), String> {
         let mut doc = self.document.borrow_mut();
         let session = doc.status.as_mut().ok_or("Not a status buffer")?;

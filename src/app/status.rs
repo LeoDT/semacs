@@ -91,8 +91,8 @@ impl AppShell {
                 .flatten();
             let Some((repository, target)) = bound else {
                 shell
-                    .update_in(cx, |shell, _, _| {
-                        shell.finish_git_read(operation);
+                    .update_in(cx, |shell, window, cx| {
+                        shell.finish_git_read(operation, window, cx);
                     })
                     .ok();
                 return;
@@ -116,9 +116,17 @@ impl AppShell {
                 .await;
             shell
                 .update_in(cx, |shell, window, cx| {
-                    if !shell.finish_git_read(operation)
+                    if !shell.finish_git_read(operation, window, cx)
                         || !shell.status_open_valid(&origin, session, cx)
                     {
+                        return;
+                    }
+                    if !shell.git_read_current(operation, &repository) {
+                        shell.show_message(
+                            &origin,
+                            "Repository changed while reading status; refresh again",
+                            cx,
+                        );
                         return;
                     }
                     let existing = match target {
@@ -153,7 +161,7 @@ impl AppShell {
                                 (index, request)
                             });
                             if shell.install_status_result(index, request, data, rendered, cx) {
-                                shell.activate(index, window, cx);
+                                shell.display_temporary(index, window, cx);
                             }
                         }
                         Err(error) => {
@@ -209,8 +217,8 @@ impl AppShell {
                 })
                 .await;
             shell
-                .update_in(cx, |shell, _, cx| {
-                    if !shell.finish_git_read(operation) {
+                .update_in(cx, |shell, window, cx| {
+                    if !shell.finish_git_read(operation, window, cx) {
                         return;
                     }
                     let Some(index) = shell.buffers.index_of(buffer) else {

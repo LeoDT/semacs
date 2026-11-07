@@ -101,7 +101,7 @@ impl AppShell {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if !self.git_available(origin, cx) {
+        if !self.git_available(origin, cx) || !origin.read(cx).git_open_ready() {
             return;
         }
         let repository = origin.read(cx).buffer().repository();
@@ -123,7 +123,11 @@ impl AppShell {
                         Some(repository) => repository,
                         None => crate::git::discover(&directory, &worker_cancelled)?,
                     };
-                    let comparison = Comparison { repository, kind };
+                    let comparison = Comparison {
+                        repository,
+                        kind,
+                        environment: crate::diff::ReadEnvironment::Projection,
+                    };
                     let diff = Diff::load(comparison, &worker_cancelled)?;
                     let rendered = diff.render()?;
                     Ok::<_, String>((diff, rendered))
@@ -131,18 +135,27 @@ impl AppShell {
                 .await;
             shell
                 .update_in(cx, |shell, window, cx| {
-                    if !shell.finish_git_read(operation) {
+                    if !shell.finish_git_read(operation, window, cx) {
                         return;
                     }
                     if shell.minibuffer.is_some()
                         || shell.active_view() != &origin
                         || origin.read(cx).display_snapshot().id().session != input_session
                         || shell.buffer_index(&origin, cx).is_none()
+                        || !origin.read(cx).git_open_ready()
                     {
                         return;
                     }
                     match result {
                         Ok((data, rendered)) => {
+                            if !shell.git_read_current(operation, &data.comparison.repository) {
+                                shell.show_message(
+                                    &origin,
+                                    "Repository changed while reading diff; refresh again",
+                                    cx,
+                                );
+                                return;
+                            }
                             let existing = shell.buffers.iter().position(|slot| {
                                 slot.buffer.comparison().as_ref() == Some(&data.comparison)
                             });
@@ -156,7 +169,7 @@ impl AppShell {
                             let request =
                                 shell.buffers[index].buffer.begin_diff_request().unwrap().1;
                             shell.install_diff_result(index, request, data, rendered, cx);
-                            shell.activate(index, window, cx);
+                            shell.display_temporary(index, window, cx);
                         }
                         Err(error) => shell.show_message(&origin, error, cx),
                     }
@@ -208,8 +221,8 @@ impl AppShell {
                 })
                 .await;
             shell
-                .update_in(cx, |shell, _, cx| {
-                    if !shell.finish_git_read(operation) {
+                .update_in(cx, |shell, window, cx| {
+                    if !shell.finish_git_read(operation, window, cx) {
                         return;
                     }
                     let Some(index) = shell.buffers.index_of(id) else {
@@ -217,7 +230,7 @@ impl AppShell {
                     };
                     match result {
                         Ok((data, rendered)) => {
-                            shell.install_diff_result(index, request, data, rendered, cx)
+                            shell.install_diff_result(index, request, data, rendered, cx);
                         }
                         Err(error) => {
                             shell.show_message(&origin, format!("Diff unchanged: {error}"), cx)
@@ -233,14 +246,14 @@ impl AppShell {
         }));
     }
 
-    fn install_diff_result(
+    pub(super) fn install_diff_result(
         &mut self,
         index: usize,
         request: u64,
         data: Diff,
         rendered: crate::diff::RenderedDiff,
         cx: &mut Context<Self>,
-    ) {
+    ) -> bool {
         #[cfg(feature = "native-profiler")]
         let _span =
             crate::preparation_trace::Span::new("diff-install-and-invalidate", rendered.text.len());
@@ -263,6 +276,9 @@ impl AppShell {
             for (view, anchor) in views {
                 view.update(cx, |view, cx| view.restore_section_scroll(anchor, cx));
             }
+            true
+        } else {
+            false
         }
     }
 
@@ -317,7 +333,7 @@ impl AppShell {
                         .await;
                     shell
                         .update_in(cx, |shell, window, cx| {
-                            if !shell.finish_git_read(operation) {
+                            if !shell.finish_git_read(operation, window, cx) {
                                 return;
                             }
                             if shell.minibuffer.is_some()

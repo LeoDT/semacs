@@ -138,10 +138,13 @@ impl SaveState {
         }
     }
 
-    pub(crate) fn cancel_confirmation(&mut self) {
+    pub(crate) fn cancel_confirmation(&mut self) -> bool {
         if matches!(self.phase, SavePhase::Confirming(_)) {
             self.phase = SavePhase::Idle;
             self.pending = None;
+            true
+        } else {
+            false
         }
     }
 }

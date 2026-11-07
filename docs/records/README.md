@@ -1,11 +1,12 @@
 # 冻结记录索引
 
-本目录保存固定版本下的验收与诊断证据，包括失败、修复、用户确认及未测边界；不是当前待办，也不表示后续代码自动通过。先从 [实施计划](../plan.md) 确认当前工作，需要历史上下文时再查 [R0–F1 归档](../archive/completed-through-f1.md)、[F2 归档](../archive/f2-status.md)和对应批次。
+本目录保存固定版本下的验收与诊断证据，包括失败、修复、用户确认及未测边界；不是当前待办，也不表示后续代码自动通过。先从 [实施计划](../plan.md) 确认当前工作，需要历史上下文时再查 [R0–F1 归档](../archive/completed-through-f1.md)、[F2 归档](../archive/f2-status.md)、[F3 归档](../archive/f3-window-commit.md)和对应批次。
 
 记录正文不随当前实现更新，后续复测另记；允许修复引用，不改写历史结论。维护规则见 [文档说明](../README.md#冻结证据)。本索引随新增记录维护，不复制测试数量、完整批次经过或当前问题清单。
 
 | 材料 | 用途与边界 |
 |---|---|
+| [F3 临时 window / 普通 commit 本地验证](f3-window-commit-local.md) / [单窗口宿主工具准备](f3-host-tools-local.md) / [单窗口宿主功能验证](f3-commit-host-01.md) | 隔离真实 Git / helper、headless 生命周期、阶段集中审查修复后的本地检查，以及单窗口人工观察和独立 Git / 消息字节核对；不包含密码 / passphrase 读入或性能矩阵。 |
 | [F2 status / 单文件写入本地验证与基线](f2-status-local.md) / [单窗口宿主工具准备](f2-host-tools-local.md) / [单窗口宿主功能验证](f2-status-host-01.md) | 隔离自动化、64 / 4096 条清单 headless 基线、工具自检，以及一窗口 status / 默认写键 / 过时标识与完整 index 检查点；不表示完整平台或性能预算通过。 |
 | [F1 diff 专项本地基线](f1-diff-performance-local.md) / [首批启动失败与修复](f1-diff-performance-host-01.md) / [第二批 setup 超限](f1-diff-performance-host-02.md) / [完整诊断工具](f1-diff-diagnostic-local.md) / [三轮宿主完整数据](f1-diff-diagnostic-host-01.md) | 两档 headless 基线、两次原生失败、完整诊断工具及 small 三轮宿主数据；首次命令准备峰值另见 [静态调查](f1-command-prepaint-inspection.md)。诊断不是总体预算通过。 |
 | [F1 mode 与 Magit diff 本地验证](f1-magit-diff-local.md) / [宿主定向验收](f1-magit-diff-host-01.md) | mode / 局部键位、只读 diff、本地回归及四组宿主功能证据。 |

@@ -14,6 +14,7 @@ const TIMEOUT: Duration = Duration::from_secs(15);
 
 pub(crate) enum Access<'a> {
     Read(&'a AtomicBool),
+    CommitRead(&'a AtomicBool),
     IndexWrite {
         hooks: &'a Path,
         started: &'a mut dyn FnMut(),
@@ -80,42 +81,49 @@ pub(crate) fn execute(
         ));
     }
     let mut command = Command::new("git");
-    for name in [
-        "GIT_CONFIG",
-        "GIT_DIR",
-        "GIT_WORK_TREE",
-        "GIT_COMMON_DIR",
-        "GIT_INDEX_FILE",
-        "GIT_OBJECT_DIRECTORY",
-        "GIT_ALTERNATE_OBJECT_DIRECTORIES",
-        "GIT_QUARANTINE_PATH",
-        "GIT_NAMESPACE",
-        "GIT_PREFIX",
-        "GIT_SHALLOW_FILE",
-        "GIT_GRAFT_FILE",
-        "GIT_IMPLICIT_WORK_TREE",
-    ] {
-        command.env_remove(name);
+    let commit_read = matches!(access, Access::CommitRead(_));
+    if !commit_read {
+        for name in [
+            "GIT_CONFIG",
+            "GIT_DIR",
+            "GIT_WORK_TREE",
+            "GIT_COMMON_DIR",
+            "GIT_INDEX_FILE",
+            "GIT_OBJECT_DIRECTORY",
+            "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+            "GIT_QUARANTINE_PATH",
+            "GIT_NAMESPACE",
+            "GIT_PREFIX",
+            "GIT_SHALLOW_FILE",
+            "GIT_GRAFT_FILE",
+            "GIT_IMPLICIT_WORK_TREE",
+        ] {
+            command.env_remove(name);
+        }
     }
     #[cfg(unix)]
     {
         use std::os::unix::process::CommandExt;
         command.process_group(0);
     }
+    if !commit_read {
+        command.args([
+            "--no-optional-locks",
+            "--literal-pathspecs",
+            "-c",
+            "core.fsmonitor=false",
+            "-c",
+            "core.untrackedCache=false",
+        ]);
+    }
     command.args([
-        "--no-optional-locks",
-        "--literal-pathspecs",
-        "-c",
-        "core.fsmonitor=false",
-        "-c",
-        "core.untrackedCache=false",
         "-c",
         "diff.suppressBlankEmpty=false",
         "-c",
         "core.quotePath=true",
     ]);
     let (cancelled, started) = match access {
-        Access::Read(cancelled) => (Some(cancelled), None),
+        Access::Read(cancelled) | Access::CommitRead(cancelled) => (Some(cancelled), None),
         Access::IndexWrite { hooks, started } => {
             write_environment().map_err(not_started)?;
             command.arg("-c").arg({
@@ -137,11 +145,12 @@ pub(crate) fn execute(
             .arg("--work-tree")
             .arg(directory);
     }
-    command
-        .args(args)
-        .env("GIT_TERMINAL_PROMPT", "0")
-        .env("GIT_NO_LAZY_FETCH", "1")
-        .env("LC_ALL", "C");
+    command.args(args).env("LC_ALL", "C");
+    if !commit_read {
+        command
+            .env("GIT_TERMINAL_PROMPT", "0")
+            .env("GIT_NO_LAZY_FETCH", "1");
+    }
     run(
         command,
         input,

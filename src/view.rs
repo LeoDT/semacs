@@ -65,6 +65,7 @@ pub(crate) enum KeyLayers<'a> {
 pub(crate) enum KeyRoute {
     /// The view consumed the key sequence; stop further propagation.
     Handled,
+    Quit,
     /// A command owned by a layer above the edit target; the owner executes it.
     Requested(CommandId),
     /// Leave the key to platform text input or framework handlers.
@@ -672,6 +673,13 @@ impl BufferView {
         self.queue_change(change, cx);
         self.input_geometry = None;
         self.invalidate_input_registration();
+    }
+
+    pub(crate) fn reset_input(&mut self, cx: &mut Context<Self>) {
+        self.end_input(cx);
+        if self.accepting_input {
+            self.resume_input(cx);
+        }
     }
 
     fn resume_input(&mut self, cx: &mut Context<Self>) {
@@ -1297,7 +1305,11 @@ impl BufferView {
                 }
                 InputDisposition::Handled => {
                     self.invalidate_input_registration();
+                    let quit = route.outcome.quit;
                     self.finish_command(route.outcome, window, cx);
+                    if quit {
+                        return KeyRoute::Quit;
+                    }
                 }
                 InputDisposition::Requested(command) => {
                     // The owner revokes input when it changes the target. An
@@ -1320,7 +1332,7 @@ impl BufferView {
         command: Command,
         window: &mut Window,
         cx: &mut Context<Self>,
-    ) {
+    ) -> KeyRoute {
         let display = self.display_snapshot().id();
         let viewport = motion::Viewport::for_view(
             self.index.as_ref(),
@@ -1340,9 +1352,18 @@ impl BufferView {
         match result {
             Ok(outcome) => {
                 self.invalidate_input_registration();
+                let route = if outcome.quit {
+                    KeyRoute::Quit
+                } else {
+                    KeyRoute::Handled
+                };
                 self.finish_command(outcome, window, cx);
+                route
             }
-            Err(error) => self.fail(error, before_point, window, cx),
+            Err(error) => {
+                self.fail(error, before_point, window, cx);
+                KeyRoute::Handled
+            }
         }
     }
 
@@ -1394,6 +1415,27 @@ impl BufferView {
         Ok(())
     }
 
+    pub(crate) fn replace_range(
+        &mut self,
+        range: std::ops::Range<ByteOffset>,
+        text: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Result<(), RouteError> {
+        let token = self.target.token();
+        let update = self.target.replace_text_range(token, range, text)?;
+        self.finish_command(
+            CommandOutcome {
+                update: Some(update),
+                reveal_point: true,
+                ..CommandOutcome::default()
+            },
+            window,
+            cx,
+        );
+        Ok(())
+    }
+
     /// Replaces the editable input area, used by the owner of a read session.
     pub(crate) fn replace_input(
         &mut self,
@@ -1403,21 +1445,9 @@ impl BufferView {
     ) {
         let buffer = self.target.buffer();
         let range = buffer.read_only_prefix()..ByteOffset(buffer.text().len());
-        let token = self.target.token();
-        match self.target.replace_text_range(token, range, text) {
-            Ok(update) => self.finish_command(
-                CommandOutcome {
-                    update: Some(update),
-                    reveal_point: true,
-                    ..CommandOutcome::default()
-                },
-                window,
-                cx,
-            ),
-            Err(error) => {
-                let point = self.target.buffer().point();
-                self.fail(error, point, window, cx);
-            }
+        if let Err(error) = self.replace_range(range, text, window, cx) {
+            let point = self.target.buffer().point();
+            self.fail(error, point, window, cx);
         }
     }
 
