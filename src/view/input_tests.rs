@@ -23,6 +23,25 @@ pub(super) fn open(text: &str, cx: &mut TestAppContext) -> (VisualTestContext, E
     open_buffer(buffer, cx)
 }
 
+pub(super) fn open_file(
+    text: &str,
+    cx: &mut TestAppContext,
+) -> (VisualTestContext, Entity<BufferView>) {
+    open_buffer(
+        Buffer::new(
+            Some(
+                std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                    .join(".pi/tmp/close-input.txt"),
+            ),
+            DecodedFile {
+                text: text.into(),
+                format: FileFormat::default(),
+            },
+        ),
+        cx,
+    )
+}
+
 pub(super) fn open_buffer(
     buffer: Buffer,
     cx: &mut TestAppContext,
@@ -427,7 +446,7 @@ fn malformed_platform_callbacks_leave_projection_and_committed_versions_unchange
 
 #[gpui::test]
 fn dirty_close_is_confirmed_cancel_restores_focus_and_discard_closes(cx: &mut TestAppContext) {
-    let (mut visual, editor) = open("a🙂中z", cx);
+    let (mut visual, editor) = open_file("a🙂中z", cx);
     let mut input = handler(&editor, &visual);
     visual.update(|window, cx| {
         input.replace_and_mark_text_in_range(Some(1..4), "ni", None, window, cx);
@@ -448,7 +467,7 @@ fn dirty_close_is_confirmed_cancel_restores_focus_and_discard_closes(cx: &mut Te
                 .unwrap()
                 .read(cx)
                 .prompt(cx)
-                .contains("Save buffer")
+                .contains("Save file")
         );
     });
     assert!(!visual.simulate_close());
@@ -494,7 +513,7 @@ fn closing_only_a_preedit_is_clean_but_preserves_prior_commits(cx: &mut TestAppC
         assert!(!editor.read(cx).target.buffer().is_modified());
     });
 
-    let (mut visual, editor) = open("body", cx);
+    let (mut visual, editor) = open_file("body", cx);
     let mut input = handler(&editor, &visual);
     visual.update(|window, cx| {
         input.replace_text_in_range(None, "提交", window, cx);
@@ -521,8 +540,24 @@ fn closing_only_a_preedit_is_clean_but_preserves_prior_commits(cx: &mut TestAppC
 }
 
 #[gpui::test]
+fn modified_non_file_close_discards_preedit_without_save_confirmation(cx: &mut TestAppContext) {
+    let (mut visual, editor) = open_buffer(Buffer::named("notes"), cx);
+    visual.simulate_input("draft");
+    let mut input = handler(&editor, &visual);
+    visual
+        .update(|window, cx| input.replace_and_mark_text_in_range(None, "临时", None, window, cx));
+    assert!(visual.simulate_close());
+    visual.read(|cx| {
+        let view = editor.read(cx);
+        assert_eq!(view.display_snapshot().text().to_string(), "draft");
+        assert!(view.buffer().is_modified());
+        assert!(view.buffer().path().is_none());
+    });
+}
+
+#[gpui::test]
 fn close_confirmation_defaults_to_cancel_and_accepts_keyboard_quit(cx: &mut TestAppContext) {
-    let (mut visual, editor) = open("", cx);
+    let (mut visual, editor) = open_file("", cx);
     visual.simulate_input("dirty");
     for keys in ["enter ctrl-g", "ctrl-g"] {
         assert!(!visual.simulate_close());

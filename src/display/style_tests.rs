@@ -75,6 +75,58 @@ fn named_range_fonts_follow_theme_without_recreating_the_range_table() {
 }
 
 #[test]
+fn current_section_fonts_are_local_and_colors_do_not_change_typography() {
+    let mut theme = ThemeSettings::default();
+    theme.set_style(
+        StyleRole::DiffHunk,
+        StyleOverride::default()
+            .with_text_attributes(StyleRole::DiffHunk, Some("normal"), None, None, None)
+            .unwrap(),
+    );
+    let named = Arc::from([(ByteOffset(0)..ByteOffset(4), StyleRole::DiffHunk)]);
+    let make = |theme: &ThemeSettings, current| {
+        Typography::new(theme, None, None, 0, Arc::from([]))
+            .with_named_ranges(Arc::clone(&named), theme)
+            .with_current_section(current, theme, None)
+    };
+    let plain = make(&theme, None);
+    let highlighted = make(&theme, Some(ByteOffset(0)..ByteOffset(4)));
+    assert_ne!(plain, highlighted);
+    assert_eq!(plain.font_at(0).bold, Some(false));
+    assert_eq!(highlighted.font_at(0).bold, Some(true));
+    assert_eq!(plain, make(&theme, Some(ByteOffset(4)..ByteOffset(8))));
+    theme.set_style(
+        StyleRole::DiffHunkHighlight,
+        StyleOverride::new(
+            StyleRole::DiffHunkHighlight,
+            Some("#123456"),
+            Some("#234567"),
+        )
+        .unwrap(),
+    );
+    assert_eq!(
+        highlighted,
+        make(&theme, Some(ByteOffset(0)..ByteOffset(4)))
+    );
+    theme.set_style(
+        StyleRole::DiffHunkHighlight,
+        StyleOverride::default()
+            .with_text_attributes(
+                StyleRole::DiffHunkHighlight,
+                Some("normal"),
+                None,
+                None,
+                None,
+            )
+            .unwrap(),
+    );
+    assert_eq!(
+        make(&theme, None),
+        make(&theme, Some(ByteOffset(0)..ByteOffset(4)))
+    );
+}
+
+#[test]
 fn wrapping_uses_font_sensitive_grapheme_advances_not_contextual_fitting() {
     use crate::test_support::StyledTextSystem;
     let system = Arc::new(TextSystem::new(Arc::new(StyledTextSystem::default())));

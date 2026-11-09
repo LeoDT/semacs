@@ -691,32 +691,15 @@ fn terminal_exit_asks_each_dirty_buffer_and_cancel_keeps_unsaved_state(cx: &mut 
 }
 
 #[gpui::test]
-fn terminal_exit_prompts_for_a_file_name_and_cancel_aborts_exit(cx: &mut TestAppContext) {
+fn modified_scratch_exits_without_either_save_prompt(cx: &mut TestAppContext) {
     let (mut visual, shell, body) = open(Buffer::scratch(), cx);
     visual.simulate_input("dirty");
     redraw(&mut visual);
+    visual.read(|cx| assert!(body.read(cx).buffer().is_modified()));
     visual.simulate_keystrokes("ctrl-x ctrl-c");
-    redraw(&mut visual);
-    visual.read(|cx| {
-        let prompt = shell.read(cx).minibuffer().unwrap().read(cx).prompt(cx);
-        assert!(prompt.contains("Save buffer *scratch*?"));
-    });
-    visual.simulate_keystrokes("y");
-    redraw(&mut visual);
-    visual.read(|cx| {
-        assert_eq!(
-            shell.read(cx).minibuffer().unwrap().read(cx).prompt(cx),
-            "Write file: "
-        );
-    });
-    visual.simulate_keystrokes("ctrl-g");
-    redraw(&mut visual);
-    visual.read(|cx| {
-        assert!(shell.read(cx).session().is_none());
-        assert_eq!(body.read(cx).buffer().text().to_string(), "dirty");
-        assert!(body.read(cx).buffer().is_modified());
-    });
-    assert_eq!(visual.windows().len(), 1);
+    visual.run_until_parked();
+    assert!(visual.windows().is_empty());
+    assert!(shell.read_with(&visual, |shell, _| shell.session().is_none()));
 }
 
 #[gpui::test]
@@ -726,12 +709,27 @@ fn terminal_exit_saves_a_named_scratch_buffer_and_closes(cx: &mut TestAppContext
     let (mut visual, shell, _) = open(Buffer::scratch(), cx);
     visual.simulate_input("dirty");
     redraw(&mut visual);
-    visual.simulate_keystrokes("ctrl-x ctrl-c");
-    visual.simulate_keystrokes("y");
+    visual.simulate_keystrokes("ctrl-x ctrl-w");
     visual.simulate_input(target.to_str().unwrap());
     visual.simulate_keystrokes("enter");
+    redraw(&mut visual);
+    visual.simulate_input(" again");
+    visual.simulate_keystrokes("ctrl-x ctrl-c");
+    redraw(&mut visual);
+    visual.read(|cx| {
+        assert!(
+            shell
+                .read(cx)
+                .minibuffer()
+                .unwrap()
+                .read(cx)
+                .prompt(cx)
+                .contains("Save file")
+        );
+    });
+    visual.simulate_keystrokes("y");
     visual.run_until_parked();
-    assert_eq!(fs::read(&target).unwrap(), b"dirty");
+    assert_eq!(fs::read(&target).unwrap(), b"dirty again");
     assert!(visual.windows().is_empty());
     assert!(shell.read_with(&visual, |shell, _| shell.session().is_none()));
 }

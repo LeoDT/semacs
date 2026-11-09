@@ -16,6 +16,109 @@ fn diff_buffer(repo: &Repository) -> Buffer {
     buffer
 }
 
+#[test]
+fn current_section_fonts_and_geometry_are_view_local_and_recoloring_reuses_them() {
+    use crate::theme::{StyleOverride, StyleRole, ThemeSettings};
+    use std::sync::Arc;
+    crate::test_support::with_text_system(
+        Arc::new(crate::test_support::StyledTextSystem::default()),
+        |cx| {
+            let repo = Repository::new();
+            repo.write("a", "old\ncontext\n");
+            repo.commit();
+            repo.write("a", "new\ncontext\n");
+            let buffer = diff_buffer(&repo);
+            let other = buffer.new_view();
+            let original = buffer.snapshot_id();
+            let (mut first_window, first) = open_buffer(buffer, cx);
+            let (mut second_window, second) = open_buffer(other, cx);
+            let hunk = first_window.read(|cx| {
+                first
+                    .read(cx)
+                    .buffer()
+                    .sections()
+                    .unwrap()
+                    .nodes()
+                    .iter()
+                    .find(|node| node.key.contains("/@@"))
+                    .unwrap()
+                    .range
+                    .start
+            });
+            first_window.update(|_, cx| {
+                let mut theme = ThemeSettings::default();
+                theme.set_style(
+                    StyleRole::DiffHunk,
+                    StyleOverride::default()
+                        .with_text_attributes(StyleRole::DiffHunk, Some("normal"), None, None, None)
+                        .unwrap(),
+                );
+                theme.install(cx);
+            });
+            redraw(&mut first_window);
+            redraw(&mut second_window);
+            first_window.update(|window, cx| {
+                first.update(cx, |view, cx| view.show_location(hunk, window, cx))
+            });
+            redraw(&mut first_window);
+            redraw(&mut second_window);
+            let before = first_window.read(|cx| {
+                let a = first.read(cx);
+                let b = second.read(cx);
+                assert_eq!(a.settings.typography.font_at(hunk.0).bold, Some(true));
+                assert_eq!(b.settings.typography.font_at(hunk.0).bold, Some(false));
+                assert_eq!(a.buffer().snapshot_id(), original);
+                assert_eq!(b.buffer().point(), ByteOffset(0));
+                assert!(!a.buffer().is_modified());
+                let layout = a.viewport_layout().unwrap();
+                let bounds = layout
+                    .bounds_for_range(hunk..hunk, a.wrap_index().unwrap())
+                    .unwrap();
+                assert_eq!(
+                    layout.hit_test(bounds.origin + point(px(0.1), px(0.1))),
+                    Some(hunk)
+                );
+                layout.key().clone()
+            });
+            first_window.update(|_, cx| {
+                let mut theme = ThemeSettings::global(cx).clone();
+                theme.set_style(
+                    StyleRole::DiffHunkHighlight,
+                    StyleOverride::new(
+                        StyleRole::DiffHunkHighlight,
+                        Some("#123456"),
+                        Some("#234567"),
+                    )
+                    .unwrap(),
+                );
+                theme.install(cx);
+            });
+            redraw(&mut first_window);
+            first_window
+                .read(|cx| assert_eq!(first.read(cx).viewport_layout().unwrap().key(), &before));
+            first_window.update(|window, cx| {
+                window.activate_window();
+                first.update(cx, |view, cx| view.restore_input(window, cx));
+            });
+            first_window.simulate_keystrokes("tab");
+            redraw(&mut first_window);
+            first_window.read(|cx| {
+                let view = first.read(cx);
+                assert_eq!(view.buffer().snapshot_id(), original);
+                assert_eq!(view.buffer().point(), hunk);
+                assert!(
+                    view.buffer()
+                        .sections()
+                        .unwrap()
+                        .nodes()
+                        .iter()
+                        .any(|node| node.range.start == hunk && node.collapsed)
+                );
+            });
+        },
+    );
+}
+
 #[gpui::test]
 fn projected_rows_truncate_and_share_geometry_after_folding(cx: &mut TestAppContext) {
     let repo = Repository::new();

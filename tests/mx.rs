@@ -80,6 +80,55 @@ fn assert_focused(visual: &mut VisualTestContext, view: &Entity<BufferView>) {
 }
 
 #[gpui::test]
+fn mx_remembers_confirmed_commands_but_not_keys_cancellation_or_invalid_names(
+    cx: &mut TestAppContext,
+) {
+    let (mut visual, shell, _) = open("abc def", cx);
+    let first = |visual: &VisualTestContext| {
+        shell.read_with(visual, |shell, _| {
+            shell.session().unwrap().candidates().unwrap().items[0]
+                .candidate
+                .value
+                .clone()
+        })
+    };
+    mx(&mut visual, &shell);
+    let initial = first(&visual);
+    visual.simulate_input("forward-word");
+    visual.simulate_keystrokes("ctrl-g ctrl-e alt-x");
+    redraw(&mut visual);
+    assert_eq!(first(&visual), initial);
+    visual.simulate_input("not-a-command");
+    visual.simulate_keystrokes("alt-enter ctrl-g alt-x");
+    redraw(&mut visual);
+    assert_eq!(first(&visual), initial);
+    visual.simulate_input("forward-word");
+    visual.simulate_keystrokes("enter alt-x");
+    redraw(&mut visual);
+    assert_eq!(first(&visual), "forward-word");
+    visual.simulate_input("backward-char");
+    visual.simulate_keystrokes("enter alt-x");
+    redraw(&mut visual);
+    assert_eq!(first(&visual), "backward-char");
+    visual.simulate_input("forward-word");
+    redraw(&mut visual);
+    visual.read(|cx| {
+        assert_eq!(
+            shell
+                .read(cx)
+                .session()
+                .unwrap()
+                .candidates()
+                .unwrap()
+                .selected_candidate()
+                .unwrap()
+                .value,
+            "forward-word"
+        );
+    });
+}
+
+#[gpui::test]
 fn mx_lists_candidates_and_tab_inserts_the_selection(cx: &mut TestAppContext) {
     let (mut visual, shell, body) = open("body", cx);
     let editor = mx(&mut visual, &shell);
@@ -208,7 +257,7 @@ fn mx_ret_accepts_the_selected_fuzzy_match(cx: &mut TestAppContext) {
         let candidates = shell.read(cx).session().unwrap().candidates().unwrap();
         assert_eq!(
             candidates.selected_candidate().unwrap().value,
-            "forward-word"
+            "forward-char"
         );
     });
     visual.simulate_keystrokes("ctrl-n ctrl-p");
@@ -217,7 +266,7 @@ fn mx_ret_accepts_the_selected_fuzzy_match(cx: &mut TestAppContext) {
     redraw(&mut visual);
     visual.read(|cx| {
         assert!(shell.read(cx).session().is_none());
-        assert_eq!(body.read(cx).buffer().point(), ByteOffset(4));
+        assert_eq!(body.read(cx).buffer().point(), ByteOffset(1));
         assert_eq!(body.read(cx).buffer().text().to_string(), "body");
     });
 }
@@ -248,7 +297,7 @@ fn mx_unknown_names_stay_open_and_empty_input_accepts_the_first_command(cx: &mut
     redraw(&mut visual);
     visual.read(|cx| {
         assert!(shell.read(cx).session().is_none());
-        assert_eq!(body.read(cx).message(), Some("Beginning of buffer"));
+        assert_eq!(body.read(cx).message(), Some("No further undo information"));
         assert_eq!(body.read(cx).buffer().text().to_string(), "body");
     });
     assert_focused(&mut visual, &body);

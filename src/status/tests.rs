@@ -91,6 +91,41 @@ fn clean_unborn_detached_and_sha256_headers() {
 }
 
 #[test]
+fn semantic_styles_separate_labels_counts_branches_and_hashes() {
+    use crate::theme::StyleRole;
+    let rendered = Status::parse(
+        repository(),
+        &protocol(ordinary("MM", "文件.txt").as_bytes()),
+    )
+    .unwrap()
+    .render()
+    .unwrap();
+    let spans: Vec<_> = rendered
+        .styles
+        .iter()
+        .map(|(range, role)| (&rendered.text[range.start.0..range.end.0], *role))
+        .collect();
+    assert!(spans.contains(&("main", StyleRole::MagitBranch)));
+    assert!(spans.contains(&("Unstaged changes", StyleRole::SectionHeading)));
+    assert!(
+        spans
+            .iter()
+            .any(|(text, role)| text.len() == 40 && *role == StyleRole::MagitHash)
+    );
+    assert!(
+        spans
+            .iter()
+            .all(|(text, _)| !text.contains("(1)") && !text.contains("文件.txt"))
+    );
+    assert!(
+        rendered
+            .styles
+            .windows(2)
+            .all(|pair| pair[0].0.end <= pair[1].0.start)
+    );
+}
+
+#[test]
 fn groups_preserve_record_order_and_do_not_count_conflicts_twice() {
     let records = format!(
         "{}? directory/\0{}u UU N... 100644 100644 100644 100644 {} {} {} conflict\0? -leading file\0",

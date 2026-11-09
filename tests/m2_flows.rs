@@ -357,39 +357,28 @@ fn exit_external_change_answered_no_continues_to_the_modified_prompt(cx: &mut Te
 }
 
 #[gpui::test]
-fn exit_overwrite_answered_no_continues_to_the_modified_prompt(cx: &mut TestAppContext) {
-    let dir = TempDir::new("exit-overwrite");
-    let target = dir.path().join("existing.txt");
+fn exit_saves_files_but_does_not_offer_or_warn_about_modified_scratch(cx: &mut TestAppContext) {
+    let dir = TempDir::new("exit-with-scratch");
+    let target = dir.path().join("file.txt");
     fs::write(&target, b"old").unwrap();
-    let (mut visual, shell, view) = open(Buffer::scratch(), cx);
+    let (mut visual, shell, scratch) = open(Buffer::scratch(), cx);
+    visual.simulate_input("scratch draft");
+    let index = create(&mut visual, &shell, "old", Some(&target));
+    activate(&mut visual, &shell, index);
     visual.simulate_input("dirty");
     redraw(&mut visual);
 
     visual.simulate_keystrokes("ctrl-x ctrl-c");
     redraw(&mut visual);
-    assert!(prompt(&mut visual, &shell).contains("Save buffer *scratch*? (y or n)"));
+    assert!(prompt(&mut visual, &shell).contains("Save file"));
     visual.simulate_keystrokes("y");
-    redraw(&mut visual);
-    assert_eq!(prompt(&mut visual, &shell), "Write file: ");
-    type_path(&mut visual, &target);
-    visual.simulate_keystrokes("enter");
-    redraw(&mut visual);
-    assert!(prompt(&mut visual, &shell).contains("exists; overwrite? (y or n)"));
-    visual.simulate_keystrokes("n");
-    redraw(&mut visual);
-    assert!(
-        prompt(&mut visual, &shell).contains("Modified buffers exist; exit anyway?"),
-        "declining the overwrite must not leave exit waiting on a dead session"
-    );
-    visual.simulate_input("no");
-    visual.simulate_keystrokes("enter");
-    redraw(&mut visual);
+    visual.run_until_parked();
+    assert!(visual.windows().is_empty());
+    assert_eq!(fs::read(&target).unwrap(), b"dirtyold");
     visual.read(|cx| {
         assert!(shell.read(cx).session().is_none());
-        assert!(view.read(cx).buffer().is_modified());
+        assert!(scratch.read(cx).buffer().is_modified());
     });
-    assert_eq!(fs::read(&target).unwrap(), b"old");
-    assert_eq!(visual.windows().len(), 1);
 }
 
 #[gpui::test]

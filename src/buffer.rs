@@ -551,6 +551,11 @@ impl Buffer {
     pub fn format(&self) -> FileFormat {
         self.document.borrow().format
     }
+    pub(crate) fn needs_exit_save(&self) -> bool {
+        let document = self.document.borrow();
+        document.path.is_some() && document.modified
+    }
+
     pub fn is_modified(&self) -> bool {
         self.document.borrow().modified
     }

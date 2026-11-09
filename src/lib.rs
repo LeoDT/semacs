@@ -3,6 +3,7 @@ pub mod appearance;
 pub mod buffer;
 mod buffers;
 pub mod command;
+pub mod command_history;
 pub mod command_registry;
 #[cfg(unix)]
 pub mod commit;

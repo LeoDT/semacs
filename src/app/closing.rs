@@ -146,7 +146,8 @@ impl AppShell {
             .copied()
             .filter(|id| {
                 self.buffers.index_of(*id).is_some_and(|index| {
-                    self.buffers[index].save.is_saving() || self.buffers[index].buffer.is_modified()
+                    self.buffers[index].save.is_saving()
+                        || self.buffers[index].buffer.needs_exit_save()
                 })
             })
             .collect();
@@ -205,7 +206,7 @@ impl AppShell {
             self.buffers.index_of(id).map(|index| {
                 if self.buffers[index].save.is_saving() {
                     ExitBufferState::Saving
-                } else if self.buffers[index].buffer.is_modified() {
+                } else if self.buffers[index].buffer.needs_exit_save() {
                     ExitBufferState::Modified
                 } else {
                     ExitBufferState::Clean
@@ -231,7 +232,7 @@ impl AppShell {
             }
             ExitStep::CheckRemaining => {
                 if self.buffers.iter().any(|slot| {
-                    slot.buffer.is_modified()
+                    slot.buffer.needs_exit_save()
                         && !flow.modified_confirmed.contains(&slot.buffer.snapshot_id())
                 }) {
                     let origin = self.active_view().clone();

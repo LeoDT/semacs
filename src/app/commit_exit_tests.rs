@@ -27,6 +27,22 @@ fn opened(cx: &mut TestAppContext) -> (VisualTestContext, gpui_kit::Entity<AppSh
     (visual, shell)
 }
 
+fn opened_file(cx: &mut TestAppContext) -> (VisualTestContext, gpui_kit::Entity<AppShell>) {
+    let (visual, shell) = opened(cx);
+    visual.read(|cx| {
+        shell
+            .read(cx)
+            .active_view()
+            .read(cx)
+            .buffer()
+            .new_view()
+            .set_path(
+                std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(".pi/tmp/exit-draft.txt"),
+            )
+    });
+    (visual, shell)
+}
+
 #[gpui::test]
 fn active_exit_rejects_empty_no_and_quit_without_ending_sessions(cx: &mut TestAppContext) {
     let (mut visual, shell) = opened(cx);
@@ -69,7 +85,7 @@ fn active_exit_rejects_empty_no_and_quit_without_ending_sessions(cx: &mut TestAp
 
 #[gpui::test]
 fn dirty_exit_precedes_process_query_and_terminal_does_not_advance_a_read(cx: &mut TestAppContext) {
-    let (mut visual, shell) = opened(cx);
+    let (mut visual, shell) = opened_file(cx);
     visual.update(|window, cx| {
         shell.update(cx, |shell, cx| {
             let mut buffer = shell.active_view().read(cx).buffer().new_view();
@@ -110,7 +126,7 @@ fn dirty_exit_precedes_process_query_and_terminal_does_not_advance_a_read(cx: &m
 #[gpui::test]
 fn delayed_exit_rechecks_new_dirty_text_after_previous_decisions(cx: &mut TestAppContext) {
     for initially_dirty in [false, true] {
-        let (mut visual, shell) = opened(cx);
+        let (mut visual, shell) = opened_file(cx);
         if initially_dirty {
             visual.simulate_input("discarded");
         }

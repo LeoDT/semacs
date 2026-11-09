@@ -33,6 +33,62 @@ fn switching_rebuilds_from_base_and_keeps_only_explicit_overrides() {
 }
 
 #[test]
+fn diff_highlights_follow_base_styles_and_allow_independent_overrides() {
+    let mut theme = ThemeSettings::default();
+    let role = StyleRole::DiffAdded;
+    theme.set_style(
+        role,
+        StyleOverride::new(role, Some("#123456"), Some("#234567")).unwrap(),
+    );
+    theme.set_style(
+        StyleRole::SectionCurrent,
+        StyleOverride::new(StyleRole::SectionCurrent, None, Some("#345678")).unwrap(),
+    );
+    assert_eq!(
+        theme.style(role.highlighted()).foreground,
+        parse_color("#123456").unwrap()
+    );
+    assert_eq!(
+        theme.style(role.highlighted()).background,
+        parse_color("#345678").unwrap()
+    );
+    theme.set_style(
+        role.highlighted(),
+        StyleOverride::new(role.highlighted(), Some("#abcdef"), Some("#456789")).unwrap(),
+    );
+    theme.select("dark").unwrap();
+    assert_eq!(
+        theme.style(role.highlighted()).foreground,
+        parse_color("#abcdef").unwrap()
+    );
+    assert_eq!(
+        theme.style(role.highlighted()).background,
+        parse_color("#456789").unwrap()
+    );
+    assert_eq!(
+        theme.style(role).background,
+        parse_color("#234567").unwrap()
+    );
+    assert_eq!(theme.attributes(StyleRole::SectionHeading).bold, Some(true));
+    theme.set_style(
+        StyleRole::DiffHunkHighlight,
+        StyleOverride::default()
+            .with_text_attributes(
+                StyleRole::DiffHunkHighlight,
+                Some("normal"),
+                None,
+                None,
+                None,
+            )
+            .unwrap(),
+    );
+    assert_eq!(
+        theme.attributes(StyleRole::DiffHunkHighlight).bold,
+        Some(false)
+    );
+}
+
+#[test]
 fn validates_names_colors_attributes_and_limits() {
     for value in ["red", "#fff", "#000000ff", "#gggggg", " #123456", "#１２３"] {
         assert!(parse_color(value).is_err(), "{value}");

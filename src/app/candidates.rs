@@ -155,7 +155,11 @@ impl AppShell {
                     .collect(),
                 _ => unreachable!(),
             };
-            let items = completion::filter(candidates, &input, &AtomicBool::new(false));
+            let mut items = completion::filter(candidates, &input, &AtomicBool::new(false));
+            if kind == ReadKind::Command {
+                cx.global::<crate::command_history::CommandHistory>()
+                    .sort(&mut items);
+            }
             self.session.as_mut().unwrap().candidates = Some(CandidateList::ready(
                 items,
                 &input,

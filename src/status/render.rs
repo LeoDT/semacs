@@ -68,20 +68,32 @@ fn path_key(path: &std::path::Path) -> String {
 
 pub(super) fn render(status: &Status) -> Result<RenderedStatus, String> {
     let mut text = String::new();
+    let mut styles = Vec::new();
     append(&mut text, "Status: ")?;
     escaped(
         &mut text,
         status.repository.root.as_os_str().as_encoded_bytes(),
     )?;
     append(&mut text, "\nBranch: ")?;
+    let branch_start = ByteOffset(text.len());
     match &status.head {
         Head::Branch { name, oid } => {
             escaped(&mut text, name)?;
-            append(&mut text, &format!("\nHEAD: {oid}\n"))?;
+            styles.push((branch_start..ByteOffset(text.len()), StyleRole::MagitBranch));
+            append(&mut text, "\nHEAD: ")?;
+            let start = ByteOffset(text.len());
+            append(&mut text, &format!("{oid}\n"))?;
+            styles.push((start..ByteOffset(text.len() - 1), StyleRole::MagitHash));
         }
-        Head::Detached { oid } => append(&mut text, &format!("(detached)\nHEAD: {oid}\n"))?,
+        Head::Detached { oid } => {
+            append(&mut text, "(detached)\nHEAD: ")?;
+            let start = ByteOffset(text.len());
+            append(&mut text, &format!("{oid}\n"))?;
+            styles.push((start..ByteOffset(text.len() - 1), StyleRole::MagitHash));
+        }
         Head::Unborn { name } => {
             escaped(&mut text, name)?;
+            styles.push((branch_start..ByteOffset(text.len()), StyleRole::MagitBranch));
             append(&mut text, "\nHEAD: (unborn)\n")?;
         }
     }
@@ -93,7 +105,6 @@ pub(super) fn render(status: &Status) -> Result<RenderedStatus, String> {
         body: title.end,
         collapsed: false,
     }];
-    let mut styles = vec![(title, StyleRole::DiffFile)];
     let mut locations = Vec::new();
     for group in Group::ALL {
         let start = ByteOffset(text.len());
@@ -102,7 +113,8 @@ pub(super) fn render(status: &Status) -> Result<RenderedStatus, String> {
             &format!("{} ({})\n", group.name(), status.group(group).count()),
         )?;
         let heading = start..ByteOffset(text.len());
-        styles.push((heading.clone(), StyleRole::DiffFile));
+        let label_end = start.0 + group.name().len();
+        styles.push((start..ByteOffset(label_end), StyleRole::SectionHeading));
         let parent = nodes.len();
         nodes.push(Section {
             key: group.key().into(),

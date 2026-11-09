@@ -58,6 +58,7 @@ pub fn init(cx: &mut App) {
         .expect("failed to load bundled Lilex fonts");
     gpui_kit::init(cx);
     crate::theme::ThemeSettings::default().install(cx);
+    cx.default_global::<crate::command_history::CommandHistory>();
 }
 
 struct MinibufferMount {

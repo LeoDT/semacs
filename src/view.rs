@@ -848,6 +848,12 @@ impl BufferView {
         cx.notify();
     }
 
+    fn current_section(&self) -> Option<std::ops::Range<ByteOffset>> {
+        let sections = self.buffer().sections()?;
+        let index = sections.current(self.buffer().point());
+        (index != 0).then(|| sections.nodes()[index].range.clone())
+    }
+
     fn typography(&self, cx: &App) -> crate::display::Typography {
         let snapshot = self.display_snapshot();
         let theme = ThemeSettings::global(cx);
@@ -869,6 +875,11 @@ impl BufferView {
             fonts,
         )
         .with_named_ranges(self.buffer().named_styles(), theme)
+        .with_current_section(
+            self.current_section(),
+            theme,
+            Some(&self.settings.typography),
+        )
     }
 
     fn ensure_index(&mut self, bounds: Bounds<Pixels>, cx: &mut Context<Self>) {
@@ -1598,10 +1609,7 @@ impl Element for TextCanvas {
         let (named_styles, current_section, collapsed_headings) = {
             let view = self.view.read(cx);
             let sections = view.buffer().sections();
-            let current = sections.as_ref().and_then(|sections| {
-                let index = sections.current(view.buffer().point());
-                (index != 0).then(|| sections.nodes()[index].range.clone())
-            });
+            let current = view.current_section();
             let headings: Vec<_> = sections
                 .iter()
                 .flat_map(|sections| {
@@ -1621,7 +1629,8 @@ impl Element for TextCanvas {
             prompt_end.0,
         )
         .with_annotations(annotations.as_deref())
-        .with_named_ranges(&named_styles);
+        .with_named_ranges(&named_styles)
+        .with_current_section(current_section.clone());
         let cursor_colors = ThemeSettings::global(cx).style(StyleRole::Cursor);
         window.with_content_mask(
             Some(ContentMask {
@@ -1635,20 +1644,14 @@ impl Element for TextCanvas {
                         window.paint_quad(fill(bounds, color));
                     }
                 }
-                if let Some(section) = &current_section {
-                    for row in layout
-                        .rows
-                        .iter()
-                        .filter(|row| section.contains(&row.source.start))
-                    {
+                for row in &layout.rows {
+                    if let Some(color) = style.named_line_background(row.source.start) {
                         window.paint_quad(fill(
                             Bounds::new(
                                 point(layout.bounds.left(), layout.origin(row).y),
                                 size(layout.bounds.size.width, layout.key.settings.line_height),
                             ),
-                            ThemeSettings::global(cx)
-                                .style(StyleRole::SectionCurrent)
-                                .background,
+                            color,
                         ));
                     }
                 }

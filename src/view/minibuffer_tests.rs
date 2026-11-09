@@ -4,7 +4,7 @@ use gpui_kit::{
 };
 
 use super::BufferView;
-use super::input_tests::{app_shell, handler, open, press_listener, redraw};
+use super::input_tests::{app_shell, handler, open, open_file, press_listener, redraw};
 use crate::app::AppShell;
 use crate::minibuffer::Minibuffer;
 use crate::text::ByteOffset;
@@ -453,7 +453,7 @@ fn whole_buffer_readonly_remains_distinct_from_prompt_protection(cx: &mut TestAp
 
 #[gpui::test]
 fn close_cancels_both_compositions_and_cancel_restores_body_focus(cx: &mut TestAppContext) {
-    let (mut visual, body) = open("body", cx);
+    let (mut visual, body) = open_file("body", cx);
     visual.simulate_input("X");
     let (shell, mini, editor) = show(&mut visual, "P: ", "abc");
     let mut input = handler(&editor, &visual);

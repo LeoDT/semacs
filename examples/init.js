@@ -7,6 +7,9 @@ semacs.defineTheme("night", {
     styles: {
         "mode-line": { foreground: "#ffffff", background: "#304060" },
         "minibuffer-prompt": { foreground: "#a8c7fa" },
+        "section.heading": { foreground: "#c792ea", weight: "bold" },
+        "diff.hunk": { foreground: "#e6e6e6", background: "#292c32" },
+        "diff.hunk-highlight": { background: "#39465a" },
     },
 });
 semacs.loadTheme("night");

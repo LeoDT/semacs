@@ -11,7 +11,11 @@ type SemacsStyleName =
     | "syntax.type" | "syntax.function" | "syntax.variable" | "syntax.constant"
     | "syntax.operator" | "syntax.punctuation"
     | "markup.heading" | "markup.strong" | "markup.emphasis"
-    | "diff.file" | "diff.hunk" | "diff.added" | "diff.removed" | "section.current";
+    | "diff.file" | "diff.hunk" | "diff.added" | "diff.removed" | "diff.context"
+    | "diff.file-highlight" | "diff.hunk-highlight" | "diff.added-highlight"
+    | "diff.removed-highlight" | "diff.context-highlight"
+    | "diffstat.added" | "diffstat.removed" | "section.current" | "section.heading"
+    | "magit.branch" | "magit.hash";
 
 interface SemacsTextStyle {
     foreground?: string;
@@ -24,7 +28,7 @@ interface SemacsTextStyle {
 
 type SemacsStyleColors<N extends SemacsStyleName> =
     N extends "region" | "section.current" ? { background?: string } :
-    N extends "default" | "minibuffer-prompt" | `syntax.${string}` | `markup.${string}` | `diff.${string}` ? SemacsTextStyle :
+    N extends "default" | "minibuffer-prompt" | "section.heading" | `syntax.${string}` | `markup.${string}` | `diff.${string}` | `diffstat.${string}` | `magit.${string}` ? SemacsTextStyle :
     N extends "completion-match" | "completion-annotation" | "separator" ? { foreground?: string } :
     { foreground?: string; background?: string };
 

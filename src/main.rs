@@ -28,9 +28,17 @@ fn main() -> ExitCode {
         }
     };
 
+    let (history, _history_persistence) = semacs::command_history::state_path()
+        .and_then(semacs::command_history::Persistence::open)
+        .map(|(history, persistence)| (history, Some(persistence)))
+        .unwrap_or_else(|error| {
+            eprintln!("semacs: command history unavailable: {error}");
+            (semacs::command_history::CommandHistory::default(), None)
+        });
     let title = format!("{} - semacs", buffer.display_name());
     gpui_kit::application().run(move |cx| {
         semacs::app::init(cx);
+        cx.set_global(history);
         let options = WindowOptions {
             titlebar: Some(TitlebarOptions {
                 title: Some(title.into()),

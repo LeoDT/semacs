@@ -67,7 +67,7 @@
             if (typeof name !== "string" || name.length > 64 || !object(definition) ||
                 Object.keys(definition).some(key => key !== "appearance" && key !== "styles") ||
                 (definition.appearance !== "light" && definition.appearance !== "dark") ||
-                !object(definition.styles) || Object.keys(definition.styles).length > 30)
+                !object(definition.styles) || Object.keys(definition.styles).length > 41)
                 throw new TypeError("defineTheme expects a name and {appearance, styles}");
             themes.push({name, appearance: definition.appearance,
                 styles: Object.entries(definition.styles).map(([name, value]) => copyStyle(name, value))});

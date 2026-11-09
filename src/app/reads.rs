@@ -93,6 +93,13 @@ impl AppShell {
         let input = self.session_input(cx).unwrap_or_default();
         if let Some(command) = self.commands.named(&input) {
             if let Some(target) = self.end_session(id, window, cx) {
+                if self
+                    .commands
+                    .available_in(command, target.read(cx).buffer().mode())
+                {
+                    cx.global_mut::<crate::command_history::CommandHistory>()
+                        .record(&input);
+                }
                 self.run_command(command, &target, window, cx);
             }
         } else {
@@ -526,7 +533,7 @@ impl AppShell {
                             flow.modified_confirmed = self
                                 .buffers
                                 .iter()
-                                .filter(|slot| slot.buffer.is_modified())
+                                .filter(|slot| slot.buffer.needs_exit_save())
                                 .map(|slot| slot.buffer.snapshot_id())
                                 .collect();
                         } else {

@@ -42,8 +42,14 @@
 | `syntax.type` / `syntax.function` / `syntax.variable` / `syntax.constant` | 前景 / 背景及全部文字属性，语法类型 / 函数 / 变量 / 常量 |
 | `syntax.operator` / `syntax.punctuation` | 前景 / 背景及全部文字属性，语法运算符 / 标点 |
 | `markup.heading` / `markup.strong` / `markup.emphasis` | 前景 / 背景及全部文字属性，Markdown 标题 / 强强调 / 强调；内置分别为加粗 / 加粗 / 斜体 |
-| `diff.file` / `diff.hunk` / `diff.added` / `diff.removed` | 前景 / 背景及全部文字属性，diff heading 与增删行；heading 默认加粗 |
+| `diff.file` / `diff.hunk` / `diff.added` / `diff.removed` / `diff.context` | 前景 / 背景及全部文字属性，diff 文件头、hunk 头、增删行及上下文；heading 默认加粗，显式背景铺满逻辑行 |
+| `diff.file-highlight` / `diff.hunk-highlight` / `diff.added-highlight` / `diff.removed-highlight` / `diff.context-highlight` | 当前 section 内对应 diff 角色的样式；缺省沿用普通角色的有效属性，再使用 `section.current` 背景，文件 / hunk 头默认加粗；可独立覆盖，包括 `weight: "normal"` |
+| `diffstat.added` / `diffstat.removed` | 前景 / 背景及全部文字属性，diffstat 的增删计数 |
+| `section.heading` | 前景 / 背景及全部文字属性，status 分组名及 diff 总览标题；不把 status 数量、路径或文件头混用为分组标题 |
+| `magit.branch` / `magit.hash` | 前景 / 背景及全部文字属性，status 中的本地分支名与 HEAD OID |
 | `section.current` | 仅 `background`，当前 section 整行背景；该反馈独立于 region |
+
+当前 section 按各 view 的 point 分别合成，不改写共享样式范围；颜色变化仅重绘，当前字体变化参与该 view 的布局身份。逻辑行背景按行首对应角色决定，背景铺至视图右缘，文字 / region / 光标仍保留既有合成优先级。高亮角色到普通角色的回退是上述固定对应关系，不提供任意继承。配色由 semacs 主题直接控制，不运行 Delta；保留 `+` / `-`，不提供逐词差异高亮。
 
 未知样式、未支持的属性及非法颜色均拒绝整份配置。不支持逐段字体族 / 字号、任意继承、多个启用主题叠加或自动跟随系统。字体实际效果依赖平台字体及回退，不保证所请求字形一定存在。语法启用见 [E1 契约](emacs-fidelity.md#阶段-e1rust-tree-sitter)，字体与背景合成见 [E3 契约](emacs-fidelity.md#阶段-e3文本样式与高亮合成)。
 

@@ -24,6 +24,19 @@ fn binding(configuration: &Configuration, keys: &str) -> Lookup {
 }
 
 #[test]
+fn a_theme_can_configure_every_named_role_including_magit() {
+    let styles = crate::theme::StyleRole::ALL
+        .iter()
+        .map(|role| format!("'{}': {{}}", role.name()))
+        .collect::<Vec<_>>()
+        .join(",");
+    let (_, configuration) = load(&format!(
+        "semacs.defineTheme('all-roles', {{appearance:'light',styles:{{{styles}}}}}); semacs.loadTheme('all-roles');"
+    )).unwrap();
+    assert_eq!(configuration.theme.active(), "all-roles");
+}
+
+#[test]
 fn configuration_registers_commands_font_and_multiple_keys() {
     let (mut engine, configuration) = load(
         r#"

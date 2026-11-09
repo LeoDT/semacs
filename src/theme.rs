@@ -35,10 +35,21 @@ pub enum StyleRole {
     DiffAdded,
     DiffRemoved,
     SectionCurrent,
+    SectionHeading,
+    MagitBranch,
+    MagitHash,
+    DiffContext,
+    DiffStatAdded,
+    DiffStatRemoved,
+    DiffFileHighlight,
+    DiffHunkHighlight,
+    DiffAddedHighlight,
+    DiffRemovedHighlight,
+    DiffContextHighlight,
 }
 
 impl StyleRole {
-    pub const COUNT: usize = 30;
+    pub const COUNT: usize = Self::DiffContextHighlight as usize + 1;
     pub const ALL: [Self; Self::COUNT] = [
         Self::Default,
         Self::Cursor,
@@ -70,6 +81,17 @@ impl StyleRole {
         Self::DiffAdded,
         Self::DiffRemoved,
         Self::SectionCurrent,
+        Self::SectionHeading,
+        Self::MagitBranch,
+        Self::MagitHash,
+        Self::DiffContext,
+        Self::DiffStatAdded,
+        Self::DiffStatRemoved,
+        Self::DiffFileHighlight,
+        Self::DiffHunkHighlight,
+        Self::DiffAddedHighlight,
+        Self::DiffRemovedHighlight,
+        Self::DiffContextHighlight,
     ];
 
     pub fn name(self) -> &'static str {
@@ -104,6 +126,39 @@ impl StyleRole {
             Self::DiffAdded => "diff.added",
             Self::DiffRemoved => "diff.removed",
             Self::SectionCurrent => "section.current",
+            Self::SectionHeading => "section.heading",
+            Self::MagitBranch => "magit.branch",
+            Self::MagitHash => "magit.hash",
+            Self::DiffContext => "diff.context",
+            Self::DiffStatAdded => "diffstat.added",
+            Self::DiffStatRemoved => "diffstat.removed",
+            Self::DiffFileHighlight => "diff.file-highlight",
+            Self::DiffHunkHighlight => "diff.hunk-highlight",
+            Self::DiffAddedHighlight => "diff.added-highlight",
+            Self::DiffRemovedHighlight => "diff.removed-highlight",
+            Self::DiffContextHighlight => "diff.context-highlight",
+        }
+    }
+
+    pub(crate) fn highlighted(self) -> Self {
+        match self {
+            Self::DiffFile => Self::DiffFileHighlight,
+            Self::DiffHunk => Self::DiffHunkHighlight,
+            Self::DiffAdded => Self::DiffAddedHighlight,
+            Self::DiffRemoved => Self::DiffRemovedHighlight,
+            Self::DiffContext => Self::DiffContextHighlight,
+            _ => self,
+        }
+    }
+
+    fn plain(self) -> Option<Self> {
+        match self {
+            Self::DiffFileHighlight => Some(Self::DiffFile),
+            Self::DiffHunkHighlight => Some(Self::DiffHunk),
+            Self::DiffAddedHighlight => Some(Self::DiffAdded),
+            Self::DiffRemovedHighlight => Some(Self::DiffRemoved),
+            Self::DiffContextHighlight => Some(Self::DiffContext),
+            _ => None,
         }
     }
 
@@ -148,6 +203,13 @@ pub struct FontEmphasis {
 }
 
 impl FontEmphasis {
+    pub(crate) fn emphasis(self, base: Self) -> Self {
+        Self {
+            bold: self.bold.or(base.bold),
+            italic: self.italic.or(base.italic),
+        }
+    }
+
     pub fn font(self, base: &gpui_kit::Font) -> gpui_kit::Font {
         let mut font = base.clone();
         if let Some(bold) = self.bold {
@@ -294,13 +356,15 @@ impl Default for ThemeSettings {
                 },
             );
         }
-        Self {
+        let mut settings = Self {
             themes,
             active: "light".into(),
             overrides: BTreeMap::new(),
             resolved: builtin_colors(ThemeMode::Light),
             attributes: builtin_attributes(ThemeMode::Light),
-        }
+        };
+        settings.resolve();
+        settings
     }
 }
 
@@ -324,6 +388,9 @@ impl ThemeSettings {
     pub(crate) fn attributes(&self, role: StyleRole) -> StyleOverride {
         let mut attributes = self.attributes[role as usize];
         attributes.foreground = Some(self.style(role).foreground);
+        if role == StyleRole::SectionCurrent {
+            attributes.background = Some(self.style(role).background);
+        }
         attributes
     }
 
@@ -386,10 +453,25 @@ impl ThemeSettings {
         let definition = &self.themes[&self.active];
         self.resolved = builtin_colors(definition.mode);
         self.attributes = builtin_attributes(definition.mode);
-        for styles in [&definition.styles, &self.overrides] {
-            for (role, colors) in styles {
-                colors.apply(&mut self.resolved[*role as usize]);
-                self.attributes[*role as usize].merge(*colors);
+        for role in StyleRole::ALL {
+            if let Some(base) = role.plain() {
+                self.resolved[role as usize] = self.resolved[base as usize];
+                self.attributes[role as usize] = self.attributes[base as usize];
+                let background = self.style(StyleRole::SectionCurrent).background;
+                self.resolved[role as usize].background = background;
+                self.attributes[role as usize].background = Some(background);
+                if matches!(
+                    role,
+                    StyleRole::DiffFileHighlight | StyleRole::DiffHunkHighlight
+                ) {
+                    self.attributes[role as usize].bold = Some(true);
+                }
+            }
+            for styles in [&definition.styles, &self.overrides] {
+                if let Some(colors) = styles.get(&role) {
+                    colors.apply(&mut self.resolved[role as usize]);
+                    self.attributes[role as usize].merge(*colors);
+                }
             }
         }
     }
@@ -439,35 +521,38 @@ fn builtin_colors(mode: ThemeMode) -> [StyleColors; StyleRole::COUNT] {
         foreground: rgb(fg).into(),
         background: rgb(bg).into(),
     };
-    [
-        pair(foreground, background),
-        pair(background, foreground),
-        pair(foreground, selection),
-        pair(foreground, active_bg),
-        pair(muted, inactive_bg),
-        pair(accent, background),
-        pair(muted, background),
-        pair(foreground, background),
-        pair(foreground, active_bg),
-        pair(accent, background),
-        pair(muted, background),
-        pair(separator, background),
-        pair(keyword, background),
-        pair(comment, background),
-        pair(string, background),
-        pair(number, background),
-        pair(type_color, background),
-        pair(function, background),
-        pair(foreground, background),
-        pair(constant, background),
-        pair(foreground, background),
-        pair(muted, background),
-        pair(type_color, background),
-        pair(type_color, background),
-        pair(foreground, background),
-        pair(type_color, background),
-        pair(function, background),
-        pair(
+    StyleRole::ALL.map(|role| match role {
+        StyleRole::Default
+        | StyleRole::Completion
+        | StyleRole::SyntaxVariable
+        | StyleRole::SyntaxOperator
+        | StyleRole::MarkupEmphasis
+        | StyleRole::DiffContext
+        | StyleRole::DiffContextHighlight => pair(foreground, background),
+        StyleRole::Cursor => pair(background, foreground),
+        StyleRole::Region => pair(foreground, selection),
+        StyleRole::ModeLine | StyleRole::CompletionSelected => pair(foreground, active_bg),
+        StyleRole::ModeLineInactive => pair(muted, inactive_bg),
+        StyleRole::MinibufferPrompt | StyleRole::CompletionMatch => pair(accent, background),
+        StyleRole::EchoArea
+        | StyleRole::CompletionAnnotation
+        | StyleRole::SyntaxPunctuation
+        | StyleRole::MagitHash => pair(muted, background),
+        StyleRole::Separator => pair(separator, background),
+        StyleRole::SyntaxKeyword | StyleRole::SectionHeading => pair(keyword, background),
+        StyleRole::SyntaxComment => pair(comment, background),
+        StyleRole::SyntaxString | StyleRole::DiffStatAdded => pair(string, background),
+        StyleRole::SyntaxNumber => pair(number, background),
+        StyleRole::SyntaxType
+        | StyleRole::MarkupHeading
+        | StyleRole::MarkupStrong
+        | StyleRole::DiffFile
+        | StyleRole::DiffFileHighlight
+        | StyleRole::MagitBranch => pair(type_color, background),
+        StyleRole::SyntaxFunction => pair(function, background),
+        StyleRole::SyntaxConstant | StyleRole::DiffStatRemoved => pair(constant, background),
+        StyleRole::DiffHunk | StyleRole::DiffHunkHighlight => pair(function, inactive_bg),
+        StyleRole::DiffAdded | StyleRole::DiffAddedHighlight => pair(
             string,
             if mode == ThemeMode::Dark {
                 0x20372a
@@ -475,7 +560,7 @@ fn builtin_colors(mode: ThemeMode) -> [StyleColors; StyleRole::COUNT] {
                 0xe5f4e8
             },
         ),
-        pair(
+        StyleRole::DiffRemoved | StyleRole::DiffRemovedHighlight => pair(
             constant,
             if mode == ThemeMode::Dark {
                 0x42292d
@@ -483,7 +568,7 @@ fn builtin_colors(mode: ThemeMode) -> [StyleColors; StyleRole::COUNT] {
                 0xfce8e6
             },
         ),
-        pair(
+        StyleRole::SectionCurrent => pair(
             foreground,
             if mode == ThemeMode::Dark {
                 0x303a4a
@@ -491,7 +576,7 @@ fn builtin_colors(mode: ThemeMode) -> [StyleColors; StyleRole::COUNT] {
                 0xeaf0f8
             },
         ),
-    ]
+    })
 }
 
 fn builtin_attributes(mode: ThemeMode) -> [StyleOverride; StyleRole::COUNT] {
@@ -500,7 +585,12 @@ fn builtin_attributes(mode: ThemeMode) -> [StyleOverride; StyleRole::COUNT] {
     attributes[StyleRole::MarkupStrong as usize].bold = Some(true);
     attributes[StyleRole::DiffFile as usize].bold = Some(true);
     attributes[StyleRole::DiffHunk as usize].bold = Some(true);
-    for role in [StyleRole::DiffAdded, StyleRole::DiffRemoved] {
+    attributes[StyleRole::SectionHeading as usize].bold = Some(true);
+    for role in [
+        StyleRole::DiffAdded,
+        StyleRole::DiffRemoved,
+        StyleRole::DiffHunk,
+    ] {
         attributes[role as usize].background = Some(builtin_colors(mode)[role as usize].background);
     }
     attributes[StyleRole::MarkupEmphasis as usize].italic = Some(true);

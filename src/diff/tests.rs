@@ -104,6 +104,41 @@ fn head_to_worktree_includes_both_sides_of_the_index_and_visits_disk() {
 }
 
 #[test]
+fn semantic_styles_cover_diffstat_headings_and_every_hunk_line() {
+    use crate::theme::StyleRole;
+    let repo = Repository::new();
+    repo.write("中文.txt", "old\ncontext\n");
+    repo.commit();
+    repo.write("中文.txt", "new\ncontext\n");
+    let rendered = repo.load(DiffKind::Unstaged).render().unwrap();
+    let spans: Vec<_> = rendered
+        .styles
+        .iter()
+        .map(|(range, role)| (&rendered.text[range.start.0..range.end.0], *role))
+        .collect();
+    for (text, role) in [
+        ("+1", StyleRole::DiffStatAdded),
+        ("-1", StyleRole::DiffStatRemoved),
+        ("+new\n", StyleRole::DiffAdded),
+        ("-old\n", StyleRole::DiffRemoved),
+        (" context\n", StyleRole::DiffContext),
+    ] {
+        assert!(spans.contains(&(text, role)), "{text:?}");
+    }
+    assert!(
+        spans
+            .iter()
+            .any(|(text, role)| text.starts_with("@@") && *role == StyleRole::DiffHunk)
+    );
+    assert!(
+        rendered
+            .styles
+            .windows(2)
+            .all(|pair| pair[0].0.end <= pair[1].0.start)
+    );
+}
+
+#[test]
 fn head_to_worktree_uses_the_repository_empty_tree_for_unborn_sha1_and_sha256() {
     for format in ["sha1", "sha256"] {
         let repo = Repository::with_format(format);

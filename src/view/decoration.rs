@@ -16,6 +16,7 @@ pub(super) struct TextStyle<'a> {
     pub prompt_end: usize,
     annotations: Option<&'a crate::buffer::Annotations>,
     named: &'a [(Range<crate::text::ByteOffset>, StyleRole)],
+    current_section: Option<Range<crate::text::ByteOffset>>,
 }
 
 impl<'a> TextStyle<'a> {
@@ -33,6 +34,7 @@ impl<'a> TextStyle<'a> {
             prompt_end,
             annotations: None,
             named: &[],
+            current_section: None,
         }
     }
 
@@ -50,6 +52,48 @@ impl<'a> TextStyle<'a> {
     ) -> Self {
         self.named = named;
         self
+    }
+
+    pub(super) fn with_current_section(
+        mut self,
+        current: Option<Range<crate::text::ByteOffset>>,
+    ) -> Self {
+        self.current_section = current;
+        self
+    }
+
+    fn named_role(&self, role: StyleRole, offset: crate::text::ByteOffset) -> StyleRole {
+        if self
+            .current_section
+            .as_ref()
+            .is_some_and(|range| range.contains(&offset))
+        {
+            role.highlighted()
+        } else {
+            role
+        }
+    }
+
+    pub(super) fn named_line_background(
+        &self,
+        offset: crate::text::ByteOffset,
+    ) -> Option<gpui_kit::Hsla> {
+        let index = self.named.partition_point(|(range, _)| range.end <= offset);
+        let background = self
+            .named
+            .get(index)
+            .filter(|(range, _)| range.contains(&offset))
+            .and_then(|(_, role)| self.styles[self.named_role(*role, offset) as usize].background);
+        background.or_else(|| {
+            self.current_section
+                .as_ref()
+                .filter(|range| range.contains(&offset))
+                .map(|_| {
+                    self.styles[StyleRole::SectionCurrent as usize]
+                        .background
+                        .unwrap()
+                })
+        })
     }
 
     fn runs(
@@ -115,8 +159,16 @@ impl<'a> TextStyle<'a> {
                 .partition_point(|(range, _)| range.end.0 <= position);
             if let Some((range, role)) = self.named.get(index) {
                 if range.start.0 <= position {
-                    attributes.merge(self.styles[*role as usize]);
+                    let role = self.named_role(*role, crate::text::ByteOffset(position));
+                    attributes.merge(self.styles[role as usize]);
                     end = end.min(range.end.0);
+                    if let Some(current) = &self.current_section {
+                        if position < current.start.0 {
+                            end = end.min(current.start.0);
+                        } else if position < current.end.0 {
+                            end = end.min(current.end.0);
+                        }
+                    }
                 } else {
                     end = end.min(range.start.0);
                 }
@@ -337,6 +389,63 @@ mod tests {
         assert_eq!(runs[0].color, theme.style(StyleRole::Default).foreground);
         assert!(runs[0].background_color.is_none());
         assert!(runs[0].underline.is_none());
+    }
+
+    #[test]
+    fn named_line_backgrounds_and_text_share_current_section_variants() {
+        use crate::text::ByteOffset as B;
+        let mut theme = ThemeSettings::default();
+        theme.set_style(
+            StyleRole::DiffAddedHighlight,
+            StyleOverride::new(
+                StyleRole::DiffAddedHighlight,
+                Some("#123456"),
+                Some("#234567"),
+            )
+            .unwrap(),
+        );
+        let named = [
+            (B(0)..B(2), StyleRole::DiffAdded),
+            (B(2)..B(4), StyleRole::DiffContext),
+        ];
+        let plain = TextStyle::new(&theme, None, None, 0).with_named_ranges(&named);
+        let current = TextStyle::new(&theme, None, None, 0)
+            .with_named_ranges(&named)
+            .with_current_section(Some(B(0)..B(4)));
+        assert_eq!(
+            plain.named_line_background(B(0)),
+            Some(theme.style(StyleRole::DiffAdded).background)
+        );
+        assert_eq!(plain.named_line_background(B(2)), None);
+        assert_eq!(
+            current.named_line_background(B(0)),
+            Some(theme.style(StyleRole::DiffAddedHighlight).background)
+        );
+        assert_eq!(
+            current.named_line_background(B(2)),
+            Some(theme.style(StyleRole::SectionCurrent).background)
+        );
+        assert_eq!(current.named_line_background(B(4)), None);
+        let runs = current.runs(0..4, Some(0..1));
+        assert_eq!(runs[0].color, theme.style(StyleRole::Cursor).foreground);
+        assert_eq!(
+            runs[1].color,
+            theme.style(StyleRole::DiffAddedHighlight).foreground
+        );
+        assert_eq!(
+            runs[1].background_color,
+            current.named_line_background(B(0))
+        );
+        let partial = TextStyle::new(&theme, None, None, 0)
+            .with_named_ranges(&named)
+            .with_current_section(Some(B(1)..B(2)));
+        let runs = partial.runs(0..2, None);
+        assert_eq!(runs.len(), 2);
+        assert_eq!(runs[0].color, theme.style(StyleRole::DiffAdded).foreground);
+        assert_eq!(
+            runs[1].color,
+            theme.style(StyleRole::DiffAddedHighlight).foreground
+        );
     }
 
     #[test]

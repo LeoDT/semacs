@@ -2,15 +2,23 @@
 
 本文是当前工作和跨会话待办的唯一入口；维护与归档规则见 [文档说明](README.md#维护规则)。范围见 [需求](requirements.md)，行为见 [保真度契约](emacs-fidelity.md)。里程碑按可验收行为划分，不按工期估算。
 
-## 当前状态：F3 已按确认范围完成，下一阶段待确认
+## 当前状态：F3 及插入项本地验证完成，新样式待目视核对
 
 R0–M3、A–E3、日常编辑增强及 F1 只读 Magit diff 的交付结论见 [R0–F1 归档](archive/completed-through-f1.md)，F2 status / 单文件 stage / unstage 见 [F2 归档](archive/f2-status.md)。F3 临时 window 与普通 commit 已完成实现、集中审查修复、本地验证及获准的单窗口宿主功能验证，见 [F3 归档](archive/f3-window-commit.md)；固定源码 / 环境、结果和未测边界见[冻结记录索引](records/README.md)。
 
 F3 没有已知阻塞性遗留项；密码 / passphrase 读入已由用户明确排除于 F3，不因它继续维持阶段未完成。原性能预算、历史非阻塞观察及各阶段未测边界不变，不把功能收尾解释为全部性能预算通过。
 
+## 当前插入项：Magit 样式、M-x 历史与 scratch 退出
+
+已按批准范围实现：status / diff 语义样式、view-local 当前 section 高亮及用户 Alucard 配置补充；M-x 的 Vertico 式历史 / 长度 / 名称排序与持久化；普通非文件 buffer 不参与退出保存及最终未保存提醒。保留 semacs 自有可配置 diff 配色及 `+` / `-`，不引入 Delta，不增加 remote、Recent commits、词级差异或 status 内嵌 hunk。行为见[保真度契约](emacs-fidelity.md)，样式见[配置 API](scripting.md#主题与命名样式)。
+
+已完成本地全目标测试、Clippy、格式 / diff 检查、JS 类型检查及配置副本的 Rust / QuickJS 加载校验；一次集中审查指出稳定帧可能重复扫描当前 section 的字体范围，已增加按范围身份、section 和有效字体属性复用正 / 负判断的缓存，并通过回归。用户提供的截图是 Emacs 参照，不是 semacs 的视觉通过证据，新样式仍待用户目视核对。
+
+status / diff 两项 headless 专项首批因并行格式化触发源码指纹变化而停止；获用户明确同意后已冻结代码、以新目录顺序重跑完成，正文、投影、双 view 及 stage / unstage 的独立核对通过。结果仅为 headless 功能及 CPU 基线，不表示原生性能预算通过；源码身份、证据和未测边界见[本地记录](records/magit-style-history-scratch-local.md)。
+
 ## 下一步
 
-目前没有另行批准的新实施阶段。先由实际需要确认优先级与范围，再开始下方未排期事项；不自动追加宿主矩阵，不代用户提交现有工作区。
+上述插入项之外，目前没有另行批准的新实施阶段。先由实际需要确认优先级与范围，再开始下方未排期事项；不自动追加宿主矩阵，不代用户提交现有工作区。
 
 后续更多 Magit 操作 / 完整 transient、脚本扩展 / async、LSP 或 Job 持久化均需另行确认。按需参考 [脚本扩展与热重载调研](work/scripting-extension-research.md) 和 [Magit 上游参照](work/f-magit-reference.md)，两者不额外授权其他范围。有效用户行为仍见[保真度契约](emacs-fidelity.md)，不会改写 F1 / F2 的历史排除范围。
 

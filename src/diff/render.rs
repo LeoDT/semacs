@@ -71,11 +71,12 @@ pub(super) fn render(diff: &Diff) -> Result<RenderedDiff, String> {
         body: title.end,
         collapsed: false,
     }];
-    let mut styles = vec![(title, StyleRole::DiffFile)];
+    let mut styles = vec![(title, StyleRole::SectionHeading)];
     let mut locations = Vec::new();
     let mut peers = Vec::new();
     if !diff.files.is_empty() {
         let heading = push(&mut text, &format!("{} files changed", diff.files.len()));
+        styles.push((heading.clone(), StyleRole::SectionHeading));
         let stat = nodes.len();
         nodes.push(Section {
             key: "stat".into(),
@@ -85,15 +86,26 @@ pub(super) fn render(diff: &Diff) -> Result<RenderedDiff, String> {
             collapsed: false,
         });
         for (file, item) in diff.files.iter().enumerate() {
+            let added = format!("+{}", item.added.map_or("binary".into(), |n| n.to_string()));
+            let deleted = format!(
+                "-{}",
+                item.deleted.map_or("binary".into(), |n| n.to_string())
+            );
             let range = push(
                 &mut text,
-                &format!(
-                    " {} | +{} -{}",
-                    label(&item.new_path),
-                    item.added.map_or("binary".into(), |n| n.to_string()),
-                    item.deleted.map_or("binary".into(), |n| n.to_string())
-                ),
+                &format!(" {} | {added} {deleted}", label(&item.new_path)),
             );
+            let deleted_end = range.end.0 - 1;
+            let deleted_start = deleted_end - deleted.len();
+            let added_end = deleted_start - 1;
+            styles.push((
+                ByteOffset(added_end - added.len())..ByteOffset(added_end),
+                StyleRole::DiffStatAdded,
+            ));
+            styles.push((
+                ByteOffset(deleted_start)..ByteOffset(deleted_end),
+                StyleRole::DiffStatRemoved,
+            ));
             nodes.push(Section {
                 key: format!("stat/{:?}", item.new_path),
                 parent: Some(stat),
@@ -176,11 +188,9 @@ pub(super) fn render(diff: &Diff) -> Result<RenderedDiff, String> {
                 let role = match line.text.as_bytes().first() {
                     Some(b'+') => StyleRole::DiffAdded,
                     Some(b'-') => StyleRole::DiffRemoved,
-                    _ => StyleRole::Default,
+                    _ => StyleRole::DiffContext,
                 };
-                if role != StyleRole::Default {
-                    styles.push((range.clone(), role));
-                }
+                styles.push((range.clone(), role));
                 if line.old_line.is_some() || line.new_line.is_some() {
                     locations.push(Location {
                         range,

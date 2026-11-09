@@ -20,6 +20,12 @@
   `extensions/vertico-directory.el` were read as behavior references for candidate
   insertion, acceptance, raw input and directory navigation. No Emacs Lisp
   implementation was copied or translated.
+- Command-history ranking in `src/command_history.rs` adapts the history rank
+  calculation from Vertico `vertico-sort.el`, package snapshot
+  `20260830.123`, Copyright 2021–2026 Free Software Foundation, Inc., authored
+  by Daniel Mendler, under GPL-3.0-or-later. The Rust implementation keeps its
+  own bounded history and persistence; no Emacs Lisp runtime or package is
+  bundled. Retain this attribution and `LICENSE-GPL` when distributing it.
 - `nucleo-matcher` 0.3.1 is a registry dependency under MPL-2.0. Its manifest and
   license were reviewed; no source is vendored or patched. Include its license
   and covered-source availability in the dependency audit before distributing
