@@ -4,6 +4,7 @@ use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
 
 mod parse;
+mod patch;
 mod render;
 #[cfg(test)]
 pub(crate) mod tests;
@@ -46,6 +47,7 @@ pub struct FileDiff {
     pub deleted: Option<usize>,
     pub hunks: Vec<Hunk>,
     pub summary: Option<String>,
+    pub(crate) patch_header: String,
 }
 #[derive(Clone, Debug)]
 pub struct Hunk {
@@ -122,6 +124,23 @@ fn worktree_base(
 
 impl Diff {
     pub(crate) fn load(comparison: Comparison, cancelled: &AtomicBool) -> Result<Self, String> {
+        Self::load_paths(comparison, &[], false, cancelled).map(|(diff, _)| diff)
+    }
+
+    pub(crate) fn load_status(
+        comparison: Comparison,
+        paths: &[PathBuf],
+        cancelled: &AtomicBool,
+    ) -> Result<(Self, usize), String> {
+        Self::load_paths(comparison, paths, true, cancelled)
+    }
+
+    fn load_paths(
+        comparison: Comparison,
+        paths: &[PathBuf],
+        status: bool,
+        cancelled: &AtomicBool,
+    ) -> Result<(Self, usize), String> {
         let environment = comparison.environment;
         let mut args = vec![
             "diff",
@@ -156,6 +175,9 @@ impl Diff {
         } else {
             None
         };
+        if status {
+            args.push("--diff-filter=ACDMRT");
+        }
         if comparison.kind == DiffKind::Staged {
             args.push("--cached");
         }
@@ -163,7 +185,8 @@ impl Diff {
             args.push(base.trim());
         }
         args.push("--");
-        let args: Vec<_> = args.into_iter().map(std::ffi::OsStr::new).collect();
+        let mut args: Vec<_> = args.into_iter().map(std::ffi::OsStr::new).collect();
+        args.extend(paths.iter().map(|path| path.as_os_str()));
         let bytes = {
             #[cfg(feature = "native-profiler")]
             let _span = crate::preparation_trace::Span::new("diff-git", 0);
@@ -171,8 +194,8 @@ impl Diff {
         };
         #[cfg(feature = "native-profiler")]
         let _span = crate::preparation_trace::Span::new("diff-parse", bytes.len());
-        let files = parse::parse(&bytes)?;
-        Ok(Self { comparison, files })
+        let files = parse::parse_text(&bytes, status)?;
+        Ok((Self { comparison, files }, bytes.len()))
     }
 
     pub(crate) fn render(&self) -> Result<RenderedDiff, String> {

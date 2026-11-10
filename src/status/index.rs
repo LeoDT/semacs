@@ -1,4 +1,4 @@
-//! Single-file index requests captured from a status snapshot, never from script paths.
+//! File and hunk index requests captured from a status projection, never from script paths.
 
 use super::{Entry, Group, Head, Record, Repository, Status};
 use crate::git;
@@ -64,6 +64,7 @@ pub struct Request {
     entry: Entry,
     group: Group,
     operation: Operation,
+    patch: Option<(std::sync::Arc<crate::diff::FileDiff>, usize)>,
 }
 
 fn ordinary(mode: u32) -> bool {
@@ -82,8 +83,15 @@ impl Entry {
             Operation::Unstage if group != Group::Staged => return false,
             _ => {}
         }
+        self.ordinary_index_file()
+    }
+
+    fn ordinary_index_file(&self) -> bool {
+        if self.submodule.is_submodule {
+            return false;
+        }
         match &self.record {
-            Record::Untracked { directory } => !directory && operation == Operation::Stage,
+            Record::Untracked { directory } => !directory,
             Record::Tracked { state, rename } => {
                 rename.is_none()
                     && !self
@@ -101,6 +109,27 @@ impl Entry {
 }
 
 impl Status {
+    pub fn index_request_at(
+        &self,
+        location: &super::StatusLocation,
+        operation: Operation,
+    ) -> Result<Request, String> {
+        let mut request = self.index_request(location.group, location.entry, operation)?;
+        if let Some(hunk) = location.hunk {
+            let file = self
+                .file_diff(location.group, location.entry)
+                .ok_or("No diff for this status file")?;
+            if file.summary.is_some()
+                || file.hunks.get(hunk).is_none()
+                || !matches!(file.status, 'A' | 'D' | 'M')
+            {
+                return Err("This change has no supported text hunk".into());
+            }
+            request.patch = Some((file.clone(), hunk));
+        }
+        Ok(request)
+    }
+
     pub fn index_request(
         &self,
         group: Group,
@@ -129,6 +158,7 @@ impl Status {
             entry: entry.clone(),
             group,
             operation,
+            patch: None,
         })
     }
 }
@@ -142,7 +172,7 @@ fn read(repo: &Repository, args: &[&OsStr]) -> Result<Vec<u8>, String> {
     )
 }
 
-fn check_path(repo: &Repository, entry: &Entry) -> Result<(), String> {
+fn check_path(repo: &Repository, entry: &Entry, patch: bool) -> Result<(), String> {
     let path = git::relative_path(entry.path.as_os_str().as_encoded_bytes())?;
     if path != entry.path || path.as_os_str().as_encoded_bytes().starts_with(b":(") {
         return Err("Invalid index target or pathspec magic".into());
@@ -157,7 +187,8 @@ fn check_path(repo: &Repository, entry: &Entry) -> Result<(), String> {
             Ok(metadata) if !last && metadata.is_dir() => {}
             Err(error)
                 if error.kind() == std::io::ErrorKind::NotFound
-                    && matches!(&entry.record, Record::Tracked { state, .. } if state.worktree_mode == 0) =>
+                    && (patch
+                        || matches!(&entry.record, Record::Tracked { state, .. } if state.worktree_mode == 0)) =>
             {
                 return Ok(());
             }
@@ -195,7 +226,7 @@ fn check_configuration(config: &[u8]) -> Result<(), String> {
     Ok(())
 }
 
-fn check_index(repo: &Repository, entry: &Entry) -> Result<(), String> {
+fn check_index(repo: &Repository, entry: &Entry, match_identity: bool) -> Result<(), String> {
     // Inspect stored sparse entries even if sparse configuration has since been disabled.
     let index = read(
         repo,
@@ -234,7 +265,7 @@ fn check_index(repo: &Repository, entry: &Entry) -> Result<(), String> {
         _ => None,
     };
     if bytes.is_empty() {
-        return if expected.is_none() {
+        return if !match_identity || expected.is_none() {
             Ok(())
         } else {
             Err("Index entry disappeared; refresh first".into())
@@ -263,13 +294,19 @@ fn check_index(repo: &Repository, entry: &Entry) -> Result<(), String> {
         .ok()
         .and_then(|s| u32::from_str_radix(s, 8).ok());
     let oid = std::str::from_utf8(fields[2]).ok();
-    if expected.is_none() || expected != mode.zip(oid) {
+    if !mode.is_some_and(ordinary) {
+        return Err("Non-ordinary index entries are not supported".into());
+    }
+    if match_identity && (expected.is_none() || expected != mode.zip(oid)) {
         return Err("Index identity changed; refresh first".into());
     }
     Ok(())
 }
 
-struct Prepared(Request);
+struct Prepared {
+    request: Request,
+    patch: Option<String>,
+}
 
 impl Request {
     pub fn repository(&self) -> &Repository {
@@ -293,7 +330,8 @@ impl Request {
     }
 
     fn prepare(self) -> Result<Prepared, String> {
-        check_path(&self.repository, &self.entry)?;
+        let patch = self.patch.is_some();
+        check_path(&self.repository, &self.entry, patch)?;
         let config = read(
             &self.repository,
             &["config".as_ref(), "--null".as_ref(), "--list".as_ref()],
@@ -307,8 +345,22 @@ impl Request {
             &super::load::external_filters(&config)?,
             &AtomicBool::new(false),
         )?;
-        check_index(&self.repository, &self.entry)?;
-        let current = Status::load(self.repository.clone(), &AtomicBool::new(false))?;
+        check_index(&self.repository, &self.entry, !patch)?;
+        let current = super::load::load(self.repository.clone(), &AtomicBool::new(false))?;
+        if patch {
+            if current.entries().iter().any(|entry| {
+                (entry.path == self.entry.path && !entry.ordinary_index_file())
+                    || matches!(&entry.record, Record::Tracked { rename: Some(rename), .. } if rename.source == self.entry.path)
+            }) {
+                return Err("Special index or file types are not supported for hunk writes".into());
+            }
+            let (file, hunk) = self.patch.as_ref().unwrap();
+            let patch = file.hunk_patch(*hunk)?;
+            return Ok(Prepared {
+                request: self,
+                patch: Some(patch),
+            });
+        }
         if current.head() != &self.head
             || !current
                 .entries()
@@ -324,8 +376,11 @@ impl Request {
             .position(|entry| entry == &self.entry)
             .unwrap();
         current.index_request(self.group, index, self.operation)?;
-        check_path(&self.repository, &self.entry)?;
-        Ok(Prepared(self))
+        check_path(&self.repository, &self.entry, false)?;
+        Ok(Prepared {
+            request: self,
+            patch: None,
+        })
     }
 
     pub fn execute(self) -> Report {
@@ -363,34 +418,49 @@ impl Prepared {
     }
 
     fn write_observed(self, started: &mut dyn FnMut()) -> Result<Executed, String> {
-        let request = self.0;
+        let request = self.request;
         let hooks = EmptyHooks::new()?;
-        let args: Vec<&OsStr> = match (&request.operation, &request.head) {
-            (Operation::Stage, _) => vec![
-                "add".as_ref(),
-                "--".as_ref(),
-                request.entry.path.as_os_str(),
-            ],
-            (Operation::Unstage, Head::Unborn { .. }) => vec![
-                "update-index".as_ref(),
-                "--force-remove".as_ref(),
-                "--".as_ref(),
-                request.entry.path.as_os_str(),
-            ],
-            (Operation::Unstage, Head::Branch { oid, .. } | Head::Detached { oid }) => vec![
-                "restore".as_ref(),
-                "--staged".as_ref(),
-                "--source".as_ref(),
-                oid.as_ref(),
-                "--".as_ref(),
-                request.entry.path.as_os_str(),
-            ],
+        let args: Vec<&OsStr> = if request.patch.is_some() {
+            let mut args = vec![
+                "apply".as_ref(),
+                "--cached".as_ref(),
+                "-p0".as_ref(),
+                "-C3".as_ref(),
+                "--ignore-space-change".as_ref(),
+            ];
+            if request.operation == Operation::Unstage {
+                args.push("--reverse".as_ref());
+            }
+            args.push("-".as_ref());
+            args
+        } else {
+            match (&request.operation, &request.head) {
+                (Operation::Stage, _) => vec![
+                    "add".as_ref(),
+                    "--".as_ref(),
+                    request.entry.path.as_os_str(),
+                ],
+                (Operation::Unstage, Head::Unborn { .. }) => vec![
+                    "update-index".as_ref(),
+                    "--force-remove".as_ref(),
+                    "--".as_ref(),
+                    request.entry.path.as_os_str(),
+                ],
+                (Operation::Unstage, Head::Branch { oid, .. } | Head::Detached { oid }) => vec![
+                    "restore".as_ref(),
+                    "--staged".as_ref(),
+                    "--source".as_ref(),
+                    oid.as_ref(),
+                    "--".as_ref(),
+                    request.entry.path.as_os_str(),
+                ],
+            }
         };
         let (outcome, diagnostic) = match git::execute(
             &request.repository.root,
             Some(&request.repository.git_dir),
             &args,
-            None,
+            self.patch.as_deref().map(str::as_bytes),
             git::Access::IndexWrite {
                 hooks: &hooks.0,
                 started,

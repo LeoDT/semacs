@@ -10,6 +10,9 @@ use gpui_kit::{Context, Entity, Window};
 use std::sync::{Arc, atomic::AtomicBool};
 
 #[cfg(test)]
+#[path = "status_hunk_tests.rs"]
+mod hunk_tests;
+#[cfg(test)]
 #[path = "status_tests.rs"]
 mod tests;
 

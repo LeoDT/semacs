@@ -262,5 +262,6 @@ pub(super) fn parse(repository: Repository, mut bytes: &[u8]) -> Result<Status, 
         repository,
         head,
         entries,
+        diffs: Default::default(),
     })
 }

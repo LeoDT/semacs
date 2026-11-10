@@ -27,6 +27,9 @@ class FixtureTests(unittest.TestCase):
                          "Staged changes (4)", "Unmerged paths (0)"):
             self.assertIn(expected, base)
         self.assertEqual(base.count("both-0000.txt"), 2)
+        self.assertEqual(base.count("@@ -1 +1 @@"), 8)
+        self.assertIn("@@ -1 +1 @@\n-INDEX intermediate\n+WORKTREE current\n", base)
+        self.assertIn("@@ -1 +1 @@\n-HEAD base\n+INDEX intermediate\n", base)
         self.assertIn("Unstaged changes (3)", stage)
         self.assertIn("Staged changes (5)", stage)
         self.assertNotIn(f" .M {perf_status.TARGET}", stage)

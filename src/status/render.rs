@@ -6,11 +6,12 @@ use crate::section::{Section, Sections};
 use crate::text::{ByteOffset, Rope};
 use crate::theme::StyleRole;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct StatusLocation {
     pub range: Range<ByteOffset>,
     pub group: Group,
     pub entry: usize,
+    pub hunk: Option<usize>,
 }
 
 #[derive(Clone, Debug)]
@@ -155,18 +156,79 @@ pub(super) fn render(status: &Status) -> Result<RenderedStatus, String> {
             }
             append(&mut text, "\n")?;
             let range = start..ByteOffset(text.len());
+            let file_node = nodes.len();
+            let key = format!("{}/file/{}", group.key(), path_key(&entry.path));
+            let diff = status.file_diff(group, index);
+            if diff.is_some() {
+                styles.push((range.clone(), StyleRole::DiffFile));
+            }
             nodes.push(Section {
-                key: format!("{}/file/{}", group.key(), path_key(&entry.path)),
+                key: key.clone(),
                 parent: Some(parent),
                 range: range.clone(),
                 body: range.end,
-                collapsed: false,
+                collapsed: diff.is_some(),
             });
             locations.push(StatusLocation {
                 range,
                 group,
                 entry: index,
+                hunk: None,
             });
+            if let Some(file) = diff {
+                if let Some(summary) = &file.summary {
+                    append(&mut text, summary)?;
+                    append(&mut text, "\n")?;
+                } else if file.hunks.is_empty() {
+                    append(
+                        &mut text,
+                        &format!(
+                            "Metadata only: mode {} → {}\n",
+                            file.old_mode, file.new_mode
+                        ),
+                    )?;
+                }
+                if file.hunks.is_empty() {
+                    locations.last_mut().unwrap().range.end = ByteOffset(text.len());
+                }
+                for (hunk_index, hunk) in file.hunks.iter().enumerate() {
+                    let start = ByteOffset(text.len());
+                    append(&mut text, &hunk.header)?;
+                    append(&mut text, "\n")?;
+                    let heading = start..ByteOffset(text.len());
+                    styles.push((heading.clone(), StyleRole::DiffHunk));
+                    let node = nodes.len();
+                    nodes.push(Section {
+                        key: format!("{key}/{}", hunk.header),
+                        parent: Some(file_node),
+                        range: heading.clone(),
+                        body: heading.end,
+                        collapsed: false,
+                    });
+                    for line in &hunk.lines {
+                        let start = ByteOffset(text.len());
+                        append(&mut text, &line.text)?;
+                        if !line.text.ends_with('\n') {
+                            append(&mut text, "\n")?;
+                        }
+                        let role = match line.text.as_bytes().first() {
+                            Some(b'+') => StyleRole::DiffAdded,
+                            Some(b'-') => StyleRole::DiffRemoved,
+                            _ => StyleRole::DiffContext,
+                        };
+                        styles.push((start..ByteOffset(text.len()), role));
+                    }
+                    let range = heading.start..ByteOffset(text.len());
+                    nodes[node].range.end = range.end;
+                    locations.push(StatusLocation {
+                        range,
+                        group,
+                        entry: index,
+                        hunk: Some(hunk_index),
+                    });
+                }
+            }
+            nodes[file_node].range.end = ByteOffset(text.len());
         }
         nodes[parent].range.end = ByteOffset(text.len());
     }

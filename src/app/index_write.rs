@@ -71,7 +71,7 @@ impl AppShell {
         let view = origin.read(cx);
         let buffer = view.buffer();
         let (location, request) = buffer.status_selection().ok_or(
-            "Select one visible status file without an active region; refresh stale status first",
+            "Select one visible status file or hunk without an active region; refresh stale status first",
         )?;
         let data = buffer.status_data().ok_or("Status is not ready")?;
         Ok(StatusWriteTarget {
@@ -105,16 +105,12 @@ impl AppShell {
             || current.region != target.region
             || current.revision != target.revision
             || current.request != target.request
-            || current.location.group != target.location.group
-            || current.location.entry != target.location.entry
+            || current.location != target.location
             || !Arc::ptr_eq(&current.data, &target.data)
         {
             return Err("Status write target changed; invoke the command again".into());
         }
-        let request =
-            target
-                .data
-                .index_request(target.location.group, target.location.entry, operation)?;
+        let request = target.data.index_request_at(&target.location, operation)?;
         let buffer = target.display.committed.buffer;
         let index = self
             .buffers
@@ -125,9 +121,11 @@ impl AppShell {
         self.git_writes
             .accept(id, &request, buffer, refresh_request);
         let origin = target.origin;
-        self.show_message(&origin, match operation {
-            Operation::Stage => "Staging current disk content; unsaved buffers are not saved. This can replace an index-only version; no automatic undo.",
-            Operation::Unstage => "Restoring this index path to the captured HEAD; worktree is unchanged. Index-only content can be lost; no automatic undo.",
+        self.show_message(&origin, match (target.location.hunk, operation) {
+            (Some(_), Operation::Stage) => "Staging the selected hunk into the index; worktree and unsaved buffers are unchanged.",
+            (Some(_), Operation::Unstage) => "Unstaging the selected hunk from the index; worktree and unsaved buffers are unchanged.",
+            (None, Operation::Stage) => "Staging current disk content; unsaved buffers are not saved. This can replace an index-only version; no automatic undo.",
+            (None, Operation::Unstage) => "Restoring this index path to the captured HEAD; worktree is unchanged. Index-only content can be lost; no automatic undo.",
         }, cx);
 
         let (started_send, started_receive) = futures_channel::oneshot::channel();

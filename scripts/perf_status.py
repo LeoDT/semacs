@@ -1,4 +1,4 @@
-"""Isolated F2 status / JS index-write headless baselines; never opens a desktop."""
+"""Isolated status / embedded-diff / JS index-write baselines; never opens a desktop."""
 
 import argparse
 import csv
@@ -13,7 +13,7 @@ from magit_fixture import git, isolated_environment
 
 ROOT = Path(__file__).resolve().parents[1]
 SIZES = {"small": 64, "limit": 4096}
-ACTIONS = ("open", "navigate", "leaf-toggle", "scroll", "split", "collapse",
+ACTIONS = ("open", "navigate", "file-toggle", "scroll", "split", "collapse",
            "refresh", "expand", "stage", "unstage", "unsplit")
 TARGET = "unstaged-0000.txt"
 
@@ -33,9 +33,17 @@ def body(count, staged):
     groups = (("Untracked files", [("??", name) for name in names("untracked")]),
               ("Unstaged changes", both + unstaged),
               ("Staged changes", both + indexed), ("Unmerged paths", []))
-    return "".join(f"{title} ({len(entries)})\n" +
-                   "".join(f" {xy} {name}\n" for xy, name in entries)
-                   for title, entries in groups).encode()
+    result = []
+    for title, entries in groups:
+        result.append(f"{title} ({len(entries)})\n")
+        for xy, name in entries:
+            result.append(f" {xy} {name}\n")
+            if xy == "??":
+                continue
+            old = "INDEX intermediate" if title == "Unstaged changes" and name.startswith("both-") else "HEAD base"
+            new = "INDEX intermediate" if title == "Staged changes" and name != TARGET else "WORKTREE current"
+            result.append(f"@@ -1 +1 @@\n-{old}\n+{new}\n")
+    return "".join(result).encode()
 
 
 def protected_files(directory):

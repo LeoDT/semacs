@@ -371,3 +371,15 @@ F2 仅提供 status 与单文件整文件级 index 操作，不包含 hunk / 批
 - 已知非密码 yes/no 与用户名提示支持跨输出块识别；yes/no 要求完整答复后发送工具请求的词形，用户名空答使用当前登录名。已有读入先完成，不递归进入 minibuffer；提示 / 答复绑定进程和请求，`C-g` 强杀所属进程，终态只解除自己的提示。输入失败单独诊断，不自动重发。
 - 终态刷新仍存活的发起 Magit buffer 及对应 status，其他 diff 保留 stale 快照；短 Git 槽忙时延后，不抢焦点、不复活已删除 / 导出的投影，终态前的迟到读取不能覆盖新状态。刷新失败不改变真实提交结果。commit 预检 / companion 保留实际 Git 环境（含替代 index），与 F1 / F2 投影区分身份；机器解析用 diff 固定必要输出格式，不改变真实 commit 的 hooks / 签名环境。
 - 异步退出等待期间新出现的 dirty 文本须重新经过已有退出确认，旧的放弃保存答复只覆盖当时已确认的文本状态；不改变上述 SIGHUP 和显式进程控制语义。
+
+## 阶段 F4：status 内嵌 diff 与单 hunk index 操作
+
+本节扩展 F2 的 status / 单文件范围，不改写其历史边界；当前进度见[计划](plan.md)。
+
+- status 的 staged / unstaged 文件包含所属比较的文件正文与 hunk sections，文件默认折叠，hunk 默认展开；untracked / unmerged 保持现有清单，不提供冲突 hunk 写入。文件头沿用 XY / 原始路径身份，正文使用既有 diff 语义样式。binary、非 UTF-8 正文、symlink / 类型变化等明确显示摘要，metadata-only 明示；不伪造可操作文本 hunk。其他 F1 / F2 支持边界不扩大。
+- `TAB`、section 导航、当前 section 高亮、共享折叠与独立 view point / scroll 沿用既有 section 模型。刷新以组 / 原始路径 / hunk heading / 父链恢复，hunk 消失或身份变化回退最近存活祖先；不保证内容变化后仍命中原 hunk。
+- 文件 heading 的 `s` / `u` 保留 F2 整文件行为；hunk heading 或正文的同一命令仅对当前一个普通文本 hunk 操作。仍不支持非空活动 region、部分行、多 section、组级批量或 discard；独立 diff 仍只读。
+- hunk stage 将捕获的 patch 以 `git apply --cached -p0 -C3 --ignore-space-change` 应用到 index；unstage 增加 `--reverse`。保留 Git 路径引用、原始正文及无末尾换行标记，独立应用时调整新侧起始行号；普通内容 hunk 不顺带应用独立 chmod metadata。不读取未保存 buffer、不写 worktree / HEAD / refs，无额外确认、自动备份 / undo / 重试或回滚。
+- hunk patch 由 Git 按上下文匹配并报告失败，不增加 HEAD / index OID / XY 快照一致性检查，也不把整文件 stage 的执行时磁盘语义冒充 hunk 语义。现有特殊 index / sparse / 路径类型 / 外部 filter 范围限制仍适用，不通过 patch 绕过。失败保留诊断，沿用核心终态重读，不把刷新成功误报为写入成功。
+- JS 仍只返回相同 stage / unstage 领域意图；核心捕获并复核原 status 会话、投影、输入与单文件 / hunk 目标，不接收脚本路径或 patch。已接受写入复用现有 Git 操作槽、跨 reload / buffer 删除的所有权、结果记录、stale 标记、写后核对及退出等待，不另建生命周期。
+- status 的嵌入读取沿用固定仓库、后台执行、filter 筛查与既有子进程限额；两组 diff 的输入合计最多 16 MiB、普通 hunk patch 最多 100000 行，正文投影仍最多 16 MiB，超限整次失败并保留旧投影，不截断为完整清单。无新增原生性能预算或真实环境测试授权。

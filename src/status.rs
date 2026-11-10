@@ -4,6 +4,9 @@ use std::path::PathBuf;
 
 pub use crate::git::Repository;
 
+#[cfg(test)]
+mod hunk_tests;
+mod hunks;
 pub mod index;
 mod load;
 #[cfg(test)]
@@ -126,6 +129,10 @@ pub struct Status {
     repository: Repository,
     head: Head,
     entries: Vec<Entry>,
+    diffs: std::collections::HashMap<
+        Group,
+        std::collections::HashMap<PathBuf, std::sync::Arc<crate::diff::FileDiff>>,
+    >,
 }
 
 impl Status {
@@ -133,7 +140,9 @@ impl Status {
         repository: Repository,
         cancelled: &std::sync::atomic::AtomicBool,
     ) -> Result<Self, String> {
-        load::load(repository, cancelled)
+        let mut status = load::load(repository, cancelled)?;
+        status.load_diffs(cancelled)?;
+        Ok(status)
     }
 
     pub fn parse(repository: Repository, bytes: &[u8]) -> Result<Self, String> {
@@ -157,6 +166,14 @@ impl Status {
             .iter()
             .enumerate()
             .filter(move |(_, entry)| entry.in_group(group))
+    }
+
+    pub(crate) fn file_diff(
+        &self,
+        group: Group,
+        entry: usize,
+    ) -> Option<&std::sync::Arc<crate::diff::FileDiff>> {
+        self.diffs.get(&group)?.get(&self.entries.get(entry)?.path)
     }
 
     pub fn render(&self) -> Result<RenderedStatus, String> {

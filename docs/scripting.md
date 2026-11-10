@@ -82,7 +82,7 @@ semacs.setStyle("syntax.comment", { italic: true });
 
 - `mode`：`"fundamental" | "magit-diff" | "magit-status" | "git-commit" | "magit-process"`。
 - `status`：非 status 为 `null`，否则为 `{ selection }`。
-- `selection`：无可见文件叶节点时为 `null`，否则含 `group: "untracked" | "unstaged" | "staged" | "unmerged"` 及布尔值 `canStage` / `canUnstage`。能力只是提示；region、过时清单或不支持的目标不授予写入权，核心仍重新校验。
+- `selection`：无可见文件 / hunk 目标时为 `null`，否则含 `group: "untracked" | "unstaged" | "staged" | "unmerged"` 及布尔值 `canStage` / `canUnstage`。能力只是提示；region、过时清单或不支持的目标不授予写入权，核心仍重新校验。
 
 返回 `null` 表示无请求，或返回以下一个严格对象（未知字段拒绝）：
 
@@ -91,13 +91,13 @@ semacs.setStyle("syntax.comment", { italic: true });
 | `{ operation: "magit.status.open" }` | 沿调用目标的固定仓库或目录打开 status |
 | `{ operation: "magit.status.refresh" }` | 仅刷新捕获的 status 会话；非 status 拒绝 |
 | `{ operation: "magit.diff.open", comparison: "staged" | "unstaged" }` | 打开整个比较，不按 point 过滤 |
-| `{ operation: "magit.stage" }` / `{ operation: "magit.unstage" }` | 仅操作调用时捕获的一个 status 文件叶节点 |
+| `{ operation: "magit.stage" }` / `{ operation: "magit.unstage" }` | 仅操作调用时捕获的一个 status 文件或 hunk，见 [F4](emacs-fidelity.md#阶段-f4status-内嵌-diff-与单-hunk-index-操作) |
 
 不接受数组、任意命令名 / payload / Git args、Promise、执行期 host-call 或完成回调。JS 异常、超时、非法返回或 pending jobs 均不启动核心操作。返回不等于 Git 完成；接受前重新验证原 view、输入会话、配置代次及目标，不在返回时重选 point。接受后的写入由核心持有，跨 reload / kill / 另存继续，终态和独立刷新结果记录在 `*Messages*`；不确定结果不自动重试。
 
 随包 JS 声明 `magit-stage` / `magit-unstage`，status 默认 `s` / `u`；空配置、配置失败回退也构建真实 handler。可重绑或用局部 `null` 禁用，不能重名覆盖。JS 故障时写入不可用，不改走原生写入；原生 status / diff / 刷新仍可用。
 
-**stage 使用执行时磁盘内容，不保存编辑 buffer；stage / unstage 可能丢失仅存于 index 的中间版本，没有自动 undo / 回滚。** 支持矩阵与退出规则见 F2 契约。
+**文件级 stage 使用执行时磁盘内容；hunk stage / unstage 应用捕获的 patch，不读取未保存 buffer。写入可能丢失仅存于 index 的中间版本，没有自动 undo / 回滚。** 支持矩阵与退出规则见 [F2](emacs-fidelity.md#阶段-f2status-与单文件-index-操作) / [F4](emacs-fidelity.md#阶段-f4status-内嵌-diff-与单-hunk-index-操作) 契约。
 
 ```js
 semacs.registerWorkflowCommand("status-or-refresh", {

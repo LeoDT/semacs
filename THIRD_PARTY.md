@@ -77,6 +77,11 @@
   exit, Git editor lifecycle, commit-message recovery and process prompt behavior. Source
   identity and static-reading boundaries are recorded in
   `docs/work/f3-window-commit.md`.
+- The same Magit snapshot's `lisp/magit-diff.el` and `lisp/magit-apply.el`
+  were read for status file/hunk nesting, default visibility and single-hunk
+  index application. semacs retains its own parsed patch/section model and
+  uses Git's context matching, with the same independent-hunk line-start
+  adjustment and apply options; no Lisp implementation is bundled.
 - semacs implements its own pane-local display history, restoration and
   commit-message recovery model. No Emacs Lisp implementation was copied or
   translated, and these packages are not runtime dependencies.

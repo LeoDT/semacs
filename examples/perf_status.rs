@@ -1,4 +1,4 @@
-//! Production-shell F2 baselines on TestPlatform / TestTextSystem, without desktop access.
+//! Production-shell status baselines on TestPlatform / TestTextSystem, without desktop access.
 use std::fs::{File, OpenOptions};
 use std::io::Write;
 use std::ops::Range;
@@ -24,7 +24,7 @@ mod headless;
 const ACTIONS: &[&str] = &[
     "open",
     "navigate",
-    "leaf-toggle",
+    "file-toggle",
     "scroll",
     "split",
     "collapse",
@@ -71,15 +71,34 @@ fn line_start(text: &str, marker: &str) -> ByteOffset {
     panic!("missing oracle line: {marker}");
 }
 
-fn projection(text: &str, collapsed: bool) -> Vec<Range<ByteOffset>> {
-    let mut hidden = false;
+fn projection(text: &str, collapsed: bool, file_open: bool) -> Vec<Range<ByteOffset>> {
+    let mut group_hidden = false;
+    let mut body_hidden = true;
+    let mut unstaged = false;
     let mut offset = 0;
     let mut result = Vec::new();
     for line in text.split_inclusive('\n') {
-        if !line.starts_with(' ') {
-            hidden = collapsed && line.starts_with("Unstaged changes (");
-            result.push(ByteOffset(offset)..ByteOffset(offset + line.len()));
-        } else if !hidden {
+        let group = line.starts_with("Untracked files (")
+            || line.starts_with("Unstaged changes (")
+            || line.starts_with("Staged changes (")
+            || line.starts_with("Unmerged paths (");
+        let file = [" ?? ", " MM ", " .M ", " M. "]
+            .iter()
+            .any(|prefix| line.starts_with(prefix));
+        let visible = if group {
+            unstaged = line.starts_with("Unstaged changes (");
+            group_hidden = collapsed && unstaged;
+            body_hidden = true;
+            true
+        } else if file {
+            body_hidden = !(file_open && unstaged && line == " MM both-0000.txt\n");
+            !group_hidden
+        } else if line.starts_with("@@") || line.starts_with('-') || line.starts_with('+') {
+            !group_hidden && !body_hidden
+        } else {
+            true
+        };
+        if visible {
             result.push(ByteOffset(offset)..ByteOffset(offset + line.len()));
         }
         offset += line.len();
@@ -192,7 +211,7 @@ impl Workload {
         match phase {
             "open" => key(window, cx, "enter"),
             "navigate" => key(window, cx, "n"),
-            "leaf-toggle" | "collapse" | "expand" => key(window, cx, "tab"),
+            "file-toggle" | "collapse" | "expand" => key(window, cx, "tab"),
             "refresh" => key(window, cx, "g"),
             "stage" => key(window, cx, "s"),
             "unstage" => key(window, cx, "u"),
@@ -239,7 +258,7 @@ impl Workload {
     fn verify(&self, phase: &str, cx: &App) {
         let collapsed = matches!(phase, "collapse" | "refresh");
         let expected = self.expected(phase);
-        let rows = projection(expected, collapsed);
+        let rows = projection(expected, collapsed, !matches!(phase, "open" | "navigate"));
         let selected = self.shell.read(cx).active_view();
         let snapshot = selected.read(cx).buffer().snapshot_id();
         for entity in &self.views {
@@ -258,7 +277,7 @@ impl Workload {
             );
             assert_eq!(index.row_count(), rows.len());
             let marker = match phase {
-                "navigate" | "leaf-toggle" => Some(" MM both-0000.txt"),
+                "navigate" | "file-toggle" => Some(" MM both-0000.txt"),
                 "collapse" | "refresh" | "expand" => Some("Unstaged changes ("),
                 "stage" if entity == selected => Some("Unstaged changes ("),
                 "unstage" if entity == selected => Some("Staged changes ("),
@@ -475,10 +494,26 @@ mod tests {
     use super::*;
 
     #[test]
+    fn projection_oracle_hides_default_files_but_preserves_expansion_through_group_toggle() {
+        let text = "Unstaged changes (2)\n MM both-0000.txt\n@@ -1 +1 @@\n-INDEX intermediate\n+WORKTREE current\n .M unstaged-0000.txt\n@@ -1 +1 @@\n-HEAD base\n+WORKTREE current\nStaged changes (1)\n MM both-0000.txt\n@@ -1 +1 @@\n-HEAD base\n+INDEX intermediate\nUnmerged paths (0)\n";
+        let rows = |collapsed, file_open| {
+            projection(text, collapsed, file_open)
+                .into_iter()
+                .map(|row| &text[row.start.0..row.end.0])
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(rows(false, false).len(), 7);
+        assert_eq!(rows(false, true).len(), 10);
+        assert_eq!(rows(true, true).len(), 5);
+        assert!(rows(false, true).contains(&"-INDEX intermediate\n"));
+        assert!(!rows(false, true).contains(&"-HEAD base\n"));
+    }
+
+    #[test]
     fn projection_oracle_preserves_headings_empty_groups_and_final_empty_row() {
         let text = "Status: /tmp\nBranch: main\nHEAD: abc\nUntracked files (1)\n ?? a\nUnstaged changes (2)\n .M b\n MM c\nStaged changes (1)\n MM c\nUnmerged paths (0)\n";
-        let expanded = projection(text, false);
-        let collapsed = projection(text, true);
+        let expanded = projection(text, false, false);
+        let collapsed = projection(text, true, false);
         assert_eq!(expanded.len(), 12);
         assert_eq!(collapsed.len(), 10);
         for row in collapsed {

@@ -57,7 +57,7 @@ RUNS=3 target/release/examples/perf_m1 .pi/tmp/NEW-sample.txt
 
 | 入口 | 范围与解释 |
 |---|---|
-| `python3 -B scripts/perf_status.py .pi/tmp/NEW-status-perf` | release `perf_status`，64 / 4096 条隔离清单各三轮；原生 status / 刷新、随包 JS `s` / `u`、折叠导航及双 view，独立正文 / 可见行 / 完整 index oracle；只记 headless 基线，不测桌面、原生 idle 或预算通过 |
+| `python3 -B scripts/perf_status.py .pi/tmp/NEW-status-perf` | release `perf_status`，64 / 4096 条隔离清单各三轮；原生 status / 刷新、随包 JS 整文件 `s` / `u`、内嵌 diff 展开、折叠导航及双 view，独立正文 / 可见行 / 完整 index oracle；只记 headless 基线，不测桌面、原生 idle 或预算通过 |
 | `python3 -B scripts/perf_diff.py .pi/tmp/NEW-diff-perf` | 构建 profiler release `perf_diff`，真实 Git patch 约 256 KiB / 2 MiB，各三轮 staged / unstaged 的 headless 专项；独立正文 / 折叠投影 oracle、同场景双 view 与分段基线，不测原生 idle |
 | `perf_view` / `perf_m1` | 基础布局 / 绘制与命令输入；M1 未等待输入段的 ready 只是末键恢复，不是逐键 ready 或原生持续输入 |
 | `RUNS=3 target/release/examples/perf_split .pi/tmp/NEW-sample.txt` | 共享 buffer 双 view；聚合 ready 与选中 view 分开记录，不给聚合擅加旧单 view 门限 |

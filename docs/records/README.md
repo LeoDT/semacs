@@ -6,6 +6,7 @@
 
 | 材料 | 用途与边界 |
 |---|---|
+| [F4 status 内嵌 diff / 单 hunk 操作本地验证](f4-status-hunks-local.md) | 隔离 Git / App / JS 回归、D/F 冲突集中审查修复及 status / 独立 diff headless 专项；不表示新界面宿主或原生性能通过。 |
 | [Magit 样式、M-x 历史与 scratch 退出本地验证](magit-style-history-scratch-local.md) | 三项插入需求的本地回归、集中审查修复及获准重跑后的 status / diff headless 基线；不表示真实窗口观感或原生性能预算通过。 |
 | [F3 临时 window / 普通 commit 本地验证](f3-window-commit-local.md) / [单窗口宿主工具准备](f3-host-tools-local.md) / [单窗口宿主功能验证](f3-commit-host-01.md) | 隔离真实 Git / helper、headless 生命周期、阶段集中审查修复后的本地检查，以及单窗口人工观察和独立 Git / 消息字节核对；不包含密码 / passphrase 读入或性能矩阵。 |
 | [F2 status / 单文件写入本地验证与基线](f2-status-local.md) / [单窗口宿主工具准备](f2-host-tools-local.md) / [单窗口宿主功能验证](f2-status-host-01.md) | 隔离自动化、64 / 4096 条清单 headless 基线、工具自检，以及一窗口 status / 默认写键 / 过时标识与完整 index 检查点；不表示完整平台或性能预算通过。 |

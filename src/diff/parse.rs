@@ -14,7 +14,15 @@ fn utf8(bytes: &[u8]) -> Result<&str, String> {
     std::str::from_utf8(bytes).map_err(|_| "Diff contains non-UTF-8 text".into())
 }
 
-pub(super) fn parse(mut bytes: &[u8]) -> Result<Vec<FileDiff>, String> {
+#[cfg(test)]
+pub(super) fn parse(bytes: &[u8]) -> Result<Vec<FileDiff>, String> {
+    parse_text(bytes, false)
+}
+
+pub(super) fn parse_text(
+    mut bytes: &[u8],
+    summarize_non_utf8: bool,
+) -> Result<Vec<FileDiff>, String> {
     if bytes.is_empty() {
         return Ok(Vec::new());
     }
@@ -58,6 +66,7 @@ pub(super) fn parse(mut bytes: &[u8]) -> Result<Vec<FileDiff>, String> {
             deleted: None,
             hunks: Vec::new(),
             summary: None,
+            patch_header: String::new(),
         });
     }
     for file in &mut files {
@@ -89,15 +98,15 @@ pub(super) fn parse(mut bytes: &[u8]) -> Result<Vec<FileDiff>, String> {
     if bytes.first() != Some(&0) {
         return Err("Missing patch separator".into());
     }
-    let patch = utf8(&bytes[1..])?;
-    if patch.lines().count() > 100_000 {
+    let patch = &bytes[1..];
+    if patch.split(|byte| *byte == b'\n').count() > 100_001 {
         return Err("Diff exceeds the 100000 patch line limit".into());
     }
     let mut blocks = Vec::new();
     let mut start = 0;
     let mut offset = 0;
-    for line in patch.split_inclusive('\n') {
-        if line.starts_with("diff --git ") && offset != 0 {
+    for line in patch.split_inclusive(|byte| *byte == b'\n') {
+        if line.starts_with(b"diff --git ") && offset != 0 {
             blocks.push(&patch[start..offset]);
             start = offset;
         }
@@ -109,10 +118,24 @@ pub(super) fn parse(mut bytes: &[u8]) -> Result<Vec<FileDiff>, String> {
     let mut blocks = blocks.into_iter();
     for file in &mut files {
         let block = blocks.next().ok_or("Missing file patch")?;
-        if file.status == 'T' {
-            let addition = blocks
-                .next()
-                .ok_or("Missing added side of file-type change")?;
+        let addition = if file.status == 'T' {
+            Some(
+                blocks
+                    .next()
+                    .ok_or("Missing added side of file-type change")?,
+            )
+        } else {
+            None
+        };
+        if summarize_non_utf8
+            && (utf8(block).is_err() || addition.is_some_and(|block| utf8(block).is_err()))
+        {
+            file.summary = Some("Non-UTF-8 contents differ (text hunks unavailable)".into());
+            continue;
+        }
+        let block = utf8(block)?;
+        if let Some(addition) = addition {
+            let addition = utf8(addition)?;
             let deleted_mode = format!("deleted file mode {}", file.old_mode);
             let added_mode = format!("new file mode {}", file.new_mode);
             if !block.lines().any(|line| line == deleted_mode)
@@ -162,6 +185,10 @@ fn range(value: &str, prefix: char) -> Result<(usize, usize), String> {
 }
 
 fn parse_file(file: &mut FileDiff, block: &str) -> Result<(), String> {
+    file.patch_header = block
+        .split_inclusive('\n')
+        .take_while(|line| !line.starts_with("@@ "))
+        .collect();
     let mut lines = block.split_inclusive('\n').peekable();
     if !lines
         .next()

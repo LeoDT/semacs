@@ -54,12 +54,8 @@ impl AppShell {
         let write = self.capture_status_write(origin, cx);
         let selection = buffer.status_leaf().and_then(|(location, _)| {
             let data = buffer.status_data()?;
-            let supported = |operation| {
-                write.is_ok()
-                    && data
-                        .index_request(location.group, location.entry, operation)
-                        .is_ok()
-            };
+            let supported =
+                |operation| write.is_ok() && data.index_request_at(&location, operation).is_ok();
             Some(StatusSelection {
                 group: location.group,
                 can_stage: supported(Operation::Stage),
