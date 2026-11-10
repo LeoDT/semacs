@@ -34,11 +34,14 @@ mod commit_start;
 mod commits;
 #[cfg(unix)]
 pub use commits::{CommitPhase, CommitRecord};
+#[cfg(unix)]
+mod commit_actions;
 mod diff;
 mod documents;
 mod git;
 #[cfg(test)]
 mod git_test_support;
+mod history;
 mod index_write;
 pub use git::records::{GitWritePhase, GitWriteRecord};
 pub use index_write::StatusWriteTarget;
@@ -96,6 +99,8 @@ pub struct AppShell {
     #[cfg(unix)]
     commits: Vec<commits::Session>,
     #[cfg(unix)]
+    commit_selections: HashMap<crate::buffer::BufferId, commit_actions::Selection>,
+    #[cfg(unix)]
     commit_runtime: Option<crate::commit::Runtime>,
     #[cfg(test)]
     save_gate: Option<futures_channel::oneshot::Receiver<()>>,
@@ -105,6 +110,8 @@ pub struct AppShell {
     index_verify_gate: Option<futures_channel::oneshot::Receiver<()>>,
     #[cfg(test)]
     status_read_gate: Option<futures_channel::oneshot::Receiver<()>>,
+    #[cfg(test)]
+    history_read_gate: Option<futures_channel::oneshot::Receiver<()>>,
     #[cfg(test)]
     commit_start_gate: Option<futures_channel::oneshot::Receiver<()>>,
     #[cfg(test)]
@@ -199,6 +206,8 @@ impl AppShell {
             #[cfg(unix)]
             commits: Vec::new(),
             #[cfg(unix)]
+            commit_selections: HashMap::new(),
+            #[cfg(unix)]
             commit_runtime: None,
             #[cfg(test)]
             save_gate: None,
@@ -208,6 +217,8 @@ impl AppShell {
             index_verify_gate: None,
             #[cfg(test)]
             status_read_gate: None,
+            #[cfg(test)]
+            history_read_gate: None,
             #[cfg(test)]
             commit_start_gate: None,
             #[cfg(test)]
@@ -321,6 +332,10 @@ impl AppShell {
                     && command.scope() == Scope::ReadSession
                 {
                     if single_key && command == Command::MinibufferCompleteAndExit {
+                        #[cfg(unix)]
+                        if self.answer_commit_choice(stroke, window, cx) {
+                            return true;
+                        }
                         self.answer_query(Answer::key(stroke), window, cx);
                     } else {
                         self.execute_session(command, window, cx);
@@ -347,6 +362,25 @@ impl AppShell {
             Command::MagitStatus => self.open_status(origin, window, cx),
             #[cfg(unix)]
             Command::MagitCommitCreate => self.prepare_commit(origin, window, cx),
+            #[cfg(unix)]
+            Command::MagitCommit
+            | Command::MagitCommitAmend
+            | Command::MagitCommitReword
+            | Command::MagitCommitFixup
+            | Command::MagitCommitSquash
+            | Command::MagitLogSelectPick
+            | Command::MagitLogSelectQuit => {
+                self.commit_action_command(command, origin, window, cx)
+            }
+            Command::MagitDiffVisit if origin.read(cx).buffer().history_query().is_some() => {
+                self.history_command(command, origin, window, cx)
+            }
+            Command::MagitLogCurrent
+            | Command::MagitVisitThing
+            | Command::MagitShowCommit
+            | Command::MagitLogMore
+            | Command::MagitLogLess
+            | Command::MagitVisitFileVersion => self.history_command(command, origin, window, cx),
             #[cfg(unix)]
             Command::MagitProcessBuffer => self.view_commit_process(origin, window, cx),
             #[cfg(unix)]

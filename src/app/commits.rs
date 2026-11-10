@@ -36,6 +36,7 @@ pub struct CommitRecord {
 pub(super) struct Session {
     pub record: CommitRecord,
     pub(super) scope: crate::commit::Scope,
+    pub(super) intent: crate::commit::Intent,
     pub(super) target: super::commit_editor::EditorTarget,
     pub(super) process: Option<Commit>,
     pub(super) interrupted: bool,
@@ -83,6 +84,31 @@ impl AppShell {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> u64 {
+        self.start_planned_commit(
+            crate::commit::Plan {
+                repository,
+                scope,
+                intent: crate::commit::Intent::Create,
+            },
+            runtime,
+            window,
+            cx,
+        )
+    }
+
+    pub(super) fn start_planned_commit(
+        &mut self,
+        plan: crate::commit::Plan,
+        runtime: crate::commit::Runtime,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> u64 {
+        let crate::commit::Plan {
+            repository,
+            scope,
+            intent,
+        } = plan;
+        let worker_intent = intent.clone();
         let operation = operation_id();
         let worker_repository = repository.clone();
         let task = cx.spawn_in(window, async move |shell, cx| {
@@ -90,11 +116,12 @@ impl AppShell {
                 .background_executor()
                 .spawn(async move {
                     let prefix = comment_prefix(&worker_repository);
-                    Commit::start_with_scope(
+                    Commit::start_with_intent(
                         &worker_repository,
                         &runtime.executable,
                         &runtime.directory,
                         scope,
+                        &worker_intent,
                     )
                     .map(|(process, events)| (process, events, prefix))
                 })
@@ -179,6 +206,7 @@ impl AppShell {
         self.prune_commit_history(&repository);
         self.commits.push(Session {
             scope,
+            intent,
             target: super::commit_editor::EditorTarget::capture(self, cx),
             record: CommitRecord {
                 operation,

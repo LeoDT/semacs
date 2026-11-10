@@ -180,7 +180,13 @@ impl AppShell {
             .find(|session| session.record.operation == operation)
             .unwrap();
         let repository = session.record.repository.clone();
-        let kind = if session.scope == crate::commit::Scope::All {
+        if session.intent == crate::commit::Intent::Reword {
+            self.show_reword_diff(operation, index, window, cx);
+            return;
+        }
+        let kind = if session.intent == crate::commit::Intent::Amend {
+            crate::diff::DiffKind::Amend
+        } else if session.scope == crate::commit::Scope::All {
             crate::diff::DiffKind::Worktree
         } else {
             crate::diff::DiffKind::Staged
@@ -257,6 +263,69 @@ impl AppShell {
                 .ok();
         })
         .detach();
+    }
+
+    fn show_reword_diff(
+        &mut self,
+        operation: u64,
+        index: usize,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let repository = self
+            .commits
+            .iter()
+            .find(|session| session.record.operation == operation)
+            .unwrap()
+            .record
+            .repository
+            .clone();
+        let editor_id = self.buffers[index].id();
+        let existing = self.buffers.iter().position(|slot| matches!(slot.buffer.history_query(), Some(crate::history::Query::Revision { repository: ref repo, environment: crate::git::ReadEnvironment::Commit, .. }) if *repo == repository));
+        let existing = existing.map(|index| {
+            let query = self.buffers[index].buffer.history_query().unwrap();
+            let request = self.buffers[index]
+                .buffer
+                .begin_history_request(query.clone())
+                .unwrap();
+            (self.buffers[index].id(), query, request)
+        });
+        let worker_repository = repository.clone();
+        let origin = self.active_view().clone();
+        let input = origin.read(cx).display_snapshot().id().session;
+        cx.spawn_in(window, async move |shell, cx| {
+            let result = cx.background_executor().spawn(async move {
+                let cancelled = std::sync::atomic::AtomicBool::new(false);
+                let oid = crate::git::ReadEnvironment::Commit.read(&worker_repository, &["rev-parse".as_ref(), "HEAD".as_ref()], &cancelled)?;
+                let oid = String::from_utf8(oid).map_err(|_| "Invalid HEAD identity")?.trim().to_owned();
+                let query = crate::history::Query::Revision { repository: worker_repository, oid, environment: crate::git::ReadEnvironment::Commit };
+                let data = query.load(&cancelled)?;
+                let rendered = data.render(&query)?;
+                Ok::<_, String>((query, data, rendered))
+            }).await;
+            shell.update_in(cx, |shell, window, cx| {
+                if !shell.commit_active(operation) || !shell.commit_editors.contains_key(&editor_id) { return; }
+                match result {
+                    Ok((query, data, rendered)) => {
+                        let index = if let Some((id, previous, request)) = existing {
+                            let Some(index) = shell.buffers.index_of(id) else { return };
+                            if !shell.buffers[index].buffer.history_request_matches(&previous, request) { return; }
+                            index
+                        } else {
+                            if shell.buffers.iter().any(|slot| matches!(slot.buffer.history_query(), Some(crate::history::Query::Revision { repository: ref repo, environment: crate::git::ReadEnvironment::Commit, .. }) if *repo == repository)) { return; }
+                            shell.create_buffer(Buffer::history(query.clone()), window, cx)
+                        };
+                        let request = shell.buffers[index].buffer.begin_history_request(query.clone()).unwrap();
+                        if !shell.install_history_result(index, &query, request, data, rendered, cx) { return; }
+                        if shell.minibuffer.is_none() && shell.active_view() == &origin && origin.read(cx).display_snapshot().id().session == input && origin.read(cx).git_open_ready()
+                            && let Some(companion) = shell.display_temporary_beside(index, &repository, window, cx) {
+                                shell.commit_editors.get_mut(&editor_id).unwrap().companions.push(companion);
+                            }
+                    }
+                    Err(error) => shell.show_message(&origin, format!("Cannot show reword diff: {error}"), cx),
+                }
+            }).ok();
+        }).detach();
     }
 
     fn attach_commit_editor(

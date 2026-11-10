@@ -189,6 +189,8 @@ impl AppShell {
             self.closing = None;
         }
         self.reset_message_log(id);
+        #[cfg(unix)]
+        self.discard_commit_selection(id, window, cx);
         self.buffers.remove(id);
         if self.buffers.is_empty() {
             self.create_buffer(Buffer::scratch(), window, cx);

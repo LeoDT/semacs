@@ -18,11 +18,13 @@ pub(crate) struct Target {
 enum Projection {
     Status(Repository),
     Diff(Comparison),
+    History(crate::history::Query),
 }
 
 enum Loaded {
     Status(Status, RenderedStatus),
     Diff(Diff, RenderedDiff),
+    History(crate::history::Data, crate::history::RenderedHistory),
 }
 
 impl Target {
@@ -32,11 +34,17 @@ impl Target {
                 buffer.status_request_matches(self.request, repository)
             }
             Projection::Diff(comparison) => buffer.diff_request_matches(self.request, comparison),
+            Projection::History(query) => buffer.history_request_matches(query, self.request),
         }
     }
 
     fn load(&self, cancelled: &AtomicBool) -> Result<Loaded, String> {
         match &self.projection {
+            Projection::History(query) => {
+                let data = query.load(cancelled)?;
+                let rendered = data.render(query)?;
+                Ok(Loaded::History(data, rendered))
+            }
             Projection::Status(repository) => {
                 let data = Status::load(repository.clone(), cancelled)?;
                 let rendered = data.render()?;
@@ -75,6 +83,15 @@ impl AppShell {
                 Some((Projection::Status(repository), request))
             } else if let Ok((comparison, request)) = slot.buffer.begin_diff_request() {
                 (slot.id() == command_buffer).then_some((Projection::Diff(comparison), request))
+            } else if let Some(query @ crate::history::Query::Log { .. }) =
+                slot.buffer.requested_history_query()
+            {
+                if slot.id() == command_buffer {
+                    let request = slot.buffer.begin_history_request(query.clone()).unwrap();
+                    Some((Projection::History(query), request))
+                } else {
+                    None
+                }
             } else {
                 None
             };
@@ -151,6 +168,18 @@ impl AppShell {
                     match result {
                         Ok(Loaded::Status(data, rendered)) => {
                             shell.install_status_result(index, target.request, data, rendered, cx);
+                        }
+                        Ok(Loaded::History(data, rendered)) => {
+                            if let Projection::History(query) = &target.projection {
+                                shell.install_history_result(
+                                    index,
+                                    query,
+                                    target.request,
+                                    data,
+                                    rendered,
+                                    cx,
+                                );
+                            }
                         }
                         Ok(Loaded::Diff(data, rendered)) => {
                             shell.install_diff_result(index, target.request, data, rendered, cx);

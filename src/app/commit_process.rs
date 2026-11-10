@@ -34,7 +34,8 @@ impl AppShell {
             let result = cx
                 .background_executor()
                 .spawn(async move {
-                    crate::git::discover(&directory, &std::sync::atomic::AtomicBool::new(false))
+                    crate::git::ReadEnvironment::Commit
+                        .discover(&directory, &std::sync::atomic::AtomicBool::new(false))
                 })
                 .await;
             shell

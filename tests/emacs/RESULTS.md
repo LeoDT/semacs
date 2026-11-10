@@ -146,3 +146,35 @@ Save file /tmp/x? (y, n, !, ., q, M-~, C-r, C-f, d or C-h)
 另在隔离 `emacs -Q -nw` pty 中直接调用查询函数，分别只发送 y / n 与 y / n / s（均不发送 RET）：`y-or-n-p` 返回 t / nil，`read-multiple-choice` 返回对应字符选择。此探针确认单键查询本身的交互，不冒充周围文件命令的完整 command loop，也不把 batch ERT 中被替换的查询当成按键证据。
 
 这些记录是外部参照，不证明 semacs 已通过验收；未覆盖真实 Wayland / IME。
+
+### F5：Magit 提交与历史参照
+
+环境：GNU Emacs 31.1、Git 2.56.0、Magit `942d61d5de37c89a3a7c6cf693696b900b1d97b0`（`v4.7.1-74-g942d61d5`，调查时工作区干净）；直接从 checkout 加载 Magit，`emacs -Q --batch` 显式加载依赖，无日常 init / 桌面 / OS 注键。入口与隔离方式见 [README](README.md#f5magit-提交与历史参照)。参照测试源码 `f5-magit.el` 的 SHA-256 为 `87fee50e1fad131ac53c6a6828c67dc441674e177ddc70a483c5c0be94b990a5`。这是 F5 实施前的外部参照，不是 semacs 通过记录。
+
+显式依赖包与主要源码 SHA-256（这些包并非 Magit checkout 锁定的统一依赖快照）：
+
+| 包 | 主要源码 SHA-256 |
+|---|---|
+| compat-31.0.0.2 / compat.el | `e7c2ddc4b6d7af6e6b038c86a0d11bf23907d5b6018c406683bcef41d1518ce3` |
+| cond-let-20260817.452 / cond-let.el | `667438802590ac16783d088ff7b39eb9a5a0379d5fe628d609d1d37b3a0741fa` |
+| dash-20260221.1346 / dash.el | `ce8043bfcfe64bfe69a411ee29e4c704213abd93aaa9a6da8b6791d3110d7f48` |
+| llama-20260601.1455 / llama.el | `44b1790e14a84d69c03889f8bd9a7975406bf996efac101a76477a0a1331f97b` |
+| transient-20260825.819 / transient.el | `cac5353bffee2f06b1961da6616dd5ecc2e61b79901c765410efee02b06034e2` |
+| with-editor-20260731.2234 / with-editor.el | `6ea16f15b201ab1c26b04bd4df514f915f58787786f2d58d802de5ae26dfc106` |
+
+扩展后的 13 项 ERT 全部符合预期，无失败。观察范围：
+
+| 用例 | 结果与证据层次 |
+|---|---|
+| amend 没有 staged | 真实 Magit 函数仍调用 `commit --amend --verbose`；启动器被捕获，不证明完整异步提交。 |
+| reword | 真实函数传 `--amend --only --allow-empty`；捕获的启动器转而运行真实 Git 和 fixture editor，消息变为 reworded，HEAD tree 不变、原 staged index 不变。不是 semacs helper 或 Magit async editor 验收。 |
+| staged fixup / squash | 真实函数先创建待选回调及 staged companion；显式调用回调后，启动参数分别包含 `--fixup=OID` / `--squash=OID` 和 `--no-edit`，无 rebase；选择 UI / 启动器被捕获。 |
+| fixup 只有 unstaged | 真实谓词及共享 assert 路径触发 unstaged 预览与 `Nothing staged. Commit all uncommitted changes?` 查询；答 yes 后才选目标，并带 `--all` 启动。`strict` 并不排除该分支。查询 / 显示 / 启动器被捕获。 |
+| fixup 拒绝 / 无改动 | 拒绝 `--all` 不选目标、不启动；没有任何改动则 user-error。 |
+| 选择键位 | map 查询：`C-c C-c`、`.`、`e` 为 pick，`q` 为 quit，`p` 不是 pick；不是实际按键驱动。 |
+| 日志 | 默认 graph / decorate / 256；真实 limit 函数将 256 加倍为 512，再减半为 256（刷新被替换）；当前分支为 main，detached 时为 HEAD（setup 被捕获）。 |
+| 已发布 amend | fixture 的 `origin/master` 包含 HEAD，真实检测走 `amend-published`；替换确认函数拒绝后不会启动。未覆盖真实确认按键。 |
+| revision 命令 | 捕获真实入口使用 `show -p --format=`，没有强制 first-parent。 |
+| root / merge revision | 真实 batch revision buffer 显示 root 的 `+base`；两父提交的 resolution fixture 由真实 Git show 产生 combined，真实 Magit buffer 含 `@@@` 及 `++resolved`。不是屏幕呈现 / 文件版本访问覆盖。 |
+
+尚未观察：真实 command loop / transient 与选择界面按键、GUI / IME、发布及 merge-range 多步查询、完整 hooks / 签名 / editor 失败生命周期、combined 的各 parent 版本访问。以上源码静态入口和实施待决范围见 [F5 调研](../../docs/work/f5-history-commit.md)，不以本记录替代产品契约或批准差异。

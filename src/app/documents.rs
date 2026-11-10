@@ -402,7 +402,8 @@ impl AppShell {
                     let buffer = &mut self.buffers[index].buffer;
                     let boundary = (update_path
                         && (buffer.status_repository().is_some()
-                            || buffer.process_repository().is_some()))
+                            || buffer.process_repository().is_some()
+                            || buffer.history_query().is_some()))
                     .then(|| buffer.save_point());
                     if update_path {
                         buffer.set_path(path.clone());
@@ -412,6 +413,7 @@ impl AppShell {
                     if update_path {
                         buffer.detach_status();
                         buffer.detach_process();
+                        buffer.detach_history();
                     }
                     if update_path && buffer.is_message_log() {
                         buffer.detach_message_log();
@@ -421,6 +423,8 @@ impl AppShell {
                 self.refresh_buffer(self.buffers[index].id(), cx);
                 if update_path {
                     self.reset_message_log(buffer);
+                    #[cfg(unix)]
+                    self.discard_commit_selection(buffer, window, cx);
                     self.rename_buffer(index, cx);
                 }
                 if let Some(mut pending) = self.buffers[index].save.take_pending() {

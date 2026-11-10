@@ -39,6 +39,80 @@ pub(crate) fn prepare(
     }
 }
 
+pub(crate) struct TargetCheck {
+    pub published: Vec<String>,
+    pub merges: bool,
+}
+
+pub(crate) fn check_target(
+    repository: &Repository,
+    target: &str,
+    amending: bool,
+    cancelled: &AtomicBool,
+) -> Result<TargetCheck, String> {
+    let read = git::ReadEnvironment::Commit;
+    let published = read.execute(
+        repository,
+        &[
+            "rev-parse".as_ref(),
+            "--verify".as_ref(),
+            "--quiet".as_ref(),
+            "origin/master".as_ref(),
+        ],
+        cancelled,
+    )?;
+    let mut branches = Vec::new();
+    if published.status.success() {
+        let tip =
+            String::from_utf8(published.bytes).map_err(|_| "Invalid publishing branch identity")?;
+        let ancestor = read.execute(
+            repository,
+            &[
+                "merge-base".as_ref(),
+                "--is-ancestor".as_ref(),
+                target.as_ref(),
+                "origin/master".as_ref(),
+            ],
+            cancelled,
+        )?;
+        match ancestor.status.code() {
+            Some(0) if amending || tip.trim() != target => branches.push("origin/master".into()),
+            Some(0 | 1) => {}
+            _ => {
+                return Err(format!(
+                    "Cannot check publishing branch: {}",
+                    ancestor.diagnostic
+                ));
+            }
+        }
+    } else if published.status.code() != Some(1) {
+        return Err(format!(
+            "Cannot read publishing branch: {}",
+            published.diagnostic
+        ));
+    }
+    let merges = if amending {
+        false
+    } else {
+        !read
+            .read(
+                repository,
+                &[
+                    "rev-list".as_ref(),
+                    "--merges".as_ref(),
+                    format!("{target}..HEAD").as_ref(),
+                    "--".as_ref(),
+                ],
+                cancelled,
+            )?
+            .is_empty()
+    };
+    Ok(TargetCheck {
+        published: branches,
+        merges,
+    })
+}
+
 fn changed(repository: &Repository, cached: bool, cancelled: &AtomicBool) -> Result<bool, String> {
     let mut args = vec![
         "diff".as_ref(),

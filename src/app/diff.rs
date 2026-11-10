@@ -33,6 +33,9 @@ impl AppShell {
             Command::MagitRefresh if origin.read(cx).buffer().status_repository().is_some() => {
                 self.refresh_status(origin, window, cx)
             }
+            Command::MagitRefresh if origin.read(cx).buffer().history_query().is_some() => {
+                self.refresh_history(origin, window, cx)
+            }
             Command::MagitRefresh => self.refresh_diff(origin, window, cx),
             Command::MagitDiffVisit => self.visit_diff(origin, window, cx),
             Command::ScrollLeft | Command::ScrollRight => origin.update(cx, |view, cx| {
@@ -295,6 +298,16 @@ impl AppShell {
                 return;
             }
         };
+        self.visit_git_location(visit, origin, window, cx);
+    }
+
+    pub(super) fn visit_git_location(
+        &mut self,
+        visit: Visit,
+        origin: &Entity<BufferView>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         match visit {
             Visit::Worktree { path, line, column } => {
                 if !path.is_file() {
@@ -312,6 +325,7 @@ impl AppShell {
                 git_dir,
                 oid,
                 path,
+                environment,
                 line,
                 column,
             } => {
@@ -328,7 +342,13 @@ impl AppShell {
                     let result = cx
                         .background_executor()
                         .spawn(async move {
-                            crate::git::blob(&root, &git_dir, &blob_oid, &worker_cancelled)
+                            crate::git::blob(
+                                &root,
+                                &git_dir,
+                                &blob_oid,
+                                environment,
+                                &worker_cancelled,
+                            )
                         })
                         .await;
                     shell

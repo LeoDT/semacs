@@ -19,9 +19,37 @@ pub(super) fn parse(bytes: &[u8]) -> Result<Vec<FileDiff>, String> {
     parse_text(bytes, false)
 }
 
-pub(super) fn parse_text(
+pub(super) fn parse_text(bytes: &[u8], summarize_non_utf8: bool) -> Result<Vec<FileDiff>, String> {
+    parse_with_stats(bytes, summarize_non_utf8, true)
+}
+
+pub(crate) fn parse_revision(bytes: &[u8]) -> Result<Vec<FileDiff>, String> {
+    let mut files = parse_with_stats(bytes, true, false)?;
+    for file in &mut files {
+        if file.summary.is_none() {
+            file.added = Some(
+                file.hunks
+                    .iter()
+                    .flat_map(|hunk| &hunk.lines)
+                    .filter(|line| line.text.starts_with('+'))
+                    .count(),
+            );
+            file.deleted = Some(
+                file.hunks
+                    .iter()
+                    .flat_map(|hunk| &hunk.lines)
+                    .filter(|line| line.text.starts_with('-'))
+                    .count(),
+            );
+        }
+    }
+    Ok(files)
+}
+
+fn parse_with_stats(
     mut bytes: &[u8],
     summarize_non_utf8: bool,
+    stats: bool,
 ) -> Result<Vec<FileDiff>, String> {
     if bytes.is_empty() {
         return Ok(Vec::new());
@@ -69,7 +97,7 @@ pub(super) fn parse_text(
             patch_header: String::new(),
         });
     }
-    for file in &mut files {
+    for file in files.iter_mut().filter(|_| stats) {
         let stat = nul(&mut bytes)?;
         let mut fields = stat.splitn(3, |byte| *byte == b'\t');
         let added = fields.next().ok_or("Missing diffstat")?;
@@ -168,7 +196,7 @@ pub(super) fn parse_text(
     Ok(files)
 }
 
-fn range(value: &str, prefix: char) -> Result<(usize, usize), String> {
+pub(crate) fn range(value: &str, prefix: char) -> Result<(usize, usize), String> {
     let value = value.strip_prefix(prefix).ok_or("Malformed hunk range")?;
     let (start, count) = value.split_once(',').unwrap_or((value, "1"));
     let number = |value: &str| {

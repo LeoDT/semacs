@@ -15,6 +15,7 @@ mod exit;
 pub mod files;
 pub mod frame;
 mod git;
+pub mod history;
 pub mod input;
 pub mod keymap;
 mod messages;

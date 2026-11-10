@@ -383,3 +383,27 @@ F2 仅提供 status 与单文件整文件级 index 操作，不包含 hunk / 批
 - hunk patch 由 Git 按上下文匹配并报告失败，不增加 HEAD / index OID / XY 快照一致性检查，也不把整文件 stage 的执行时磁盘语义冒充 hunk 语义。现有特殊 index / sparse / 路径类型 / 外部 filter 范围限制仍适用，不通过 patch 绕过。失败保留诊断，沿用核心终态重读，不把刷新成功误报为写入成功。
 - JS 仍只返回相同 stage / unstage 领域意图；核心捕获并复核原 status 会话、投影、输入与单文件 / hunk 目标，不接收脚本路径或 patch。已接受写入复用现有 Git 操作槽、跨 reload / buffer 删除的所有权、结果记录、stale 标记、写后核对及退出等待，不另建生命周期。
 - status 的嵌入读取沿用固定仓库、后台执行、filter 筛查与既有子进程限额；两组 diff 的输入合计最多 16 MiB、普通 hunk patch 最多 100000 行，正文投影仍最多 16 MiB，超限整次失败并保留旧投影，不截断为完整清单。无新增原生性能预算或真实环境测试授权。
+
+## 阶段 F5：本地提交历史与提交整理
+
+本节扩展 F1–F4 的历史范围，不追溯改写旧阶段的排除项或验收结论。上游来源与外部参照见 [F5 调研](work/f5-history-commit.md)，当前进度只见[计划](plan.md)。
+
+### 日志与固定提交查看
+
+- `magit-log-current` 查看当前分支，detached 时查看 HEAD；Magit mode 中 `l l` 可打开。日志显示 Git graph、短 hash、refs 装饰、摘要、作者及时间，初始限制 256 个提交；`+` 加倍、`-` 减半且至少保留一个，重新读取受限历史而非 skip / offset 换页，不自动滚动加载。空 / unborn 历史明确显示无提交；日志元数据固定输出 UTF-8，不受用户 `i18n.logOutputEncoding` 的非 UTF-8 配置破坏。
+- 新增 buffer mode `magit-log`、`magit-log-select`、`magit-revision`，共享 section / 局部键位、当前 section 反馈、长行截断和水平查看；普通文本 / minibuffer 不使用这些局部键。`n` / `p` / `^`、折叠、共享树及独立 view point / scroll 沿用既有模型；日志条目以完整 commit OID 为身份。刷新尽力恢复位置，身份消失回退存活祖先；失败保留已显示内容与比较身份，不以失败请求冒充新投影。
+- 日志 `RET` / `C-m`（`magit-visit-thing`）查看当前位置的 commit；revision 的 parent 行可继续查看对应 parent。`magit-show-commit` 保持“查看提交”身份，不在文件行上改为访问 blob。默认复用同仓库、同读取环境的 revision buffer；提交正文、parents、patch 及文件 blob 固定到本次完整 OID，不把旧文件访问重新解释为当前 HEAD / index / worktree。
+- 普通 / root 提交显示统一 diff、diffstat 和文件 / hunk sections；文件行 RET 按 F1 的 old / new 侧规则访问只读 blob。revision 可用 SPC / DEL / S-SPC 翻页、`TAB` 折叠。binary、非 UTF-8、symlink / 类型变化、submodule 等沿用明确摘要和文本访问边界。
+- 历史 merge commit 显示真实 dense-combined diff，保留所有 parent / result 的路径、blob 身份和 hunk 行号，不改用 first-parent diff。Git dense-combined 合法省略部分 / 全部不感兴趣的 patch 时，明确标识省略并保留文件版本访问，不把 raw 条目数量当作必须等量的 patch 数。combined RET 按 Magit 访问 result；删除行的 result 位置按 hunk 映射，不凭前缀偷偷选择 parent。补充命令 `semacs-magit-visit-file-version`（无默认键）通过现有候选读入明确选择 `result` / `parent N`，访问固定 blob；这是本产品提供已批准 parent 访问的入口，不伪称是上游 combined RET 行为。不增加 combined stage / unstage、冲突解决或 rebase。
+- 打开、刷新、加载更多及版本访问沿用固定仓库、后台有界读取、输入 / 请求身份隔离；迟到结果不抢焦点、不复活 kill / 另存脱离的 buffer。日志 / revision 的 `q` 沿用 F3 局部临时 window / bury，不恢复整棵旧布局；另存成功后成为普通文件，待完成刷新不能恢复其 mode / section / 只读身份。
+
+### 提交菜单、amend / reword 与目标选择
+
+- Magit mode 的 `c` / `M-x magit-commit` 提供本轮最小操作菜单：`c` create、`a` amend、`w` reword、`f` fixup、`s` squash，`C-g` 取消。菜单使用现有 minibuffer 单键会话，不建设完整 transient、参数 infix、instant 变体或持久菜单状态；同仓库有消息编辑会话时先返回消息 buffer。提交发现、预检、目标选择日志及其 revision / blob 访问保留真实 commit 的读取环境（包括替代对象库）；普通日志 / revision 浏览仍使用 F1 投影读取环境，两者的 buffer 身份不能混用。对应命名命令也可从 M-x 调用，默认使用上游 verbose 提交流程。
+- amend 直接启动 `git commit --amend`，纳入执行时的 staged，允许没有 staged，不自动加入 unstaged；reword 使用 `--amend --only --allow-empty`，编辑 HEAD 消息但不改其 tree，不消费已有 staged。默认更新 committer date；不增加数值前缀或日期控制。amend companion 显示 parent → index（root 使用空 tree），reword companion 显示当前 HEAD 提交而不是 staged 改动。
+- 修改 HEAD 前沿用上游已发布确认：按固定参照的默认 publishing branch `origin/master` 判断是否包含目标，不自行扩大为任何 remote / upstream，不联网探测是否发布。拒绝 / `C-g` 不启动 Git；这不是新增的通用保护性确认。
+- 普通 fixup / squash 默认总是进入专用日志显式选目标，当前位置的 commit 仅提供初始定位，没有初始目标时略过开头的 fixup! / squash! / amend! 条目。选择期间显示 staged companion；`C-c C-c`、`.`、`e` 选定，`q` / `C-c C-k` 中止并 kill 选择 buffer。`p` 仍是导航，RET 仍查看 commit，不以 RET 代替选定。
+- fixup / squash 复用普通 commit 的 staged / unstaged / merge 准备流程；只有已跟踪 unstaged 时仍先显示预览、询问是否 `--all`，不发明 staged-only 限制，不自动加入 untracked。选定后分别启动 `--fixup=OID --no-edit` / `--squash=OID --no-edit`，只创建新提交，不自动合并历史。保留上游目标检查涉及的发布及 merge-range 继续 / 重选 / 中止查询，不能因没有实际 rebase 就静默删掉这些分支；本轮不新增 rebase 继续 / 冲突处理界面。
+- 以上均启动真实 Git 并复用 F3 的 editor、消息 ring、保存 / finish / cancel、hooks / 签名、输出 / 提示、中断及退出生命周期。`--no-edit` 由 Git 自己处理（包括 hook 中的 `GIT_EDITOR=:`），不等于 semacs 跳过 hooks。完成编辑不等于提交成功；失败保留诊断，不自动重放 / 回滚，不冻结消息编辑开始时的 HEAD / index。
+- 终态刷新仍存活的原发起日志 / diff 及 status；其他可变投影保留 stale 快照，固定 OID revision 不因新提交失去其历史身份。请求代次与仓库终态隔离迟到结果；关闭、另存、reload 或选择取消不让旧请求在新目标上启动提交。没有新增通用 Job、JS 任意 Git / 进程 API 或持久化恢复。
+- 读取沿用既有单次 15 秒、stdout 16 MiB / stderr 64 KiB 限额；patch 至多 4096 个文件 / 100000 行，历史正文投影至多 16 MiB，超限整次失败且不截断为完整结果。真实提交仍无固定时限。无新增原生性能预算或真实环境测试授权。

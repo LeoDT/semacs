@@ -25,6 +25,14 @@ pub enum ReadEnvironment {
 }
 
 impl ReadEnvironment {
+    pub(crate) fn discover(
+        self,
+        directory: &Path,
+        cancelled: &AtomicBool,
+    ) -> Result<Repository, String> {
+        discover_environment(self, directory, cancelled)
+    }
+
     pub(crate) fn read(
         self,
         repository: &Repository,
@@ -87,18 +95,28 @@ pub(crate) fn read_input(
 }
 
 pub(crate) fn discover(directory: &Path, cancelled: &AtomicBool) -> Result<Repository, String> {
-    let root = output_path(read(
-        directory,
-        None,
-        &["rev-parse".as_ref(), "--show-toplevel".as_ref()],
-        cancelled,
-    )?)?;
-    let git_dir = output_path(read(
-        directory,
-        None,
-        &["rev-parse".as_ref(), "--absolute-git-dir".as_ref()],
-        cancelled,
-    )?)?;
+    ReadEnvironment::Projection.discover(directory, cancelled)
+}
+
+fn discover_environment(
+    environment: ReadEnvironment,
+    directory: &Path,
+    cancelled: &AtomicBool,
+) -> Result<Repository, String> {
+    let read = |args: &[&std::ffi::OsStr]| {
+        let access = match environment {
+            ReadEnvironment::Projection => Access::Read(cancelled),
+            ReadEnvironment::Commit => Access::CommitRead(cancelled),
+        };
+        successful(
+            execute(directory, None, args, None, access).map_err(|failure| failure.diagnostic)?,
+        )
+    };
+    let root = output_path(read(&["rev-parse".as_ref(), "--show-toplevel".as_ref()])?)?;
+    let git_dir = output_path(read(&[
+        "rev-parse".as_ref(),
+        "--absolute-git-dir".as_ref(),
+    ])?)?;
     Ok(Repository {
         root: root
             .canonicalize()
@@ -154,14 +172,17 @@ pub(crate) fn blob(
     root: &Path,
     git_dir: &Path,
     oid: &str,
+    environment: ReadEnvironment,
     cancelled: &AtomicBool,
 ) -> Result<String, String> {
     if !valid_oid(oid) || oid.bytes().all(|byte| byte == b'0') {
         return Err("No file version exists on this side".into());
     }
-    let bytes = read(
-        root,
-        Some(git_dir),
+    let bytes = environment.read(
+        &Repository {
+            root: root.to_owned(),
+            git_dir: git_dir.to_owned(),
+        },
         &["cat-file".as_ref(), "blob".as_ref(), oid.as_ref()],
         cancelled,
     )?;

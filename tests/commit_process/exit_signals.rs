@@ -224,9 +224,11 @@ fn normal_exit_hangup_can_be_caught_or_ignored_without_automatic_force_kill() {
     let script = format!(
         r#"#!/bin/sh
 set -u
-last=
-for arg do last=$arg; done
-if test "$last" != commit; then exec {quoted_git} "$@"; fi
+committing=false
+for arg do
+    if test "$arg" = commit; then committing=true; break; fi
+done
+if test "$committing" = false; then exec {quoted_git} "$@"; fi
 trap '' INT
 if test "$SEMACS_TEST_HUP" = ignore; then
     trap '' HUP

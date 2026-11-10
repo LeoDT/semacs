@@ -49,7 +49,64 @@ pub enum Scope {
     All,
 }
 
-pub(crate) use preparation::{Preparation, prepare};
+pub(crate) use preparation::{Preparation, check_target, prepare};
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Intent {
+    Create,
+    Amend,
+    Reword,
+    Fixup(String),
+    Squash(String),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TargetKind {
+    Fixup,
+    Squash,
+}
+
+impl TargetKind {
+    pub(crate) fn intent(self, target: String) -> Intent {
+        match self {
+            Self::Fixup => Intent::Fixup(target),
+            Self::Squash => Intent::Squash(target),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Action {
+    Create,
+    Amend,
+    Reword,
+    Target(TargetKind),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Request {
+    pub repository: Repository,
+    pub action: Action,
+    pub initial: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Plan {
+    pub repository: Repository,
+    pub scope: Scope,
+    pub intent: Intent,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Continuation {
+    Select {
+        repository: Repository,
+        scope: Scope,
+        kind: TargetKind,
+        initial: Option<String>,
+    },
+    Launch(Plan),
+}
 
 #[derive(Debug)]
 pub enum Event {
@@ -203,6 +260,22 @@ impl Commit {
         runtime_directory: &Path,
         scope: Scope,
     ) -> Result<(Self, Events), StartFailure> {
+        Self::start_with_intent(
+            repository,
+            editor_executable,
+            runtime_directory,
+            scope,
+            &Intent::Create,
+        )
+    }
+
+    pub fn start_with_intent(
+        repository: &Repository,
+        editor_executable: &Path,
+        runtime_directory: &Path,
+        scope: Scope,
+        intent: &Intent,
+    ) -> Result<(Self, Events), StartFailure> {
         let before_start = |error: io::Error| StartFailure {
             started: false,
             diagnostic: error.to_string(),
@@ -217,9 +290,37 @@ impl Commit {
             .arg(&repository.git_dir)
             .arg("--work-tree")
             .arg(&repository.root)
-            .arg("commit");
+            .arg("commit")
+            .arg("--verbose");
         if scope == Scope::All {
             command.arg("--all");
+        }
+        match intent {
+            Intent::Create => {}
+            Intent::Amend => {
+                command.arg("--amend");
+            }
+            Intent::Reword => {
+                command.args(["--amend", "--only", "--allow-empty"]);
+            }
+            Intent::Fixup(target) | Intent::Squash(target) => {
+                if !crate::git::valid_oid(target) {
+                    return Err(before_start(io::Error::new(
+                        io::ErrorKind::InvalidInput,
+                        "Expected a complete target commit identity",
+                    )));
+                }
+                command
+                    .arg(format!(
+                        "--{}={target}",
+                        if matches!(intent, Intent::Fixup(_)) {
+                            "fixup"
+                        } else {
+                            "squash"
+                        }
+                    ))
+                    .arg("--no-edit");
+            }
         }
         command.env("GIT_EDITOR", bridge.editor_command(editor_executable));
         let child = terminal.spawn(&mut command).map_err(before_start)?;

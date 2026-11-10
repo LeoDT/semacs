@@ -39,6 +39,24 @@ emacs -Q --batch -l tests/emacs/m1-indent.el -l tests/emacs/m1-editing.el -l tes
 
 读入注记及清除策略另按本机 31.1 的 `minibuffer.el` 中 `minibuffer-message`、`set-minibuffer-message`、`clear-minibuffer-message` 和 `minibuffer-message--message` 核对：显式提示默认两秒，普通 message 默认等下一输入，均以 overlay 保持原输入不变。这是源码参照，不证明活跃 minibuffer 的真实 command loop、GUI 像素布局或 IME 表现。
 
+## F5：Magit 提交与历史参照
+
+`f5-magit.el` 使用固定 Magit checkout 的真实函数及隔离 Git fixture；只显式加载列出的依赖，不加载日常 init，不执行 `package-initialize`。以本轮环境为例：
+
+```sh
+emacs -Q --batch \
+  -L "$HOME/.emacs.d/elpa/compat-31.0.0.2" \
+  -L "$HOME/.emacs.d/elpa/cond-let-20260817.452" \
+  -L "$HOME/.emacs.d/elpa/dash-20260221.1346" \
+  -L "$HOME/.emacs.d/elpa/llama-20260601.1455" \
+  -L "$HOME/.emacs.d/elpa/transient-20260825.819" \
+  -L "$HOME/.emacs.d/elpa/with-editor-20260731.2234" \
+  -L "$HOME/ghq/github.com/magit/magit/lisp" \
+  -l tests/emacs/f5-magit.el -f ert-run-tests-batch-and-exit
+```
+
+运行前核对 Magit 身份；路径或依赖不同应另记环境，不默认为同一基准。本轮固定 checkout 为 `942d61d5de37c89a3a7c6cf693696b900b1d97b0`（`v4.7.1-74-g942d61d5`）。fixture 只创建于 `.pi/tmp/`，隔离系统 / 用户 Git 配置及替代仓库环境，正常结束删除；不操作日常仓库。测试捕获部分查询、日志选择和 Git 启动器；reword 另用临时 editor 与真实 Git 检查 tree / index，root / merge revision 使用真实 batch buffer。它不证明真实 command loop、按键输入、GUI 或 semacs 通过。结果与依赖源码身份见 [F5 记录](RESULTS.md#f5magit-提交与历史参照)，静态入口见 [调研](../../docs/work/f5-history-commit.md)。
+
 ## 比较陷阱
 
 - Emacs point 是 1-based 字符位置，与 UTF-8 字节位置比较须显式转换，非 ASCII 不只做减一。

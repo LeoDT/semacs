@@ -113,6 +113,18 @@ impl AppShell {
             });
         } else {
             let candidates = match &kind {
+                ReadKind::HistoryFileVersion { versions } => versions
+                    .iter()
+                    .map(|version| {
+                        let annotation = match &version.visit {
+                            crate::diff::Visit::Blob { oid, path, .. } => {
+                                format!("{} {}", &oid[..12], path.to_string_lossy().escape_debug())
+                            }
+                            _ => String::new(),
+                        };
+                        Candidate::named(version.name.clone(), annotation)
+                    })
+                    .collect(),
                 ReadKind::Theme => crate::theme::ThemeSettings::global(cx)
                     .names()
                     .map(|name| {

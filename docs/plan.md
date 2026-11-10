@@ -2,7 +2,7 @@
 
 本文是当前工作和跨会话待办的唯一入口；维护与归档规则见 [文档说明](README.md#维护规则)。范围见 [需求](requirements.md)，行为见 [保真度契约](emacs-fidelity.md)。里程碑按可验收行为划分，不按工期估算。
 
-## 当前状态：F4 status 内嵌 diff 与单 hunk 操作完成
+## 当前状态：F5 提交历史与提交整理完成
 
 R0–M3、A–E3、日常编辑增强及 F1 只读 Magit diff 的交付结论见 [R0–F1 归档](archive/completed-through-f1.md)，F2 status / 单文件 stage / unstage 见 [F2 归档](archive/f2-status.md)。F3 临时 window 与普通 commit 已完成实现、集中审查修复、本地验证及获准的单窗口宿主功能验证，见 [F3 归档](archive/f3-window-commit.md)；固定源码 / 环境、结果和未测边界见[冻结记录索引](records/README.md)。
 
@@ -16,11 +16,15 @@ F3 没有已知阻塞性遗留项；密码 / passphrase 读入已由用户明确
 
 已交付批准范围，并完成一次集中审查修复、本地全目标检查及 status / 独立 diff headless 专项；没有已知阻塞性遗留。交付摘要见 [F4 归档](archive/f4-status-hunks.md)，固定身份、结果与未测边界见[本地记录](records/f4-status-hunks-local.md)。用户随后确认已试用、没有明显问题并同意收尾提交；未提供具体操作覆盖或测量数据，不扩展为完整宿主矩阵或原生性能通过。助手未启动真实桌面。
 
+## 已完成阶段 F5：本地提交历史与提交整理
+
+已交付批准范围（含历史 merge 的只读 combined 及 parent / result 版本访问），完成一次集中审查修复、默认 / profiler 全目标检查及独立 diff headless 回归，没有已知阻塞性遗留。摘要见 [F5 归档](archive/f5-history-commit.md)，固定源码、结果及未测边界见[本地记录](records/f5-history-commit-local.md)。用户随后确认已大致试用、没有明显问题，但未做完整测试，并同意先收尾提交；该反馈不扩展为完整宿主矩阵或原生性能通过，也不改写冻结记录当时的未测结论。助手未启动真实桌面。
+
 ## 下一步
 
-目前没有另行批准的新实施阶段。先使用已交付的 F4，再按实际需要确认 amend / fixup、更多 Magit 操作或其他未排期事项；真实环境验证另行授权，不自动追加宿主矩阵。
+目前没有另行批准的新实施阶段。先使用已交付的 F5，按实际需求或问题确认后续最小范围；真实环境验证另行授权，不自动追加宿主矩阵。
 
-后续更多 Magit 操作 / 完整 transient、脚本扩展 / async、LSP 或 Job 持久化均需另行确认。按需参考 [脚本扩展与热重载调研](work/scripting-extension-research.md) 和 [Magit 上游参照](work/f-magit-reference.md)，两者不额外授权其他范围。有效用户行为仍见[保真度契约](emacs-fidelity.md)，不会改写 F1 / F2 的历史排除范围。
+更多 Magit 操作 / 完整 transient、脚本扩展 / async、LSP 或 Job 持久化均需另行确认。按需参考 [脚本扩展与热重载调研](work/scripting-extension-research.md) 和 [Magit 上游参照](work/f-magit-reference.md)，两者不额外授权其他范围。有效用户行为仍见[保真度契约](emacs-fidelity.md)，不会改写 F1 / F2 的历史排除范围。
 
 ## 已知问题与未排期事项
 

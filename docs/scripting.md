@@ -80,7 +80,7 @@ semacs.setStyle("syntax.comment", { italic: true });
 
 `run(context)` 收到调用开始时深度冻结的值快照，不含路径、Git 参数、可变核心对象或可伪造目标句柄：
 
-- `mode`：`"fundamental" | "magit-diff" | "magit-status" | "git-commit" | "magit-process"`。
+- `mode`：`"fundamental" | "magit-diff" | "magit-status" | "git-commit" | "magit-process" | "magit-log" | "magit-log-select" | "magit-revision"`。
 - `status`：非 status 为 `null`，否则为 `{ selection }`。
 - `selection`：无可见文件 / hunk 目标时为 `null`，否则含 `group: "untracked" | "unstaged" | "staged" | "unmerged"` 及布尔值 `canStage` / `canUnstage`。能力只是提示；region、过时清单或不支持的目标不授予写入权，核心仍重新校验。
 
@@ -110,7 +110,7 @@ semacs.bindKey("ctrl-c g", "status-or-refresh");
 
 ### `semacs.bindKey(keys, commandName | null, options?)`
 
-绑定或取消一个正文键序列；可多次绑定不同键到同一命令。不传 `options` 保持正文通用绑定；传 `{ mode: "magit-diff" }`、`{ mode: "magit-status" }`、`{ mode: "git-commit" }`、`{ mode: "magit-process" }` 或 `{ mode: "fundamental" }` 仅配置对应 mode 的局部层。未知 mode / 选项拒绝整份配置，当前没有 JS mode 注册 API。局部层优先于通用层；局部 `null` 屏蔽该 mode 内的低层回落，删除声明恢复默认。跨层前缀与上下文规则见 [F1 契约](emacs-fidelity.md#mode-与键位)。
+绑定或取消一个正文键序列；可多次绑定不同键到同一命令。不传 `options` 保持正文通用绑定；传 `{ mode: "magit-diff" }`、`{ mode: "magit-status" }`、`{ mode: "git-commit" }`、`{ mode: "magit-process" }`、`{ mode: "magit-log" }`、`{ mode: "magit-log-select" }`、`{ mode: "magit-revision" }` 或 `{ mode: "fundamental" }` 仅配置对应 mode 的局部层。未知 mode / 选项拒绝整份配置，当前没有 JS mode 注册 API。局部层优先于通用层；局部 `null` 屏蔽该 mode 内的低层回落，删除声明恢复默认。跨层前缀与上下文规则见 [F1 契约](emacs-fidelity.md#mode-与键位)。
 
 ```js
 semacs.bindKey("tab", "section-toggle", { mode: "magit-diff" });

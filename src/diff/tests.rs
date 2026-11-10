@@ -240,7 +240,14 @@ fn real_staged_unstaged_and_line_versions_are_distinct() {
         assert_eq!(line, 1);
         assert_eq!(column, 1);
         assert_eq!(
-            crate::git::blob(&repo.0, &repo.0.join(".git"), &oid, &AtomicBool::new(false)).unwrap(),
+            crate::git::blob(
+                &repo.0,
+                &repo.0.join(".git"),
+                &oid,
+                ReadEnvironment::Projection,
+                &AtomicBool::new(false)
+            )
+            .unwrap(),
             contents
         );
     }
@@ -486,6 +493,7 @@ fn malformed_protocol_and_unsafe_paths_fail_closed() {
             Path::new("."),
             Path::new(".git"),
             "--help",
+            ReadEnvironment::Projection,
             &AtomicBool::new(false)
         )
         .is_err()

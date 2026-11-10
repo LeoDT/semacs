@@ -17,6 +17,8 @@ use semacs::commit::{Commit, EditorOutcome, EditorRequest, Event, Events, Reposi
 mod exit;
 #[path = "commit_process/exit_signals.rs"]
 mod exit_signals;
+#[path = "commit_process/history.rs"]
+mod history;
 #[path = "commit_process/merge_start.rs"]
 mod merge_starts;
 #[path = "commit_process/prompt.rs"]

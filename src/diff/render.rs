@@ -1,4 +1,4 @@
-use super::{Diff, Visit};
+use super::{Diff, FileDiff, Visit};
 use crate::section::{Section, Sections};
 use crate::text::{ByteOffset, Rope};
 use crate::theme::StyleRole;
@@ -55,15 +55,19 @@ fn label(path: &std::path::Path) -> String {
 }
 
 pub(super) fn render(diff: &Diff) -> Result<RenderedDiff, String> {
-    let mut text = String::new();
-    let title = push(
-        &mut text,
+    render_files(
         &format!(
             "{}: {}",
             diff.comparison.kind.name(),
             label(&diff.comparison.repository.root)
         ),
-    );
+        &diff.files,
+    )
+}
+
+pub(crate) fn render_files(title: &str, files: &[FileDiff]) -> Result<RenderedDiff, String> {
+    let mut text = String::new();
+    let title = push(&mut text, title);
     let mut nodes = vec![Section {
         key: "root".into(),
         parent: None,
@@ -74,8 +78,8 @@ pub(super) fn render(diff: &Diff) -> Result<RenderedDiff, String> {
     let mut styles = vec![(title, StyleRole::SectionHeading)];
     let mut locations = Vec::new();
     let mut peers = Vec::new();
-    if !diff.files.is_empty() {
-        let heading = push(&mut text, &format!("{} files changed", diff.files.len()));
+    if !files.is_empty() {
+        let heading = push(&mut text, &format!("{} files changed", files.len()));
         styles.push((heading.clone(), StyleRole::SectionHeading));
         let stat = nodes.len();
         nodes.push(Section {
@@ -85,7 +89,7 @@ pub(super) fn render(diff: &Diff) -> Result<RenderedDiff, String> {
             body: heading.end,
             collapsed: false,
         });
-        for (file, item) in diff.files.iter().enumerate() {
+        for (file, item) in files.iter().enumerate() {
             let added = format!("+{}", item.added.map_or("binary".into(), |n| n.to_string()));
             let deleted = format!(
                 "-{}",
@@ -125,7 +129,7 @@ pub(super) fn render(diff: &Diff) -> Result<RenderedDiff, String> {
     } else {
         push(&mut text, "No changes");
     }
-    for (file, item) in diff.files.iter().enumerate() {
+    for (file, item) in files.iter().enumerate() {
         let name = if item.old_path != item.new_path {
             format!("{} → {}", label(&item.old_path), label(&item.new_path))
         } else {

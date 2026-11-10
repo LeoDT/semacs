@@ -19,6 +19,21 @@ pub enum ReadKind {
     Command,
     FontFamily,
     Theme,
+    CommitMenu,
+    HistoryFileVersion {
+        versions: Vec<crate::history::FileVersion>,
+    },
+    #[cfg(unix)]
+    CommitPublished {
+        next: crate::commit::Continuation,
+        merges: bool,
+        branches: Vec<String>,
+        amending: bool,
+    },
+    #[cfg(unix)]
+    CommitTargetMerges {
+        next: crate::commit::Continuation,
+    },
     /// `C-x C-f`: read a path and visit it from the origin.
     FindFile,
     /// `C-x C-w`: read a path and write the buffer there.
@@ -59,12 +74,14 @@ pub enum ReadKind {
         outcome: Option<crate::commit::EditorOutcome>,
     },
     CommitAll {
-        repository: crate::git::Repository,
+        #[cfg(unix)]
+        request: crate::commit::Request,
         pane: u64,
         buffer: crate::buffer::BufferId,
     },
     CommitMerge {
-        repository: crate::git::Repository,
+        #[cfg(unix)]
+        request: crate::commit::Request,
     },
     CommitYesNo {
         operation: u64,
@@ -110,6 +127,7 @@ impl ReadKind {
         matches!(
             self,
             Self::Command
+                | Self::HistoryFileVersion { .. }
                 | Self::Theme
                 | Self::FindFile
                 | Self::WriteFile
@@ -136,12 +154,20 @@ impl ReadKind {
                 | Self::CommitAll { .. }
                 | Self::CommitMerge { .. }
                 | Self::CommitInterrupt { .. }
-        )
+                | Self::CommitMenu
+        ) || match self {
+            #[cfg(unix)]
+            Self::CommitPublished { .. } | Self::CommitTargetMerges { .. } => true,
+            _ => false,
+        }
     }
 
     pub fn answer_hint(&self) -> &'static str {
         match self {
             Self::KillBufferConfirm { .. } => "Please answer y, n, or s",
+            Self::CommitMenu => "Choose c, a, w, f, s; C-g cancels",
+            #[cfg(unix)]
+            Self::CommitTargetMerges { .. } => "Choose c (continue), s (select other), a (abort)",
             _ if self.is_single_key() => "Please answer y or n",
             _ => "Please answer yes or no",
         }
@@ -152,6 +178,12 @@ impl ReadKind {
             ReadKind::Command => "M-x ".to_owned(),
             ReadKind::FontFamily => "Font family: ".to_owned(),
             ReadKind::Theme => "Load theme: ".to_owned(),
+            ReadKind::CommitMenu => "Commit: [c] create  [a] amend  [w] reword  [f] fixup  [s] squash; C-g cancels: ".into(),
+            ReadKind::HistoryFileVersion { .. } => "Visit file version: ".into(),
+            #[cfg(unix)]
+            ReadKind::CommitPublished { branches, amending, .. } => format!("{} already been published to {}. Do you really want to modify {}? (y or n) ", if *amending { "This commit has" } else { "Some of these commits have" }, branches.join(", "), if *amending { "it" } else { "them" }),
+            #[cfg(unix)]
+            ReadKind::CommitTargetMerges { .. } => "Proceed despite merge in rebase range? [c] continue, [s] select other, [a] abort: ".into(),
             ReadKind::FindFile => "Find file: ".to_owned(),
             ReadKind::WriteFile => "Write file: ".to_owned(),
             ReadKind::SwitchToBuffer { default } => match default {
@@ -214,7 +246,13 @@ impl ReadSession {
     pub fn new(id: u64, kind: ReadKind, origin: Entity<BufferView>) -> Self {
         let mut keymap = if kind.is_single_key() {
             let mut keymap = Keymap::default();
-            for key in ["y", "shift-y", "n", "shift-n", "enter", "ctrl-m"] {
+            let keys: &[&str] = match &kind {
+                ReadKind::CommitMenu => &["c", "a", "w", "f", "s"],
+                #[cfg(unix)]
+                ReadKind::CommitTargetMerges { .. } => &["c", "s", "a"],
+                _ => &["y", "shift-y", "n", "shift-n", "enter", "ctrl-m"],
+            };
+            for key in keys {
                 keymap
                     .bind(
                         &parse_sequence(key).unwrap(),

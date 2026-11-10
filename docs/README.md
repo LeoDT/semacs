@@ -20,7 +20,7 @@ semacs 将 Emacs 的操作模型带到现代 GPU UI，不复刻 Emacs 外观或 
 
 ## 按需参考与冻结记录
 
-- [已完成阶段归档（R0–F1）](archive/completed-through-f1.md) / [F2 归档](archive/f2-status.md) / [F3 归档](archive/f3-window-commit.md) / [F4 归档](archive/f4-status-hunks.md)：交付摘要及当时的验收边界，不是当前待办。
+- [已完成阶段归档（R0–F1）](archive/completed-through-f1.md) / [F2 归档](archive/f2-status.md) / [F3 归档](archive/f3-window-commit.md) / [F4 归档](archive/f4-status-hunks.md) / [F5 归档](archive/f5-history-commit.md)：交付摘要及当时的验收边界，不是当前待办。
 - [冻结记录索引](records/README.md)：本地 / 宿主验收、诊断、历史失败和修复证据，按需查阅。
 - 阶段调研和未确认方案只从 [当前计划](plan.md) 按需进入，不默认通读 `work/`。
 - [Emacs 对照入口](../tests/emacs/README.md) / [观察记录](../tests/emacs/RESULTS.md)：外部行为参照，不是 semacs 通过记录。

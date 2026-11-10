@@ -111,6 +111,10 @@ impl Buffer {
         let doc = self.document.borrow();
         doc.status.as_ref().is_some_and(|session| session.stale)
             || doc.diff.as_ref().is_some_and(|session| session.stale)
+            || doc
+                .repository_history
+                .as_ref()
+                .is_some_and(|session| session.stale)
     }
 
     pub(crate) fn mark_git_stale(&mut self) {
@@ -119,6 +123,11 @@ impl Buffer {
             session.stale = true;
         }
         if let Some(session) = &mut doc.diff {
+            session.stale = true;
+        }
+        if let Some(session) = &mut doc.repository_history
+            && matches!(session.query, crate::history::Query::Log { .. })
+        {
             session.stale = true;
         }
         doc.touch();

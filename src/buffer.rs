@@ -19,6 +19,7 @@ mod diff;
 mod generated;
 mod history;
 mod process;
+mod repository_history;
 mod selection;
 mod status;
 pub(crate) use history::EditGroup;
@@ -128,6 +129,7 @@ struct Document {
     diff: Option<diff::DiffSession>,
     status: Option<status::StatusSession>,
     process: Option<process::ProcessSession>,
+    repository_history: Option<repository_history::HistorySession>,
 }
 
 impl Document {
@@ -200,6 +202,7 @@ impl Buffer {
             diff: None,
             status: None,
             process: None,
+            repository_history: None,
             revision: 0,
             last_edit: None,
             points,
@@ -278,6 +281,7 @@ impl Buffer {
         self.process_repository()
             .or_else(|| self.status_repository())
             .or_else(|| self.comparison().map(|comparison| comparison.repository))
+            .or_else(|| self.history_query().map(|query| query.repository().clone()))
     }
 
     pub fn sections(&self) -> Option<std::sync::Arc<crate::section::Sections>> {

@@ -3,7 +3,7 @@ use super::{
     git::{GitRead, operation_id},
 };
 use crate::buffer::{Buffer, BufferId};
-use crate::commit::{Preparation, Repository, Runtime, Scope};
+use crate::commit::{Action, Preparation, Repository, Runtime, Scope};
 use crate::diff::{Comparison, Diff, DiffKind, RenderedDiff};
 use crate::input::DisplayId;
 use crate::session::ReadKind;
@@ -46,6 +46,16 @@ impl AppShell {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.prepare_commit_action(Action::Create, origin, window, cx);
+    }
+
+    pub(super) fn prepare_commit_action(
+        &mut self,
+        action: Action,
+        origin: &Entity<BufferView>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         if !self.git_available(origin, cx)
             || self.minibuffer.is_some()
             || !origin.read(cx).git_open_ready()
@@ -60,6 +70,7 @@ impl AppShell {
             );
             return;
         }
+        let initial = origin.read(cx).buffer().history_commit();
         let repository = origin.read(cx).buffer().repository();
         let directory = self.default_directory_for(origin, cx);
         let origin = origin.clone();
@@ -95,9 +106,15 @@ impl AppShell {
                 .spawn(async move {
                     let repository = match repository {
                         Some(repository) => repository,
-                        None => crate::git::discover(&directory, &worker_cancelled)?,
+                        None => crate::git::ReadEnvironment::Commit
+                            .discover(&directory, &worker_cancelled)?,
                     };
-                    match crate::commit::prepare(&repository, &worker_cancelled)? {
+                    let preparation = if matches!(action, Action::Amend | Action::Reword) {
+                        Preparation::Staged
+                    } else {
+                        crate::commit::prepare(&repository, &worker_cancelled)?
+                    };
+                    match preparation {
                         Preparation::Staged => Ok(Prepared::Staged(repository)),
                         Preparation::Merge => Ok(Prepared::Merge(repository)),
                         Preparation::All => {
@@ -145,7 +162,11 @@ impl AppShell {
                             let target = shell.active_view().clone();
                             shell.begin_read(
                                 ReadKind::CommitAll {
-                                    repository,
+                                    request: crate::commit::Request {
+                                        repository,
+                                        action,
+                                        initial,
+                                    },
                                     pane,
                                     buffer,
                                 },
@@ -157,7 +178,13 @@ impl AppShell {
                         }
                         Ok(Prepared::Merge(repository)) => {
                             shell.begin_read(
-                                ReadKind::CommitMerge { repository },
+                                ReadKind::CommitMerge {
+                                    request: crate::commit::Request {
+                                        repository,
+                                        action,
+                                        initial,
+                                    },
+                                },
                                 &origin,
                                 "",
                                 window,
@@ -165,7 +192,16 @@ impl AppShell {
                             );
                         }
                         Ok(Prepared::Staged(repository)) => {
-                            shell.launch_commit(repository, Scope::Staged, window, cx);
+                            shell.continue_commit_action(
+                                crate::commit::Request {
+                                    repository,
+                                    action,
+                                    initial,
+                                },
+                                Scope::Staged,
+                                window,
+                                cx,
+                            );
                         }
                         Err(error) => shell.show_message(&origin, error, cx),
                     }
@@ -192,7 +228,7 @@ impl AppShell {
 
     pub(super) fn answer_commit_all(
         &mut self,
-        repository: Repository,
+        request: crate::commit::Request,
         preview: (u64, BufferId),
         accepted: bool,
         window: &mut Window,
@@ -207,7 +243,7 @@ impl AppShell {
             self.quit_temporary_pane(pane, window, cx);
         }
         if accepted {
-            self.launch_commit(repository, Scope::All, window, cx);
+            self.continue_commit_action(request, Scope::All, window, cx);
         }
     }
 

@@ -352,6 +352,17 @@ impl AppShell {
                     self.answer_commit_prompt(operation, request, input, &target, window, cx);
                 }
             }
+            ReadKind::HistoryFileVersion { versions } => {
+                let input = self.session_input(cx).unwrap_or_default();
+                let Some(version) = versions.into_iter().find(|version| version.name == input)
+                else {
+                    self.message_minibuffer("No match", cx);
+                    return;
+                };
+                if let Some(target) = self.end_session(id, window, cx) {
+                    self.visit_git_location(version.visit, &target, window, cx);
+                }
+            }
             ReadKind::FindFile => self.confirm_find_file(id, window, cx),
             ReadKind::WriteFile => self.confirm_write_file(id, window, cx),
             ReadKind::SwitchToBuffer { default } => {
@@ -409,24 +420,30 @@ impl AppShell {
         };
         match kind {
             ReadKind::CommitAll {
-                repository,
+                #[cfg(unix)]
+                request,
                 pane,
                 buffer,
             } => {
                 #[cfg(unix)]
-                self.answer_commit_all(
-                    repository,
-                    (pane, buffer),
-                    answer == Answer::Yes,
-                    window,
-                    cx,
-                );
+                self.answer_commit_all(request, (pane, buffer), answer == Answer::Yes, window, cx);
             }
-            ReadKind::CommitMerge { repository } =>
+            ReadKind::CommitMerge {
+                #[cfg(unix)]
+                request,
+            } =>
             {
                 #[cfg(unix)]
                 if answer == Answer::Yes {
-                    self.launch_commit(repository, crate::commit::Scope::Staged, window, cx);
+                    self.continue_commit_action(request, crate::commit::Scope::Staged, window, cx);
+                }
+            }
+            #[cfg(unix)]
+            ReadKind::CommitPublished { next, merges, .. } => {
+                if answer == Answer::Yes {
+                    self.continue_checked_commit(next, merges, window, cx);
+                } else {
+                    self.show_message(&target, "Abort", cx);
                 }
             }
             ReadKind::CommitYesNo {

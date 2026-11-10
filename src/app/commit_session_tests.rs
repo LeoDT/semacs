@@ -23,6 +23,7 @@ fn repository(name: &str) -> Repository {
 fn session(operation: u64, repository: Repository, active: bool, target: EditorTarget) -> Session {
     Session {
         scope: crate::commit::Scope::Staged,
+        intent: crate::commit::Intent::Create,
         record: CommitRecord {
             operation,
             repository,
