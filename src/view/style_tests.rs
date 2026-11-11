@@ -119,7 +119,123 @@ fn mapped_fonts_keep_local_reflow_during_pending_syntax(cx: &mut TestAppContext)
     });
     redraw(&mut visual);
     redraw(&mut visual);
+    visual.read(|cx| {
+        let view = view.read(cx);
+        assert!(view.layout_ready());
+        assert_eq!(view.settings.typography.font_at(1).bold, None);
+        assert!(view.index.as_ref().unwrap().scanned_bytes() < PREVIEW_BYTES);
+    });
+}
+
+#[gpui_kit::test]
+fn syntax_publication_without_emphasis_change_keeps_shaped_rows(cx: &mut TestAppContext) {
+    let (mut visual, view) = open_buffer(
+        document("styles.rs", &"// note\nfn main() {}\n".repeat(500)),
+        cx,
+    );
+    set_keyword_style(&mut visual, true);
+    redraw(&mut visual);
+    redraw(&mut visual);
+    let mut input = handler(&view, &visual);
+    let before = visual.update(|window, cx| {
+        input.replace_text_in_range(None, "x", window, cx);
+        window.draw(cx).clear(cx);
+        let view = view.read(cx);
+        assert!(!view.syntax_ready());
+        (
+            view.cache.clone(),
+            view.index.as_ref().unwrap().key().clone(),
+        )
+    });
+    redraw(&mut visual);
+    redraw(&mut visual);
+    visual.read(|cx| {
+        let view = view.read(cx);
+        assert!(view.syntax_ready());
+        assert!(view.layout_ready());
+        assert_eq!(view.settings.typography.font_at(9).bold, Some(true));
+        assert_ne!(view.settings.typography, before.1.settings.typography);
+        assert!(view.emphasis_work.is_none());
+        assert!(view.emphasis_result.is_none());
+        assert!(
+            view.cache
+                .iter()
+                .all(|(row, shaped)| Arc::ptr_eq(shaped, &before.0[row]))
+        );
+    });
+}
+
+#[gpui_kit::test]
+fn resize_while_emphasis_comparison_is_pending_keeps_paint_layout(cx: &mut TestAppContext) {
+    let (mut visual, view) = open_buffer(
+        document("styles.rs", &"fn example() { let n = 42; }\n".repeat(200)),
+        cx,
+    );
+    set_keyword_style(&mut visual, true);
+    redraw(&mut visual);
+    redraw(&mut visual);
+    visual.update(|window, cx| {
+        view.update(cx, |view, cx| {
+            let display = view.display_snapshot().id();
+            let pending = view.typography(cx);
+            let mut bounds = view.viewport_layout().unwrap().bounds().inset(px(-8.));
+            bounds.size.width = (bounds.size.width - px(80.)).max(px(1.));
+            // Force the "typography differs" branch with a comparison in flight.
+            view.settings.typography = crate::display::Typography::default();
+            let task = cx.spawn(async move |_, _| std::future::pending::<()>().await);
+            view.emphasis_work = Some(super::EmphasisWork {
+                display,
+                typography: pending,
+                _work: super::BackgroundWork {
+                    cancelled: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+                    _task: task,
+                },
+            });
+            view.prepare(bounds, window, cx);
+            assert!(view.emphasis_work.is_none());
+            assert!(view.viewport_layout().is_some());
+            assert!(!view.paint_layout().unwrap().rows.is_empty());
+        });
+    });
+    redraw(&mut visual);
     visual.read(|cx| assert!(view.read(cx).layout_ready()));
+}
+
+#[gpui_kit::test]
+fn markdown_heading_publication_keeps_rows_when_emphasis_matches(cx: &mut TestAppContext) {
+    let text = format!(
+        "{}# Heading\n{}",
+        "normal paragraph text here\n".repeat(3),
+        "plain text line\n".repeat(300),
+    );
+    let (mut visual, view) = open_buffer(document("notes.md", &text), cx);
+    redraw(&mut visual);
+    redraw(&mut visual);
+    let mut input = handler(&view, &visual);
+    let before = visual.update(|window, cx| {
+        input.replace_text_in_range(None, "x", window, cx);
+        window.draw(cx).clear(cx);
+        let view = view.read(cx);
+        assert!(!view.syntax_ready());
+        assert!((82..90).any(|offset| view.settings.typography.font_at(offset).bold == Some(true)));
+        (view.cache.clone(), view.settings.typography.clone())
+    });
+    redraw(&mut visual);
+    redraw(&mut visual);
+    visual.read(|cx| {
+        let view = view.read(cx);
+        assert!(view.syntax_ready());
+        assert!(view.layout_ready());
+        assert!((82..90).any(|offset| view.settings.typography.font_at(offset).bold == Some(true)));
+        assert_ne!(view.settings.typography, before.1);
+        assert!(view.emphasis_work.is_none());
+        assert!(view.emphasis_result.is_none());
+        assert!(
+            view.cache
+                .iter()
+                .all(|(row, shaped)| Arc::ptr_eq(shaped, &before.0[row]))
+        );
+    });
 }
 
 #[gpui_kit::test]

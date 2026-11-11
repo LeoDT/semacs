@@ -15,12 +15,15 @@ use crate::appearance::FontSettings;
 use crate::buffer::{Buffer, BufferSnapshot};
 use crate::command::{Command, Scope};
 use crate::command_registry::CommandId;
-use crate::display::{FontMeasure, IndexedRow, LayoutKey, LayoutSettings, WrapIndex, WrapJob};
+use crate::display::{
+    EmphasisChange, FontMeasure, IndexedRow, LayoutKey, LayoutSettings, Typography, WrapIndex,
+    WrapJob,
+};
 use crate::editing::{
     CommandOutcome, CommandViewport, EditTarget, InputDisposition, KillRing, RecenterPosition,
     RouteError, TAB_WIDTH, ViewportRequest,
 };
-use crate::input::{DisplayChange, DisplaySnapshot, SessionToken};
+use crate::input::{DisplayChange, DisplayId, DisplaySnapshot, SessionToken};
 use crate::keymap::Keymap;
 use crate::platform::{BufferInputHandler, InputOperation};
 use crate::text::ByteOffset;
@@ -81,6 +84,19 @@ impl Drop for BackgroundWork {
     fn drop(&mut self) {
         self.cancelled.store(true, Ordering::Relaxed);
     }
+}
+
+struct EmphasisWork {
+    display: DisplayId,
+    typography: Typography,
+    _work: BackgroundWork,
+}
+
+struct EmphasisResult {
+    display: DisplayId,
+    previous: Typography,
+    typography: Typography,
+    change: Option<EmphasisChange>,
 }
 
 struct RowPart {
@@ -353,6 +369,8 @@ pub struct BufferView {
     metrics: Option<FontMeasure>,
     index: Option<WrapIndex>,
     layout_work: Option<BackgroundWork>,
+    emphasis_work: Option<EmphasisWork>,
+    emphasis_result: Option<EmphasisResult>,
     shape_work: Option<BackgroundWork>,
     shape_range: Option<(LayoutKey, Range<usize>)>,
     cache: HashMap<usize, Arc<ShapedRow>>,
@@ -416,6 +434,8 @@ impl BufferView {
             metrics: None,
             index: None,
             layout_work: None,
+            emphasis_work: None,
+            emphasis_result: None,
             shape_work: None,
             shape_range: None,
             cache: HashMap::new(),
@@ -882,6 +902,149 @@ impl BufferView {
         )
     }
 
+    fn emphasis_precondition(
+        &self,
+        snapshot: &DisplaySnapshot,
+        typography: &Typography,
+    ) -> Option<Typography> {
+        let index = self.index.as_ref()?;
+        if index.key().display != snapshot.id()
+            || !index.is_complete()
+            || index.is_projected()
+            || !self.settings.same_non_typography(&index.key().settings)
+        {
+            return None;
+        }
+        let previous = &index.key().settings.typography;
+        // Theme changes, empty snapshots and first publications stay on the
+        // synchronous rebuild path; only a changed non-empty snapshot is diffed.
+        if !typography.changed_syntax_snapshot(previous)
+            || !typography.same_layout_except_emphasis(previous)
+        {
+            return None;
+        }
+        Some(previous.clone())
+    }
+
+    fn spawn_emphasis_change(
+        &mut self,
+        display: DisplayId,
+        previous: Typography,
+        typography: Typography,
+        cx: &mut Context<Self>,
+    ) {
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let worker_cancel = cancelled.clone();
+        let next = typography.clone();
+        let old = previous.clone();
+        let worker = cx
+            .background_executor()
+            .spawn(async move { next.syntax_emphasis_change_with(&previous, &worker_cancel) });
+        let expected = typography.clone();
+        let task = cx.spawn(async move |view, cx| {
+            let change = worker.await;
+            view.update(cx, |view, cx| {
+                let current = view
+                    .emphasis_work
+                    .as_ref()
+                    .is_some_and(|work| work.display == display && work.typography == expected);
+                if current {
+                    view.emphasis_result = Some(EmphasisResult {
+                        display,
+                        previous: old,
+                        typography: expected.clone(),
+                        change,
+                    });
+                    cx.notify();
+                }
+            })
+            .ok();
+        });
+        self.emphasis_work = Some(EmphasisWork {
+            display,
+            typography,
+            _work: BackgroundWork {
+                cancelled,
+                _task: task,
+            },
+        });
+    }
+
+    fn anchor_style_scroll(&mut self) {
+        if self.style_scroll_anchor.is_some() {
+            return;
+        }
+        let display = self.display_snapshot().id();
+        let Some(index) = self
+            .index
+            .as_ref()
+            .filter(|index| index.key().display == display)
+        else {
+            return;
+        };
+        let line_height = index.key().settings.line_height;
+        let first = (f32::from(self.scroll.y) / f32::from(line_height)).floor() as usize;
+        if let Some(row) = index.row(first) {
+            self.style_scroll_anchor =
+                Some((row.start, self.scroll.y - line_height * first as f32));
+        }
+    }
+
+    fn apply_emphasis_change(
+        &mut self,
+        change: EmphasisChange,
+        snapshot: DisplaySnapshot,
+        typography: Typography,
+        bounds: Bounds<Pixels>,
+        cx: &mut Context<Self>,
+    ) {
+        match change {
+            EmphasisChange::Unchanged => {
+                self.settings.typography = typography;
+                self.layout_work = None;
+                self.shape_work = None;
+                self.shape_range = None;
+                self.retain_paint_layout();
+                if self
+                    .metrics
+                    .as_ref()
+                    .is_none_or(|metrics| *metrics.settings() != self.settings)
+                {
+                    self.metrics = Some(FontMeasure::new(
+                        cx.text_system().clone(),
+                        self.settings.clone(),
+                    ));
+                }
+                let previous = self.index.take().expect("emphasis change needs an index");
+                let key = LayoutKey {
+                    display: snapshot.id(),
+                    settings: self.settings.clone(),
+                };
+                self.index = Some(previous.rekey(key));
+            }
+            EmphasisChange::Changed(dirty) => {
+                let previous = self.index.take().expect("emphasis change needs an index");
+                if let Some(row) = previous.row_for_offset(ByteOffset(dirty.start)) {
+                    self.cache.retain(|index, _| *index < row.index);
+                } else {
+                    self.cache.clear();
+                }
+                self.settings.typography = typography;
+                self.layout_work = None;
+                self.shape_work = None;
+                self.shape_range = None;
+                self.retain_paint_layout();
+                let job = WrapJob::reuse_range(snapshot, self.settings.clone(), &previous, dirty);
+                cx.background_executor()
+                    .spawn(async move {
+                        drop(previous);
+                    })
+                    .detach();
+                self.start_index(job, bounds, cx);
+            }
+        }
+    }
+
     fn ensure_index(&mut self, bounds: Bounds<Pixels>, cx: &mut Context<Self>) {
         #[cfg(feature = "native-profiler")]
         let _trace = crate::preparation_trace::Span::new("ensure-index", 0);
@@ -892,19 +1055,48 @@ impl BufferView {
             .map(|sections| sections.visible_lines());
         let snapshot = self.display_snapshot();
         let typography = self.typography(cx);
-        if typography != self.settings.typography
-            && self.style_scroll_anchor.is_none()
-            && let Some(index) = &self.index
-            && index.key().display == snapshot.id()
-        {
-            let first = (f32::from(self.scroll.y) / f32::from(index.key().settings.line_height))
-                .floor() as usize;
-            if let Some(row) = index.row(first) {
-                self.style_scroll_anchor = Some((
-                    row.start,
-                    self.scroll.y - index.key().settings.line_height * first as f32,
-                ));
+        if typography == self.settings.typography {
+            self.emphasis_work = None;
+            self.emphasis_result = None;
+        } else {
+            let mut rebuild = false;
+            if let Some(result) = self.emphasis_result.take() {
+                self.emphasis_work = None;
+                if result.display == snapshot.id()
+                    && result.typography == typography
+                    && self
+                        .emphasis_precondition(&snapshot, &typography)
+                        .is_some_and(|previous| previous == result.previous)
+                {
+                    if let Some(change) = result.change {
+                        self.apply_emphasis_change(change, snapshot, typography, bounds, cx);
+                        return;
+                    }
+                    rebuild = true;
+                }
             }
+            if !rebuild {
+                let unchanged_inputs = self.index.as_ref().is_some_and(|index| {
+                    index.key().display == snapshot.id()
+                        && index.key().settings.same_non_typography(&self.settings)
+                });
+                if unchanged_inputs
+                    && self.emphasis_work.as_ref().is_some_and(|work| {
+                        work.display == snapshot.id() && work.typography == typography
+                    })
+                {
+                    return;
+                }
+                self.emphasis_work = None;
+                if let Some(previous) = self.emphasis_precondition(&snapshot, &typography) {
+                    self.anchor_style_scroll();
+                    self.spawn_emphasis_change(snapshot.id(), previous, typography, cx);
+                    return;
+                }
+            } else {
+                self.emphasis_work = None;
+            }
+            self.anchor_style_scroll();
         }
         self.settings.typography = typography;
         let key = LayoutKey {
@@ -919,6 +1111,16 @@ impl BufferView {
         self.shape_range = None;
         self.cache.clear();
         self.retain_paint_layout();
+        let job = WrapJob::new(
+            snapshot,
+            self.settings.clone(),
+            self.reflow_base.as_ref().or(self.index.as_ref()),
+            self.pending_change.as_ref(),
+        );
+        self.start_index(job, bounds, cx);
+    }
+
+    fn start_index(&mut self, job: WrapJob, bounds: Bounds<Pixels>, cx: &mut Context<Self>) {
         if self
             .metrics
             .as_ref()
@@ -929,12 +1131,6 @@ impl BufferView {
                 self.settings.clone(),
             ));
         }
-        let job = WrapJob::new(
-            snapshot,
-            self.settings.clone(),
-            self.reflow_base.as_ref().or(self.index.as_ref()),
-            self.pending_change.as_ref(),
-        );
         let visible_rows = visible_row_count(bounds.size.height, self.settings.line_height) + 1;
         let preview = job.preview(self.metrics.as_mut().unwrap(), visible_rows, PREVIEW_BYTES);
         let complete = preview.is_complete();
@@ -1010,7 +1206,8 @@ impl BufferView {
         self.split_geometry_ready = true;
         self.ensure_index(bounds, cx);
         let index = self.index.as_ref().unwrap();
-        if let Some((offset, remainder)) = self.style_scroll_anchor
+        if self.emphasis_work.is_none()
+            && let Some((offset, remainder)) = self.style_scroll_anchor
             && let Some(row) = index.row_for_offset(offset)
         {
             self.scroll.y = self.settings.line_height * row.index as f32 + remainder;

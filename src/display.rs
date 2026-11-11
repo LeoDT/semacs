@@ -15,6 +15,7 @@ use unicode_segmentation::{GraphemeCursor, GraphemeIncomplete};
 #[cfg(test)]
 mod style_tests;
 mod typography;
+pub(crate) use typography::EmphasisChange;
 pub use typography::{FontSpan, Typography};
 
 pub use crate::input::DisplayChange;
@@ -35,14 +36,18 @@ pub struct LayoutSettings {
 }
 
 impl LayoutSettings {
-    fn compatible_after_edit(&self, other: &Self) -> bool {
+    /// Font, size, wrap width and projections that do not depend on typography.
+    pub(crate) fn same_non_typography(&self, other: &Self) -> bool {
         self.font == other.font
             && self.font_size == other.font_size
             && self.line_height == other.line_height
             && self.wrap_width == other.wrap_width
             && self.tab_size == other.tab_size
-            && self.typography.compatible_after_edit(&other.typography)
             && self.visible_lines == other.visible_lines
+    }
+
+    fn compatible_after_edit(&self, other: &Self) -> bool {
+        self.same_non_typography(other) && self.typography.compatible_after_edit(&other.typography)
     }
 
     pub fn validate(&self) {
@@ -133,6 +138,15 @@ impl WrapIndex {
     }
     pub fn is_complete(&self) -> bool {
         self.complete
+    }
+    pub(crate) fn is_projected(&self) -> bool {
+        self.projected.is_some()
+    }
+    /// Attaches a new layout key to unchanged rows.
+    pub(crate) fn rekey(mut self, key: LayoutKey) -> Self {
+        debug_assert_eq!(self.key.display, key.display);
+        self.key = key;
+        self
     }
     pub fn row_count(&self) -> usize {
         self.projected
@@ -259,9 +273,9 @@ impl WrapJob {
             && previous.key.display.committed.buffer == job.key.display.committed.buffer
             && Self::valid_change(previous.text(), job.snapshot.text(), change)
         {
-            let start = previous.text.offset_to_point(change.old_range.start.0).row;
-            let end = previous.text.offset_to_point(change.old_range.end.0).row;
-            let logical_start = previous.text.point_to_offset(Point::new(start, 0));
+            let start_line = previous.text.offset_to_point(change.old_range.start.0).row;
+            let end_line = previous.text.offset_to_point(change.old_range.end.0).row;
+            let logical_start = previous.text.point_to_offset(Point::new(start_line, 0));
             let at_edit = previous
                 .row_for_offset(change.old_range.start)
                 .expect("edited row");
@@ -270,29 +284,88 @@ impl WrapJob {
             } else {
                 at_edit
             };
-            let start = checkpoint.start.0;
-            job.phase = checkpoint.row.tab_phase;
             job.reuse = Some((previous.clone(), change.clone()));
-            let end = if end < previous.text.max_point().row {
-                previous.text.point_to_offset(Point::new(end + 1, 0))
+            let end = if end_line < previous.text.max_point().row {
+                previous.text.point_to_offset(Point::new(end_line + 1, 0))
             } else {
                 previous.text.len()
             };
-            let mut cursor = previous.rows.cursor::<RowSummary>(());
-            let prefix_rows = previous
-                .row_for_offset(ByteOffset(start))
-                .expect("logical row start")
-                .index;
-            job.prefix = cursor.slice(&ByRow(prefix_rows), Bias::Right);
-            if end < previous.text.len() {
-                cursor.seek_forward(&ByByte(end), Bias::Right);
-                job.suffix = cursor.suffix();
-            }
-            job.range = start
+            Self::reuse_rows(&mut job, previous, checkpoint.start.0, end);
+            job.range = checkpoint.start.0
                 ..(end - (change.old_range.end.0 - change.old_range.start.0)
                     + (change.new_range.end.0 - change.new_range.start.0));
         }
         job
+    }
+
+    /// Same-text reflow: only the logical lines touched by `dirty` are rescanned.
+    ///
+    /// `dirty` must cover the bytes whose effective font emphasis changed; row and
+    /// logical-line boundaries are expanded here so rows outside stay reusable.
+    pub(crate) fn reuse_range(
+        snapshot: DisplaySnapshot,
+        settings: LayoutSettings,
+        previous: &WrapIndex,
+        dirty: Range<usize>,
+    ) -> Self {
+        settings.validate();
+        assert_eq!(
+            previous.key.display,
+            snapshot.id(),
+            "reuse needs the same display"
+        );
+        assert!(
+            previous.complete && previous.projected.is_none(),
+            "reuse needs a complete materialized index"
+        );
+        let mut job = Self {
+            key: LayoutKey {
+                display: snapshot.id(),
+                settings,
+            },
+            range: 0..0,
+            snapshot,
+            prefix: SumTree::new(()),
+            suffix: SumTree::new(()),
+            phase: px(0.),
+            reuse: None,
+        };
+        if dirty.is_empty() {
+            job.suffix = previous.rows.clone();
+            return job;
+        }
+        debug_assert!(dirty.end <= previous.text.len());
+        let Some(row) = previous.row_for_offset(ByteOffset(dirty.start)) else {
+            job.range = 0..previous.text.len();
+            return job;
+        };
+        let start = row.start.0;
+        let last = dirty.end.min(previous.text.len()).saturating_sub(1);
+        let line = previous.text.offset_to_point(last).row;
+        let end = if line + 1 < previous.text.max_point().row {
+            previous.text.point_to_offset(Point::new(line + 1, 0))
+        } else {
+            previous.text.len()
+        };
+        Self::reuse_rows(&mut job, previous, start, end);
+        job.range = start..end;
+        job
+    }
+
+    /// Splits `previous` into rows before a soft row start and rows after a
+    /// logical line start (or text end). Both offsets must be row boundaries.
+    fn reuse_rows(job: &mut Self, previous: &WrapIndex, start: usize, end: usize) {
+        let row = previous
+            .row_for_offset(ByteOffset(start))
+            .expect("reflow row start");
+        debug_assert_eq!(row.start.0, start);
+        job.phase = row.row.tab_phase;
+        let mut cursor = previous.rows.cursor::<RowSummary>(());
+        job.prefix = cursor.slice(&ByRow(row.index), Bias::Right);
+        if end < previous.text.len() {
+            cursor.seek_forward(&ByByte(end), Bias::Right);
+            job.suffix = cursor.suffix();
+        }
     }
 
     fn valid_change(old: &Rope, new: &Rope, change: &DisplayChange) -> bool {

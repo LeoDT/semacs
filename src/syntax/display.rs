@@ -101,6 +101,21 @@ impl DisplayHighlights {
         Arc::ptr_eq(&self.source, &other.source)
     }
 
+    /// Committed text length; display coordinates additionally contain `marked`.
+    pub(crate) fn len(&self) -> usize {
+        self.pieces.summary().0
+    }
+
+    /// Every span projected into display coordinates; the `marked` region itself
+    /// yields no spans and later offsets are shifted by `marked.len()`.
+    pub(crate) fn display_spans(
+        &self,
+        marked: Option<Range<usize>>,
+    ) -> impl Iterator<Item = Span> + '_ {
+        let end = self.len() + marked.as_ref().map_or(0, |range| range.len());
+        self.in_display_range(0..end, marked)
+    }
+
     pub(crate) fn role_mask(&self) -> u32 {
         self.source.role_mask
     }

@@ -1,5 +1,5 @@
 use super::*;
-use crate::buffer::Buffer;
+use crate::buffer::{Buffer, Edit, EditSource};
 use crate::files::{DecodedFile, FileFormat};
 use crate::input::InputSession;
 use crate::theme::{FontEmphasis, StyleOverride, StyleRole, ThemeSettings};
@@ -15,6 +15,235 @@ fn settings() -> LayoutSettings {
         tab_size: 8,
         typography: Typography::default(),
         visible_lines: None,
+    }
+}
+
+fn bold_keyword_theme() -> ThemeSettings {
+    let mut theme = ThemeSettings::default();
+    theme.set_style(
+        StyleRole::SyntaxKeyword,
+        StyleOverride::default()
+            .with_text_attributes(StyleRole::SyntaxKeyword, Some("bold"), None, None, None)
+            .unwrap(),
+    );
+    theme
+}
+
+fn syntax_buffer(text: &str) -> (Buffer, crate::syntax::Syntax) {
+    let buffer = Buffer::new(
+        None,
+        DecodedFile {
+            text: text.into(),
+            format: FileFormat::default(),
+        },
+    );
+    let syntax =
+        crate::syntax::Syntax::new(buffer.snapshot(), Some(std::path::Path::new("sample.rs")));
+    (buffer, syntax)
+}
+
+#[gpui_kit::test]
+fn syntax_emphasis_change_ignores_new_snapshots_with_identical_emphasis(cx: &mut TestAppContext) {
+    let (mut buffer, syntax) = syntax_buffer("// note\nfn main() {}\n");
+    let observer = cx.new(|_| ());
+    cx.update(|cx| syntax.prepare(observer.downgrade().into(), cx));
+    cx.run_until_parked();
+    let theme = bold_keyword_theme();
+    let typography = |snapshot| Typography::new(&theme, Some(snapshot), None, 0, Arc::from([]));
+    let original_snapshot = syntax.display_highlights().unwrap();
+    let original = typography(original_snapshot.clone());
+    assert_eq!(original.font_at(8).bold, Some(true));
+
+    buffer
+        .edit(Edit {
+            snapshot: buffer.snapshot_id(),
+            range: ByteOffset(0)..ByteOffset(0),
+            text: "x",
+            source: EditSource::Command,
+        })
+        .unwrap();
+    syntax.edited(buffer.snapshot(), 0..0, 1);
+    let edited_snapshot = syntax.display_highlights().unwrap();
+    let projected = typography(edited_snapshot.clone());
+    assert_eq!(projected.font_at(9).bold, Some(true));
+
+    cx.update(|cx| syntax.prepare(observer.downgrade().into(), cx));
+    cx.run_until_parked();
+    let published_snapshot = syntax.display_highlights().unwrap();
+    assert!(!Arc::ptr_eq(&edited_snapshot, &published_snapshot));
+    let published = typography(published_snapshot);
+    assert_eq!(published.font_at(9).bold, Some(true));
+    assert_eq!(
+        projected.syntax_emphasis_change(&published),
+        Some(EmphasisChange::Unchanged)
+    );
+
+    // Another layout input (marked range or base emphasis) needs a full rebuild.
+    let marked = Typography::new(
+        &theme,
+        Some(original_snapshot),
+        Some(0..1),
+        0,
+        Arc::from([]),
+    );
+    assert_eq!(marked.syntax_emphasis_change(&original), None);
+    let mut base_theme = theme;
+    base_theme.set_style(
+        StyleRole::Default,
+        StyleOverride::default()
+            .with_text_attributes(StyleRole::Default, Some("bold"), None, None, None)
+            .unwrap(),
+    );
+    let base = Typography::new(
+        &base_theme,
+        syntax.display_highlights(),
+        None,
+        0,
+        Arc::from([]),
+    );
+    assert_eq!(base.syntax_emphasis_change(&published), None);
+}
+
+#[gpui_kit::test]
+fn syntax_emphasis_change_reports_local_keyword_loss(cx: &mut TestAppContext) {
+    let (mut buffer, syntax) = syntax_buffer("fn main() {}\n");
+    let observer = cx.new(|_| ());
+    cx.update(|cx| syntax.prepare(observer.downgrade().into(), cx));
+    cx.run_until_parked();
+    let theme = bold_keyword_theme();
+    let typography = |snapshot| Typography::new(&theme, Some(snapshot), None, 0, Arc::from([]));
+    let original = typography(syntax.display_highlights().unwrap());
+    assert_eq!(original.font_at(0).bold, Some(true));
+
+    buffer
+        .edit(Edit {
+            snapshot: buffer.snapshot_id(),
+            range: ByteOffset(0)..ByteOffset(0),
+            text: "x",
+            source: EditSource::Command,
+        })
+        .unwrap();
+    syntax.edited(buffer.snapshot(), 0..0, 1);
+    let projected = typography(syntax.display_highlights().unwrap());
+    assert_eq!(projected.font_at(1).bold, Some(true));
+
+    cx.update(|cx| syntax.prepare(observer.downgrade().into(), cx));
+    cx.run_until_parked();
+    let published = typography(syntax.display_highlights().unwrap());
+    assert_eq!(published.font_at(1).bold, None);
+    assert_eq!(
+        projected.syntax_emphasis_change(&published),
+        Some(EmphasisChange::Changed(1..3))
+    );
+}
+
+#[test]
+fn reuse_range_rescans_only_dirty_logical_lines() {
+    let text = "abcdefghij\n".repeat(20);
+    let buffer = Buffer::new(
+        None,
+        DecodedFile {
+            text: text.clone(),
+            format: FileFormat::default(),
+        },
+    );
+    let snapshot = InputSession::new(&buffer)
+        .display_snapshot(&buffer)
+        .unwrap();
+    let system = Arc::new(TextSystem::new(Arc::new(
+        crate::test_support::StyledTextSystem::default(),
+    )));
+    let mut settings = settings();
+    settings.wrap_width = px(30.);
+    let mut metrics = FontMeasure::new(system.clone(), settings.clone());
+    let index = WrapJob::new(snapshot.clone(), settings.clone(), None, None)
+        .finish(&mut metrics, &AtomicBool::new(false))
+        .unwrap();
+    assert!(index.is_complete());
+    let rows: Vec<_> = index
+        .visible_rows(0..index.row_count())
+        .into_iter()
+        .map(|row| (row.start, row.row.byte_len, row.row.tab_phase))
+        .collect();
+    let first_row = index.row_for_offset(ByteOffset(11 * 5 + 2)).unwrap().index;
+
+    for dirty in [11 * 5..11 * 5 + 2, text.len() - 3..text.len() - 2] {
+        let job = WrapJob::reuse_range(snapshot.clone(), settings.clone(), &index, dirty);
+        let mut metrics = FontMeasure::new(system.clone(), settings.clone());
+        let result = job.finish(&mut metrics, &AtomicBool::new(false)).unwrap();
+        assert!(result.is_complete());
+        assert_eq!(result.row_count(), index.row_count());
+        assert!(result.scanned_bytes() <= 3 * 11);
+        for (index, expected) in rows.iter().enumerate() {
+            let row = result.row(index).unwrap();
+            if index < first_row {
+                assert_eq!((row.start, row.row.byte_len, row.row.tab_phase), *expected);
+            }
+        }
+    }
+
+    let job = WrapJob::reuse_range(snapshot, settings.clone(), &index, 0..0);
+    let mut metrics = FontMeasure::new(system, settings);
+    let result = job.finish(&mut metrics, &AtomicBool::new(false)).unwrap();
+    assert!(result.is_complete());
+    assert_eq!(result.scanned_bytes(), 0);
+    assert_eq!(result.row_count(), index.row_count());
+}
+
+#[test]
+fn reuse_range_matches_full_rebuild_after_emphasis_width_change() {
+    let text = "AAAAAAAAAAAAAAAAAAAA\n".repeat(6);
+    let buffer = Buffer::new(
+        None,
+        DecodedFile {
+            text: text.clone(),
+            format: FileFormat::default(),
+        },
+    );
+    let snapshot = InputSession::new(&buffer)
+        .display_snapshot(&buffer)
+        .unwrap();
+    let system = Arc::new(TextSystem::new(Arc::new(
+        crate::test_support::StyledTextSystem::default(),
+    )));
+    let mut settings = settings();
+    settings.wrap_width = px(90.);
+    let mut metrics = FontMeasure::new(system.clone(), settings.clone());
+    let original = WrapJob::new(snapshot.clone(), settings.clone(), None, None)
+        .finish(&mut metrics, &AtomicBool::new(false))
+        .unwrap();
+
+    let dirty = 21 * 3 + 4..21 * 3 + 12;
+    let mut emphasized = settings;
+    emphasized.typography = Typography::new(
+        &ThemeSettings::default(),
+        None,
+        None,
+        0,
+        Arc::from([FontSpan {
+            range: dirty.clone(),
+            bold: Some(true),
+            italic: None,
+        }]),
+    );
+    let mut metrics = FontMeasure::new(system.clone(), emphasized.clone());
+    let full = WrapJob::new(snapshot.clone(), emphasized.clone(), None, None)
+        .finish(&mut metrics, &AtomicBool::new(false))
+        .unwrap();
+    let mut metrics = FontMeasure::new(system, emphasized.clone());
+    let reused = WrapJob::reuse_range(snapshot, emphasized, &original, dirty)
+        .finish(&mut metrics, &AtomicBool::new(false))
+        .unwrap();
+    assert!(full.is_complete() && reused.is_complete());
+    assert_eq!(reused.row_count(), full.row_count());
+    assert!(reused.scanned_bytes() < text.len());
+    for index in 0..full.row_count() {
+        let expected = full.row(index).unwrap();
+        let actual = reused.row(index).unwrap();
+        assert_eq!(actual.start, expected.start);
+        assert_eq!(actual.row.byte_len, expected.row.byte_len);
+        assert_eq!(actual.row.content_len, expected.row.content_len);
+        assert_eq!(actual.row.tab_phase, expected.row.tab_phase);
     }
 }
 

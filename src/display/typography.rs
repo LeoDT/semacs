@@ -1,11 +1,15 @@
 use std::ops::Range;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use gpui_kit::TextRun;
 use unicode_segmentation::UnicodeSegmentation;
 
 use crate::syntax::DisplayHighlightSnapshot;
 use crate::theme::{FontEmphasis, StyleRole, ThemeSettings};
+
+/// Emphasis comparison yields to cancellation at this span interval.
+const CANCEL_CHECK: usize = 4096;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct FontSpan {
@@ -65,21 +69,17 @@ impl std::fmt::Debug for Typography {
 
 impl PartialEq for Typography {
     fn eq(&self, other: &Self) -> bool {
-        self.base == other.base
-            && self.prompt == other.prompt
-            && self.prompt_end == other.prompt_end
-            && self.roles == other.roles
-            && self.named_roles == other.named_roles
-            && self.active_section_fonts() == other.active_section_fonts()
-            && (Arc::ptr_eq(&self.named, &other.named) || self.named == other.named)
-            && self.marked == other.marked
-            && match (&self.syntax, &other.syntax) {
-                (None, None) => true,
-                (Some(a), Some(b)) => Arc::ptr_eq(a, b),
-                _ => false,
-            }
-            && (Arc::ptr_eq(&self.overlays, &other.overlays) || self.overlays == other.overlays)
+        self.roles == other.roles
+            && self.same_layout_except_emphasis(other)
+            && self.same_syntax_snapshot(other)
     }
+}
+
+/// Effective emphasis contributed by syntax highlighting, in display coordinates.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum EmphasisChange {
+    Unchanged,
+    Changed(Range<usize>),
 }
 
 impl Typography {
@@ -148,6 +148,92 @@ impl Typography {
 
     fn active_section_fonts(&self) -> Option<&SectionFonts> {
         self.section_fonts.as_deref().filter(|fonts| fonts.changed)
+    }
+
+    /// Both typographies share every layout input except the syntax emphasis spans.
+    pub(crate) fn same_layout_except_emphasis(&self, other: &Self) -> bool {
+        self.base == other.base
+            && self.prompt == other.prompt
+            && self.prompt_end == other.prompt_end
+            && self.named_roles == other.named_roles
+            && self.active_section_fonts() == other.active_section_fonts()
+            && (Arc::ptr_eq(&self.named, &other.named) || self.named == other.named)
+            && self.marked == other.marked
+            && (Arc::ptr_eq(&self.overlays, &other.overlays) || self.overlays == other.overlays)
+    }
+
+    pub(crate) fn same_syntax_snapshot(&self, other: &Self) -> bool {
+        match (&self.syntax, &other.syntax) {
+            (None, None) => true,
+            (Some(a), Some(b)) => Arc::ptr_eq(a, b),
+            _ => false,
+        }
+    }
+
+    /// A different non-empty syntax snapshot; the only change handled incrementally.
+    pub(crate) fn changed_syntax_snapshot(&self, other: &Self) -> bool {
+        match (&self.syntax, &other.syntax) {
+            (Some(a), Some(b)) => !Arc::ptr_eq(a, b),
+            _ => false,
+        }
+    }
+
+    /// Compares only the emphasis contributed by syntax highlighting.
+    ///
+    /// `None` means another layout input differs and the caller must rebuild the
+    /// whole index. `Changed` spans from the first through the last byte whose
+    /// effective bold / italic differs; callers expand it to row boundaries.
+    #[cfg(test)]
+    pub(crate) fn syntax_emphasis_change(&self, other: &Self) -> Option<EmphasisChange> {
+        self.syntax_emphasis_change_with(other, &AtomicBool::new(false))
+    }
+
+    /// Background variant that stops early when `cancelled` is set.
+    pub(crate) fn syntax_emphasis_change_with(
+        &self,
+        other: &Self,
+        cancelled: &AtomicBool,
+    ) -> Option<EmphasisChange> {
+        if self == other {
+            return Some(EmphasisChange::Unchanged);
+        }
+        if !self.same_layout_except_emphasis(other) {
+            return None;
+        }
+        let runs = self.syntax_runs(cancelled)?;
+        let previous = other.syntax_runs(cancelled)?;
+        Some(match emphasis_change_bounds(&runs, &previous, self.base) {
+            Some(range) => EmphasisChange::Changed(range),
+            None => EmphasisChange::Unchanged,
+        })
+    }
+
+    fn syntax_runs(&self, cancelled: &AtomicBool) -> Option<Vec<(Range<usize>, FontEmphasis)>> {
+        let Some(syntax) = &self.syntax else {
+            return Some(Vec::new());
+        };
+        let mut runs = Vec::new();
+        for (count, span) in syntax.display_spans(self.marked.clone()).enumerate() {
+            if count % CANCEL_CHECK == 0 && cancelled.load(Ordering::Relaxed) {
+                return None;
+            }
+            let mut emphasis = self.base;
+            for role in std::iter::once(span.style).chain(span.modifiers.iter().copied()) {
+                let (bold, italic) = self.roles[role as usize];
+                emphasis = FontEmphasis {
+                    bold: bold.or(emphasis.bold),
+                    italic: italic.or(emphasis.italic),
+                };
+            }
+            if emphasis == self.base {
+                continue;
+            }
+            let start = span.range.start.max(self.prompt_end);
+            if start < span.range.end {
+                push_run(&mut runs, start..span.range.end, emphasis);
+            }
+        }
+        Some(runs)
     }
 
     pub(crate) fn with_current_section(
@@ -320,11 +406,104 @@ impl Typography {
     }
 }
 
+fn push_run(
+    runs: &mut Vec<(Range<usize>, FontEmphasis)>,
+    range: Range<usize>,
+    emphasis: FontEmphasis,
+) {
+    if let Some((previous, last_emphasis)) = runs.last_mut()
+        && *last_emphasis == emphasis
+        && previous.end == range.start
+    {
+        previous.end = range.end;
+        return;
+    }
+    runs.push((range, emphasis));
+}
+
+/// First through last position whose effective emphasis differs, if any.
+fn emphasis_change_bounds(
+    a: &[(Range<usize>, FontEmphasis)],
+    b: &[(Range<usize>, FontEmphasis)],
+    base: FontEmphasis,
+) -> Option<Range<usize>> {
+    let mut first = None;
+    let mut last = 0;
+    let (mut i, mut j) = (0, 0);
+    let (mut active_a, mut active_b) = (None, None);
+    let mut position = 0;
+    loop {
+        let next_a = match a.get(i) {
+            Some((range, _)) if active_a.is_some() => range.end,
+            Some((range, _)) => range.start,
+            None => usize::MAX,
+        };
+        let next_b = match b.get(j) {
+            Some((range, _)) if active_b.is_some() => range.end,
+            Some((range, _)) => range.start,
+            None => usize::MAX,
+        };
+        let next = next_a.min(next_b);
+        if next == usize::MAX {
+            break;
+        }
+        if next > position && active_a.unwrap_or(base) != active_b.unwrap_or(base) {
+            first.get_or_insert(position);
+            last = next;
+        }
+        position = next;
+        if next_a == next {
+            if active_a.take().is_none() {
+                active_a = Some(a[i].1);
+            } else {
+                i += 1;
+            }
+        }
+        if next_b == next {
+            if active_b.take().is_none() {
+                active_b = Some(b[j].1);
+            } else {
+                j += 1;
+            }
+        }
+    }
+    first.map(|start| start..last)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::text::ByteOffset as B;
     use crate::theme::StyleOverride;
+
+    #[test]
+    fn emphasis_bounds_cover_first_and_last_difference() {
+        let base = FontEmphasis::default();
+        let bold = FontEmphasis {
+            bold: Some(true),
+            italic: None,
+        };
+        let italic = FontEmphasis {
+            bold: None,
+            italic: Some(true),
+        };
+        assert_eq!(emphasis_change_bounds(&[], &[], base), None);
+        let a = [(0..5, bold)];
+        let b = [(1..3, bold)];
+        assert_eq!(emphasis_change_bounds(&a, &b, base), Some(0..5));
+        assert_eq!(emphasis_change_bounds(&b, &a, base), Some(0..5));
+        let a = [(0..2, bold), (10..12, bold)];
+        let b = [(0..2, italic), (10..12, italic)];
+        assert_eq!(emphasis_change_bounds(&a, &b, base), Some(0..12));
+        let a = [(0..4, bold)];
+        let b = [(0..1, bold), (3..4, bold)];
+        assert_eq!(emphasis_change_bounds(&a, &b, base), Some(1..3));
+        let mut runs = Vec::new();
+        push_run(&mut runs, 0..2, bold);
+        push_run(&mut runs, 2..4, bold);
+        push_run(&mut runs, 4..5, italic);
+        assert_eq!(runs, vec![(0..4, bold), (4..5, italic)]);
+    }
 
     #[test]
     fn current_section_cache_reuses_negative_checks_and_tracks_font_identity() {
