@@ -1,3 +1,5 @@
+use std::ops::Range;
+
 use crate::text::ByteOffset;
 
 use super::RouteError;
@@ -32,7 +34,18 @@ pub struct PageMotion {
     pub first_row: usize,
 }
 
+/// The display row holding point and, when the buffer continues in the motion
+/// direction, its neighbour. Ranges exclude the row's line break.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RowMotion {
+    pub current: Range<ByteOffset>,
+    pub target: Option<Range<ByteOffset>>,
+}
+
 /// A read-only, display-compatible viewport supplied by the command caller.
 pub trait CommandViewport {
     fn page(&self, point: ByteOffset, forward: bool) -> Result<PageMotion, RouteError>;
+    /// One display row up or down, so vertical motion follows soft wrapping.
+    /// `target` is `None` at the buffer edge.
+    fn adjacent_row(&self, point: ByteOffset, forward: bool) -> Result<RowMotion, RouteError>;
 }

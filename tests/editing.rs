@@ -799,7 +799,7 @@ fn recenter_cycles_without_changing_point_mark_or_text() {
 
 #[test]
 fn paging_requires_a_viewport_and_still_obeys_all_target_guards() {
-    use semacs::editing::{CommandViewport, PageMotion, ViewportRequest};
+    use semacs::editing::{CommandViewport, PageMotion, RowMotion, ViewportRequest};
     struct Page;
     impl CommandViewport for Page {
         fn page(&self, _: ByteOffset, _: bool) -> Result<PageMotion, RouteError> {
@@ -807,6 +807,9 @@ fn paging_requires_a_viewport_and_still_obeys_all_target_guards() {
                 point: ByteOffset(2),
                 first_row: 3,
             })
+        }
+        fn adjacent_row(&self, _: ByteOffset, _: bool) -> Result<RowMotion, RouteError> {
+            Err(RouteError::LayoutNotReady)
         }
     }
     let mut target = target("abc");

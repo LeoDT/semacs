@@ -81,11 +81,11 @@ fn consecutive_pages_work_without_an_intervening_frame_and_revoke_old_callbacks(
 }
 
 #[gpui::test]
-fn pages_use_visual_rows_even_when_vertical_motion_uses_logical_lines(cx: &mut TestAppContext) {
+fn visual_rows_drive_pages_and_vertical_motion(cx: &mut TestAppContext) {
     let (mut visual, editor) = open(&"中🙂 ".repeat(500), cx);
     visual.simulate_keystrokes("ctrl-v");
     redraw(&mut visual);
-    visual.read(|cx| {
+    let next = visual.read(|cx| {
         let view = editor.read(cx);
         assert!(view.buffer().point().0 > 0);
         assert!(
@@ -99,16 +99,151 @@ fn pages_use_visual_rows_even_when_vertical_motion_uses_logical_lines(cx: &mut T
         let row = index.row_for_offset(view.buffer().point()).unwrap();
         assert_eq!(view.buffer().point(), row.start);
         assert_eq!(view.message(), None);
+        index.row(row.index + 1).unwrap().start
     });
     visual.simulate_keystrokes("ctrl-n");
     redraw(&mut visual);
     visual.read(|cx| {
         let view = editor.read(cx);
+        assert_eq!(view.buffer().point(), next);
+        assert_eq!(view.message(), None);
+        assert!(!view.buffer().is_modified());
+    });
+}
+
+#[gpui::test]
+fn vertical_motion_keeps_the_column_within_a_visual_row(cx: &mut TestAppContext) {
+    let (mut visual, editor) = open(&"0123456789".repeat(200), cx);
+    let (second, third) = visual.read(|cx| {
+        let index = editor.read(cx).wrap_index().unwrap();
+        assert!(index.is_complete());
+        assert!(index.row(1).unwrap().start.0 > 3);
+        (index.row(1).unwrap().start.0, index.row(2).unwrap().start.0)
+    });
+    visual.simulate_keystrokes("ctrl-f ctrl-f ctrl-f");
+    redraw(&mut visual);
+    for (keys, expected) in [
+        ("ctrl-n", second + 3),
+        ("ctrl-n", third + 3),
+        ("ctrl-p", second + 3),
+        ("ctrl-p", 3),
+    ] {
+        visual.simulate_keystrokes(keys);
+        redraw(&mut visual);
+        visual.read(|cx| {
+            let view = editor.read(cx);
+            assert_eq!(view.buffer().point(), ByteOffset(expected), "{keys}");
+            assert_eq!(view.message(), None);
+        });
+    }
+    // A boundary error keeps the goal column; an interrupting command
+    // recomputes it from the row the point now belongs to.
+    visual.simulate_keystrokes("ctrl-f");
+    redraw(&mut visual);
+    visual.simulate_keystrokes("ctrl-p");
+    redraw(&mut visual);
+    visual.read(|cx| {
+        let view = editor.read(cx);
+        assert_eq!(view.buffer().point(), ByteOffset(0));
+        assert_eq!(view.message(), Some("Beginning of buffer"));
+    });
+    visual.simulate_keystrokes("ctrl-n");
+    redraw(&mut visual);
+    visual.read(|cx| {
         assert_eq!(
-            view.buffer().point(),
-            ByteOffset(view.buffer().text().len())
+            editor.read(cx).buffer().point(),
+            ByteOffset(second + 4),
+            "goal survives a boundary error"
         );
-        assert_eq!(view.message(), Some("End of buffer"));
+    });
+    visual.simulate_keystrokes("ctrl-f ctrl-p");
+    redraw(&mut visual);
+    visual.read(|cx| {
+        let view = editor.read(cx);
+        assert_eq!(view.buffer().point(), ByteOffset(5));
+        assert_eq!(view.message(), None);
+    });
+}
+
+#[gpui::test]
+fn vertical_motion_clamps_to_a_shorter_visual_row(cx: &mut TestAppContext) {
+    let (mut visual, editor) = open(&"0123456789".repeat(200), cx);
+    let (start, end) = visual.read(|cx| {
+        let index = editor.read(cx).wrap_index().unwrap();
+        let last = index.row(index.row_count() - 1).unwrap();
+        let previous = index.row(last.index - 1).unwrap();
+        assert!(previous.row.content_len > last.row.content_len);
+        (
+            previous.start.0 + previous.row.content_len - 1,
+            last.start.0 + last.row.content_len,
+        )
+    });
+    editor.update(&mut visual, |view, _| {
+        view.target
+            .set_point_from_pointer(view.target.token(), ByteOffset(start))
+            .unwrap();
+    });
+    visual.simulate_keystrokes("ctrl-n");
+    redraw(&mut visual);
+    visual.read(|cx| {
+        let view = editor.read(cx);
+        assert_eq!(view.buffer().point(), ByteOffset(end));
+        assert_eq!(view.message(), None);
+    });
+}
+
+#[gpui::test]
+fn visual_motion_reports_boundaries_only_for_a_complete_index(cx: &mut TestAppContext) {
+    use crate::display::{FontMeasure, WrapJob};
+    use crate::editing::{CommandViewport, RouteError};
+
+    let (visual, editor) = open(&"abcdef\n".repeat(10), cx);
+    visual.read(|cx| {
+        let view = editor.read(cx);
+        let settings = view.settings.clone();
+        let mut metrics = FontMeasure::new(cx.text_system().clone(), settings.clone());
+        let index = WrapJob::new(view.display_snapshot(), settings.clone(), None, None).preview(
+            &mut metrics,
+            2,
+            8192,
+        );
+        assert!(!index.is_complete());
+        let viewport = super::motion::Viewport {
+            index: &index,
+            first_row: 0,
+            visible_rows: 2,
+        };
+        let motion = viewport.adjacent_row(ByteOffset(0), true).unwrap();
+        assert_eq!(motion.current, ByteOffset(0)..ByteOffset(6));
+        assert_eq!(motion.target, Some(ByteOffset(7)..ByteOffset(13)));
+        let last = index.row(index.row_count() - 1).unwrap();
+        assert_eq!(
+            viewport.adjacent_row(last.start, true).err(),
+            Some(RouteError::LayoutNotReady)
+        );
+        assert_eq!(
+            viewport.adjacent_row(ByteOffset(0), false).err(),
+            Some(RouteError::LayoutNotReady)
+        );
+    });
+    visual.read(|cx| {
+        let view = editor.read(cx);
+        let index = view.wrap_index().unwrap();
+        assert!(index.is_complete());
+        let viewport = super::motion::Viewport {
+            index,
+            first_row: 0,
+            visible_rows: 2,
+        };
+        assert_eq!(
+            viewport.adjacent_row(ByteOffset(0), false).unwrap().target,
+            None
+        );
+        let last = index.row(index.row_count() - 1).unwrap();
+        assert_eq!(
+            viewport.adjacent_row(last.start, true).unwrap().target,
+            None
+        );
     });
 }
 

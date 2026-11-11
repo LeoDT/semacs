@@ -1,7 +1,7 @@
 use gpui_kit::{Bounds, Pixels};
 
 use crate::display::{LayoutSettings, WrapIndex};
-use crate::editing::{CommandViewport, PageMotion, RouteError};
+use crate::editing::{CommandViewport, PageMotion, RouteError, RowMotion};
 use crate::input::DisplayId;
 use crate::text::ByteOffset;
 
@@ -81,5 +81,28 @@ impl CommandViewport for Viewport<'_> {
             index.row(target).ok_or(RouteError::LayoutNotReady)?.start
         };
         Ok(PageMotion { point, first_row })
+    }
+
+    fn adjacent_row(&self, point: ByteOffset, forward: bool) -> Result<RowMotion, RouteError> {
+        let index = self.index;
+        let row = index
+            .row_for_offset(point)
+            .ok_or(RouteError::LayoutNotReady)?;
+        let current = row.start..ByteOffset(row.start.0 + row.row.content_len);
+        let target = if forward {
+            index.row(row.index + 1)
+        } else {
+            row.index
+                .checked_sub(1)
+                .and_then(|previous| index.row(previous))
+        };
+        // A missing row is a buffer edge only once the index covers the text;
+        // before that it may simply lie beyond the scanned prefix.
+        let target = match target {
+            Some(target) => Some(target.start..ByteOffset(target.start.0 + target.row.content_len)),
+            None if index.is_complete() => None,
+            None => return Err(RouteError::LayoutNotReady),
+        };
+        Ok(RowMotion { current, target })
     }
 }

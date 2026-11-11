@@ -12,7 +12,7 @@ use crate::input::{
     DisplayChange, DisplaySnapshot, InputError, InputSession, InputUpdate, SessionToken,
 };
 use crate::keymap::{Dispatch, Keymap, KeymapState};
-use crate::text::{ByteOffset, OffsetUtf16, Point};
+use crate::text::{ByteOffset, OffsetUtf16, Point, Rope};
 
 mod column;
 mod field;
@@ -26,7 +26,7 @@ mod viewport;
 pub(crate) use transform::RegionTransform;
 
 pub use kill_ring::KillRing;
-pub use viewport::{CommandViewport, PageMotion, RecenterPosition, ViewportRequest};
+pub use viewport::{CommandViewport, PageMotion, RecenterPosition, RowMotion, ViewportRequest};
 
 pub(crate) const TAB_WIDTH: u32 = 8;
 
@@ -483,28 +483,19 @@ impl EditTarget {
                 ))?;
             }
             Command::NextLine | Command::PreviousLine => {
-                let goal = *self
-                    .goal_column
-                    .get_or_insert_with(|| motion::goal(text, point));
-                let row = text.offset_to_point(point.0).row;
-                let destination = if let Some(sections) = self.buffer.sections() {
-                    sections
-                        .adjacent_line(point, command == Command::NextLine)
-                        .map(|offset| text.offset_to_point(offset.0).row)
-                } else if command == Command::NextLine {
-                    (row < text.max_point().row).then_some(row + 1)
-                } else {
-                    row.checked_sub(1)
+                let forward = command == Command::NextLine;
+                let Some(destination) =
+                    self.vertical_destination(text, point, forward, viewport)?
+                else {
+                    self.buffer
+                        .set_point(ByteOffset(if forward { text.len() } else { 0 }))?;
+                    return Err(if forward {
+                        RouteError::EndOfBuffer
+                    } else {
+                        RouteError::BeginningOfBuffer
+                    });
                 };
-                if let Some(row) = destination {
-                    self.buffer.set_point(motion::line(text, row, goal))?;
-                } else if command == Command::NextLine {
-                    self.buffer.set_point(ByteOffset(text.len()))?;
-                    return Err(RouteError::EndOfBuffer);
-                } else {
-                    self.buffer.set_point(ByteOffset(0))?;
-                    return Err(RouteError::BeginningOfBuffer);
-                }
+                self.buffer.set_point(destination)?;
             }
             Command::BeginningOfBuffer | Command::EndOfBuffer => {
                 let destination = if command == Command::BeginningOfBuffer {
@@ -630,6 +621,48 @@ impl EditTarget {
             reveal_point: true,
             ..CommandOutcome::default()
         })
+    }
+
+    /// The destination one line away: a display row when the caller supplied a
+    /// viewport over soft-wrapped text, otherwise the sections projection or a
+    /// logical row. `None` means there is no line in that direction.
+    fn vertical_destination(
+        &mut self,
+        text: &Rope,
+        point: ByteOffset,
+        forward: bool,
+        viewport: Option<&dyn CommandViewport>,
+    ) -> Result<Option<ByteOffset>, RouteError> {
+        let sections = self.buffer.sections();
+        let (current, target) = match (sections.as_ref(), viewport) {
+            (None, Some(viewport)) => {
+                let RowMotion { current, target } = viewport.adjacent_row(point, forward)?;
+                (current, target)
+            }
+            _ => {
+                let row = text.offset_to_point(point.0).row;
+                let destination = match &sections {
+                    Some(sections) => sections
+                        .adjacent_line(point, forward)
+                        .map(|offset| text.offset_to_point(offset.0).row),
+                    None if forward => (row < text.max_point().row).then_some(row + 1),
+                    None => row.checked_sub(1),
+                };
+                (
+                    Self::line_range(text, row),
+                    destination.map(|destination| Self::line_range(text, destination)),
+                )
+            }
+        };
+        let goal = *self
+            .goal_column
+            .get_or_insert_with(|| column::column(text, current.start.0..point.0));
+        Ok(target.map(|target| column::offset(text, target.start.0..target.end.0, goal)))
+    }
+
+    fn line_range(text: &Rope, row: u32) -> Range<ByteOffset> {
+        let start = text.point_to_offset(Point::new(row, 0));
+        ByteOffset(start)..ByteOffset(start + text.line_len(row) as usize)
     }
 
     fn replace_command(
