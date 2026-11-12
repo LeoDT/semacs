@@ -12,11 +12,25 @@ impl BufferView {
         self.target.show_point(point);
         self.target.clear_pending();
         self.style_scroll_anchor = None;
-        self.pending_recenter = None;
+        self.pending_scroll = None;
         self.reveal_caret = true;
         self.invalidate_input_registration();
         window.notify_text_selection_changed(&self.focus);
         cx.notify();
+    }
+
+    /// Moves to a section heading. When the section is a hunk that does not fit
+    /// in the window, its heading is pinned to the top
+    /// (`magit-hunk-set-window-start`); the caret reveal still runs, so a
+    /// horizontally scrolled heading is also brought into view.
+    pub(crate) fn show_hunk(
+        &mut self,
+        range: Range<ByteOffset>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.show_location(range.start, window, cx);
+        self.pending_scroll = Some(PendingScroll::Hunk(range));
     }
 
     pub(crate) fn show_line_column(
@@ -60,6 +74,7 @@ impl BufferView {
         anchor: Option<SectionScrollAnchor>,
         cx: &mut Context<Self>,
     ) {
+        self.pending_scroll = None;
         if let (Some((anchor, remainder)), Some(sections)) = (anchor, self.buffer().sections()) {
             self.style_scroll_anchor =
                 Some((sections.resolve(&self.buffer().text(), &anchor), remainder));

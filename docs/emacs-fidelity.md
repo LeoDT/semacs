@@ -48,9 +48,10 @@
 - 词由连续 Unicode 字母 / 数字组成；其余字符作为分隔符，不实现 syntax table 或按文字系统细分词。下划线、组合附加符号和 emoji 均为分隔符；例如 `M-f` 在 `éclair` 中先停在 `e` 后，在 `🙂last` 中直接到 `last` 后，与 Emacs 的精确边界不同。
 - `forward-paragraph` / `backward-paragraph` 按空行或仅含 ASCII 空格 / Tab 的逻辑行分隔段落，不实现 mode-specific 段落正则。向前停在当前段之后首个分隔行的行首，向后停在当前段之前最近分隔行的行首，而不是正文段首。从分隔行出发先越过当前连续空白行，再越过相应方向的一段正文，停在下一处分隔行；无目标时停在 buffer 首尾，重复不报边界错误。含空格 / Tab 的分隔行也停在行首；保留 mark / active，不建历史组，和词移动一样不按 minibuffer field 截断。当前没有默认键位，可通过 JS 配置绑定；不支持数值前缀参数。
 - `C-n` / `C-p` 按 `line-move-visual` 默认 `t` 的显示行移动：移动单位是软换行后的显示行，跨逻辑行时进入相邻逻辑行的首 / 末显示行；目标列从目标显示行起点算起，目标行不足时停在行尾；连续上下行共用临时目标列，其他命令、指针定位和平台输入提交打断；越界时先移到 buffer 首尾再报边界错误。差异在列模型与就绪前提：目标列按基础缩进的 Unicode 宽度与 tab-width=8 近似 Emacs 的像素 / float 目标列，不实现行尾特殊 goal、`line-move-partial` 窗口边缘滚动或 `goal-column` 变量；显示行取自与当前显示兼容的 wrap index，目标行尚未索引时提示布局未就绪而不按逻辑行兜底，索引与当前显示不兼容（刚编辑 / 改宽 / 改字体，本帧重排未完成）或调用方没有显示布局（直接命令、脚本）时仍按逻辑行移动。sections 投影（Magit 等）按可见行移动。
+- point 离开窗口时按 Emacs redisplay 默认（`scroll-conservatively` / `scroll-step` 为 0）居中重排，不再只做最小一行 reveal：point 行不完全可见才滚动，滚动后 point 行居中；buffer 首夹紧到首行，EOB 允许留白。`M->` 走 `end-of-buffer` 的命令级 `(recenter -3)`，把 point 放在距窗口底部三行处；point 行已完全在窗口内时不滚动，只被窗口底部裁掉一部分时交回 redisplay 居中。`M-<` 没有命令级 recenter，依赖 redisplay 居中后受首行夹紧。section buffer 中跳到 hunk 的顶部对齐规则见[独立 diff 查看](#独立-diff-查看)。差异为按像素定位与整行取整：不保证 Emacs `move-to-window-line` 的整行取整、半行差异或 `scroll-margin`。
 - 翻页按完整可见显示行数减两行移动（至少一行）；point 仍在新页内则保留，否则移到最近可见行的行首。末页 / 首页先移到 buffer 边缘，再次同向翻页报边界错误；不承诺 Emacs 的精确窗口边距与列定位。
 - `C-l` 连续执行按居中 → 顶部 → 底部循环，其他命令打断；按像素定位，允许 EOB 后留白，不承诺 Emacs 的整行取整和滚动边距。
-- 翻页只使用当前文本 / 布局设置兼容且完整的 wrap index；尚未就绪时提示重试，不同步扫描全文、不排队自动重放。recenter 可等当前 point 的兼容显示行就绪后定位。
+- 翻页只使用当前文本 / 布局设置兼容且完整的 wrap index；尚未就绪时提示重试，不同步扫描全文、不排队自动重放。需要定位具体行的滚动请求（`C-l`、`M->`、hunk 顶部对齐）可等目标行就绪后应用，期间其他命令可能取代它们。
 
 ## 3. 键位解析约定
 
@@ -313,7 +314,7 @@
 - 显示 diffstat、文件与 hunk heading 和 unified 正文；普通文件 / hunk 默认展开，删除文件默认折叠。binary、symlink / 文件类型及 submodule 变更只提供摘要；未合并 / combined 等不支持结构明确报错，不伪造逐行 hunk。
 - `TAB` / `C-i` 切换当前 section 正文，保留 heading；root 不能隐藏。父节点折叠不改写子节点自身状态；隐藏正文中的各 view point 移至折叠 heading。正文仍保留在只读 buffer 中，普通 region / 复制沿用文本语义，不提供 Magit 结构化选择语义。
 - `S-TAB` / `<backtab>` 执行 `magit-section-cycle-global`：仍有正文隐藏时全部展开；全部正文可见时只折叠顶级 section，子孙自身状态保留、heading 仍在。折叠使 point 落入隐藏正文时移到该 section heading；多 view 共享折叠，各自 point / scroll 维持既有规则。
-- `n` 到下一个可见 section heading；`p` 在正文先回当前 section 起点，在起点再到前一个可见 heading；`^` 到父节点。`j` 在 diffstat 文件项与对应文件间跳转，必要时打开目标祖先。SPC / DEL / S-SPC 及原通用翻页键按可见行翻页，普通文本移动跳过隐藏正文。
+- `n` 到下一个可见 section heading；`p` 在正文先回当前 section 起点，在起点再到前一个可见 heading；`^` 到父节点。用这三个 section 移动命令跳到 hunk 时按 Magit `magit-hunk-set-window-start`：hunk 末端（hunk 之后那一行的行首，Magit 的 section end）不完全可见时把 hunk heading 放到窗口顶部；Magit 的折叠 overlay 止于 section end 之前，所以折叠只隐藏正文、不改变末端行是否可见，其他 section 没有该规则，`j`、RET 与鼠标跳转也不套用，都按上面的 point 滚动规则处理。`j` 在 diffstat 文件项与对应文件间跳转，必要时打开目标祖先。SPC / DEL / S-SPC 及原通用翻页键按可见行翻页，普通文本移动跳过隐藏正文。
 - status / diff 使用独立的分组标题、分支、hash、文件头、hunk 头、上下文、增删行和 diffstat 命名样式，见[主题 API](scripting.md#主题与命名样式)。当前 section 按各 view 的 point 提供独立于 region 的背景反馈及对应 diff 高亮样式；角色背景铺满逻辑行，字体变化参与 view 的布局身份。使用自有可配置配色，不引入 Delta、隐藏增删标记或词级高亮；折叠 heading 带指示。长行不软换行，M-右 / M-左（`scroll-left` / `scroll-right`）水平查看，point 移动到屏幕外列时跟随。普通编辑 buffer 的软换行不变。
 - `g` 重新读取相同比较。按 section 类型 / 路径 / 父链及 hunk heading 身份尽量保留折叠、各 view point 与顶部 section 相对行列；节点消失时回退到最近仍存在的祖先 heading，不能保证 hunk 内容变化后仍匹配。只读刷新没有文本 undo，也不标记 modified。
 - `RET` / `C-m` 在删除行访问旧侧，在新增 / 上下文行访问新侧并定位；heading 使用对应侧起始行。HEAD / index 使用本次 diff 的完整 blob 身份打开只读快照，不重解释为当前 index 或 worktree；unstaged 新侧复用普通文件 buffer，保留其未保存文本，行列超界时夹紧。不提供 C-RET 的跨版本行号映射。

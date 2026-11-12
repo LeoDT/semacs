@@ -511,6 +511,11 @@ impl EditTarget {
                 self.buffer.set_point(destination)?;
                 return Ok(CommandOutcome {
                     reveal_point: true,
+                    // `end-of-buffer` recenters three lines above the bottom
+                    // when the end is off screen; `beginning-of-buffer` leaves
+                    // it to redisplay.
+                    viewport: (command == Command::EndOfBuffer)
+                        .then_some(ViewportRequest::RecenterFromBottom(3)),
                     message: set_mark.then(|| "Mark set".to_owned()),
                     ..CommandOutcome::default()
                 });

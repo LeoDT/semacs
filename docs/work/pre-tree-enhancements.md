@@ -9,18 +9,33 @@
 - Marginalia：`~/.emacs.d/elpa/marginalia-20260821.1231`（commit `7ec0b70afb43a756ecd45a958c6ebe797717fc91`）；用户同时使用 Vertico。
 - 用户 Emacs 配置：`C-x C-k` 绑定 `kill-current-buffer`。
 - 仅静态阅读源码与 docstring；未做真实 GUI 鼠标滚轮 / 重绘观察。涉及屏幕实际表现的结论保留为待验证。
+- 例外：#1 的 point 离开视口滚动另用 `tests/emacs/drive.py` 的 `m4-recenter-motion` 在真实 pty command loop 核对；仍不覆盖 GUI 像素布局、变高行或用户桌面。
 
-## 1. point 离开视口时的滚动
+## 1. point 离开视口时的滚动（已实施）
+
+已实施：契约见[保真度](../emacs-fidelity.md#已登记的-f2-motion-差异)与[独立 diff 查看](../emacs-fidelity.md#独立-diff-查看)。
 
 **现象 / 目标**：浏览代码时 point 到页底再向下移动一行，用户观察到 Emacs 会大致滚动半页，而不是只向下滚一行。实际行为按 Emacs 默认 redisplay 处理；diff 中用 `n` / `p` 导航 section 时，按 Magit 的 section 移动逻辑保证目标内容可见，不让 hunk header 停在页底而看不到正文。
 
 **静态依据**：
 
 - Emacs 31.1 默认 `scroll-conservatively` = 0、`scroll-step` = 0、`scroll-margin` = 0。`scroll-conservatively` 的 docstring：值为 0 表示 point 离开屏幕时总是 recenter；`scroll-step` 为 0 时同样总是居中。
-- Magit `magit-section-goto` 只移动 point 并运行 `magit-section-movement-hook`；`magit-hunk-set-window-start` 在该 hook 中保证 hunk section 起点可见：若 hunk 末尾不在窗口内，则把 window-start 设到 hunk 起点。普通 section 没有该 hook，依赖 Emacs redisplay 的默认滚动。
-- semacs 当前 `BufferView` 的 reveal 只做最小滚动，把 point 刚好带入视口；这是用户观察到“只滚一行”的直接差异。
+- `end-of-buffer`（`simple.el`）在 `(> (point) (window-end nil t))` 时同步调用 `(recenter -3)`；`beginning-of-buffer` 没有命令级 recenter，只 `goto-char`。`recenter` 无参数即 `move-to-window-line` 的 `(displayed_window_lines)/2`。
+- Magit `magit-section-goto` 只移动 point 并运行 `magit-section-movement-hook`；`magit-hunk-set-window-start` 在该 hook 中保证 hunk section 起点可见：若 hunk 末端不完全可见，就把 window-start 设到 hunk 起点。普通 section 没有该 hook，依赖 Emacs redisplay 的默认滚动。
+- semacs 原 `BufferView` 的 reveal 只做最小滚动，把 point 刚好带入视口；这是用户观察到“只滚一行”的直接差异。
 
-**实施原则**：普通 motion 按 Emacs redisplay 默认 recenter，不另造“固定滚动半页”常量；hunk 导航按 Magit `magit-hunk-set-window-start` 的 window-start 规则，其他 section 不额外发明可见性约束。实施前只需核对与现有 `C-l`、翻页、`goal column`、软换行和 sections 投影的交互。
+**真实 command loop 观察**（pty、24x80、21 行正文；用例 `m4-recenter-motion`，明细见 [RESULTS](../../tests/emacs/RESULTS.md#m4point-离开视口与-end-of-buffer-滚动参照)）：
+
+- point 逐行下移直到正文最后一行都不滚动；再下移一行后 point 落在新窗口第 11 行（window-start 是 point 行前 10 行，21 行正文的中间），不是只滚一行。
+- `M->` 由命令内的 `recenter -3` 同步定位：point 在第 19 行，下面留 2 行空白；不是 redisplay 的居中。
+- `M-<` 经 redisplay 居中后受 buffer 首夹紧，window-start 回到首行。
+
+**实施结果**：
+
+- `BufferView` 的 reveal 改为「point 行不完全可见才滚动，且滚动后居中」，复用 `C-l` 居中同一套像素偏移；`M->` 通过独立的重心位置（距底部三行）请求，`beginning-of-buffer` 仍走 reveal。
+- 这两类需要行定位的请求与 `C-l` 共用 `pending_scroll`，等兼容显示行就绪后应用；不再是 `pending_recenter` 单一枚举。
+- section 导航在 `n` / `p` / `^` 跳到 hunk heading 时，用 hunk 末端那一行的可见性决定是否把 hunk heading 置顶；hunk 类型由渲染器在 `Section` 上标注，heading 字符串仍只作身份。Magit 隐藏正文的 overlay 止于 section end 之前，所以折叠只隐藏正文、不改变末端行是否可见；`j`、`RET`、鼠标跳转等其他入口不跑 `magit-section-movement-hook`，也不套用该规则。
+- 已接受差异：定位按像素而非整行取整，不承诺 Emacs `move-to-window-line` 的半行差异与 `scroll-margin`；hunk 置顶要等兼容显示行就绪，索引完整却仍解析不出末端行时不置顶（不把请求永久挂起）。
 
 ## 2. Magit 的 Shift+Tab 全局 section 可见性（已实施）
 

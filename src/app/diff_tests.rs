@@ -212,3 +212,88 @@ fn late_open_does_not_steal_focus_and_killed_refresh_cannot_publish(cx: &mut Tes
         )
     });
 }
+
+fn redraw(visual: &mut VisualTestContext) {
+    visual.run_until_parked();
+    visual.update(|window, cx| window.draw(cx).clear(cx));
+}
+
+#[gpui::test]
+fn section_movement_pins_a_hunk_heading_when_the_hunk_does_not_fit(cx: &mut TestAppContext) {
+    let repo = Repository::new();
+    let lines: Vec<String> = (1..=120).map(|line| format!("line {line}\n")).collect();
+    repo.write("a", lines.concat());
+    repo.commit();
+    let mut changed = lines;
+    changed[0] = "changed 1\n".into();
+    for (line, text) in changed.iter_mut().enumerate().take(60).skip(19) {
+        *text = format!("changed {}\n", line + 1);
+    }
+    repo.write("a", changed.concat());
+    let (mut visual, shell) = open(&repo, cx);
+    command(&mut visual, &shell, Command::MagitDiffUnstaged);
+    wait(&mut visual, &shell);
+    let hunks = visual.read(|cx| {
+        let view = shell.read(cx).active_view().read(cx);
+        let hunks: Vec<_> = view
+            .buffer()
+            .sections()
+            .unwrap()
+            .nodes()
+            .iter()
+            .filter(|node| node.hunk)
+            .map(|node| node.range.start)
+            .collect();
+        assert_eq!(hunks.len(), 2);
+        hunks
+    });
+    let state = |visual: &VisualTestContext| {
+        visual.read(|cx| {
+            let view = shell.read(cx).active_view().read(cx);
+            let layout = view.viewport_layout().unwrap();
+            let index = view.wrap_index().unwrap();
+            let rows: Vec<_> = hunks
+                .iter()
+                .map(|offset| index.row_for_offset(*offset).unwrap().index)
+                .collect();
+            let line = view.line_height();
+            let available = (layout.bounds().size.height - line).max(px(0.));
+            (
+                view.buffer().point(),
+                layout.scroll().y,
+                rows,
+                line,
+                available,
+            )
+        })
+    };
+    // The first hunk fits in the window, so moving to it does not scroll.
+    visual.simulate_keystrokes("n n n n");
+    redraw(&mut visual);
+    let (point, scroll, ..) = state(&visual);
+    assert_eq!(point, hunks[0]);
+    assert_eq!(scroll, px(0.));
+    // The second hunk starts inside the window but its body does not fit, so
+    // Magit's hunk movement hook puts its heading at the top.
+    visual.simulate_keystrokes("n");
+    redraw(&mut visual);
+    let (point, scroll, rows, line, _) = state(&visual);
+    assert_eq!(point, hunks[1]);
+    assert_eq!(scroll, line * rows[1] as f32);
+    // Other sections follow redisplay: moving up recenters instead of pinning.
+    visual.simulate_keystrokes("^");
+    redraw(&mut visual);
+    let (point, scroll, _, line, available) = state(&visual);
+    let row = visual.read(|cx| {
+        shell
+            .read(cx)
+            .active_view()
+            .read(cx)
+            .wrap_index()
+            .unwrap()
+            .row_for_offset(point)
+            .unwrap()
+            .index
+    });
+    assert_eq!(scroll, (line * row as f32 - available / 2.).max(px(0.)));
+}

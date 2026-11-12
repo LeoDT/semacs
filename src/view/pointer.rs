@@ -55,7 +55,7 @@ impl BufferView {
         self.pointer_drag = Some(PointerDrag::new(offset));
         self.invalidate_input_registration();
         self.style_scroll_anchor = None;
-        self.pending_recenter = None;
+        self.pending_scroll = None;
         self.set_message("Mark set", cx);
         window.focus(&self.focus, cx);
         window.notify_text_selection_changed(&self.focus);

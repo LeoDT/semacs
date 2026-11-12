@@ -42,6 +42,8 @@ C_M__ = b"\x1b\x1f"  # C-M-_ (redo)
 C_SPC = b"\x00"
 C_X = b"\x18"
 C_W = b"\x17"
+C_N = b"\x0e"
+C_L = b"\x0c"
 
 def mouse(button, col, row, release=False):
     """xterm SGR mouse report; button 0 is left, 32 is motion with left held."""
@@ -52,7 +54,7 @@ def click(col, row):
     return mouse(0, col, row) + mouse(0, col, row, release=True)
 
 
-MOUSE_FIXTURE = "".join(f"l{i:02d} aaaa\n" for i in range(100))
+LINES_FIXTURE = "".join(f"l{i:02d} aaaa\n" for i in range(100))
 SHORT_FIXTURE = "".join(f"l{i:02d} aaaa\n" for i in range(3))
 
 # Each case: (initial text, [(label, keys), ...], optional options).
@@ -139,13 +141,13 @@ CASES = {
     "cq-sep-hello": ("hello", [("C-x", C_X), ("C-g", C_G)]),
     "cq-combined-empty": ("", [("C-x C-g", C_X + C_G)]),
     "cq-sep-empty": ("", [("C-x", C_X), ("C-g", C_G)]),
-    "m3-mouse-click-drag": (MOUSE_FIXTURE, [
+    "m3-mouse-click-drag": (LINES_FIXTURE, [
         ("click line 03 col 6", click(6, 3)),
         ("click line 06 col 6", click(6, 6)),
         ("press 5,9 / move 9,8 / move 9,11 / release",
          mouse(0, 5, 9) + mouse(32, 9, 8) + mouse(32, 9, 11) + mouse(0, 9, 11, release=True)),
     ], {"size": (24, 80), "point": "start", "mouse": True}),
-    "m3-mouse-autoscroll": (MOUSE_FIXTURE, [
+    "m3-mouse-autoscroll": (LINES_FIXTURE, [
         ("press 5,4", mouse(0, 5, 4)),
         ("move below rows", mouse(32, 5, 22)),
         ("move further below", mouse(32, 5, 30)),
@@ -168,6 +170,16 @@ CASES = {
         ("press 5,2 / move 5,12 / release",
          mouse(0, 5, 2) + mouse(32, 5, 12) + mouse(0, 5, 12, release=True)),
     ], {"size": (24, 80), "point": "start", "mouse": True}),
+    # `scroll-conservatively` and `scroll-step` are 0, so redisplay recenters
+    # when point leaves the window; `start` / `end` show the landing row.
+    "m4-recenter-motion": (LINES_FIXTURE, [
+        ("C-n x20", C_N * 20),
+        ("C-n leaves the window", C_N),
+        ("C-l", C_L),
+        ("M->", ESC + b">"),
+        ("M-<", ESC + b"<"),
+        ("C-g", C_G),
+    ], {"size": (24, 80), "point": "start"}),
     "m3-read-find-file": ("body", [("C-x C-f", C_X + b"\x06"),
         ("RET", RET),
         ("C-g", C_G),

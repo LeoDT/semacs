@@ -26,6 +26,10 @@ impl RecenterPosition {
 pub enum ViewportRequest {
     ScrollToRow(usize),
     Recenter(RecenterPosition),
+    /// `recenter` with a negative argument: put the point row this many lines
+    /// above the bottom of the window. `end-of-buffer` uses 3 when the end is
+    /// not already visible.
+    RecenterFromBottom(usize),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

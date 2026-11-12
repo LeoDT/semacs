@@ -516,3 +516,18 @@ fn malformed_protocol_and_unsafe_paths_fail_closed() {
         .contains("cancelled")
     );
 }
+
+#[test]
+fn only_hunk_headings_are_marked_for_magit_window_start() {
+    let repo = Repository::new();
+    repo.write("a", "old\ncontext\n");
+    repo.commit();
+    repo.write("a", "new\ncontext\n");
+    let rendered = repo.load(DiffKind::Unstaged).render().unwrap();
+    let mut hunks = 0;
+    for node in rendered.sections.nodes() {
+        assert_eq!(node.hunk, node.key.contains("/@@"), "{}", node.key);
+        hunks += usize::from(node.hunk);
+    }
+    assert_eq!(hunks, 1);
+}

@@ -14,6 +14,7 @@ python3 tests/emacs/drive.py m1-redo-backward-delete m1-redo-forward-delete m1-r
 python3 tests/emacs/drive.py m1-minibuffer-prompt m1-minibuffer-motion m1-minibuffer-history
 python3 tests/emacs/drive.py m2-mx-complete m2-mx-exit m2-mx-unique m2-mx-unknown m2-mx-empty m2-mx-cancel
 python3 tests/emacs/drive.py m3-mouse-click-drag m3-mouse-autoscroll m3-mouse-below-eob m3-read-find-file m3-read-write-file
+python3 tests/emacs/drive.py m4-recenter-motion
 emacs -Q --batch -l tests/emacs/m2-files.el -f ert-run-tests-batch-and-exit
 emacs -Q --batch -l tests/emacs/export-keys.el
 emacs -Q --batch -l tests/emacs/m1-indent.el -l tests/emacs/m1-editing.el -l tests/emacs/m1-motion.el -l tests/emacs/m1-kill.el -l tests/emacs/m1-history.el -l tests/emacs/m1-fields.el -f ert-run-tests-batch-and-exit
@@ -57,6 +58,10 @@ emacs -Q --batch \
 ```
 
 运行前核对 Magit 身份；路径或依赖不同应另记环境，不默认为同一基准。本轮固定 checkout 为 `942d61d5de37c89a3a7c6cf693696b900b1d97b0`（`v4.7.1-74-g942d61d5`）。fixture 只创建于 `.pi/tmp/`，隔离系统 / 用户 Git 配置及替代仓库环境，正常结束删除；不操作日常仓库。测试捕获部分查询、日志选择和 Git 启动器；reword 另用临时 editor 与真实 Git 检查 tree / index，root / merge revision 使用真实 batch buffer。它不证明真实 command loop、按键输入、GUI 或 semacs 通过。结果与依赖源码身份见 [F5 记录](RESULTS.md#f5magit-提交与历史参照)，静态入口见 [调研](../../docs/work/f5-history-commit.md)。
+
+## M4 滚动参照
+
+`m4-recenter-motion` 在同一 pty 环境下用 100 行 fixture 观察 point 离开正文时 redisplay 的滚动、`M->` 的 `(recenter -3)` 与 `M-<` 的首行夹紧；它依赖 `baseline.el` 已有的 `start` / `end` 采集，不改参照选项。固定 24x80 终端（21 行正文），不覆盖 GUI 像素布局、变高行、`scroll-margin` 非 0 或用户配置。结果见 [RESULTS.md](RESULTS.md#m4point-离开视口与-end-of-buffer-滚动参照)。该用例不涉及 Magit，hunk 跳转的 window-start 规则仍以源码参照为准。
 
 ## 比较陷阱
 

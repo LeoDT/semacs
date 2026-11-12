@@ -182,6 +182,7 @@ impl Builder {
             range: range.clone(),
             body: range.end,
             collapsed: false,
+            hunk: false,
         });
         this
     }
@@ -205,6 +206,7 @@ impl Builder {
             range: range.clone(),
             body: range.end,
             collapsed: false,
+            hunk: false,
         });
         self.locations.push(Location {
             range,
@@ -368,6 +370,7 @@ fn append_combined(out: &mut Builder, files: &[combined::File]) {
             range: range.clone(),
             body: range.end,
             collapsed: false,
+            hunk: false,
         });
         if let combined::Body::Summary(summary) = &file.body {
             out.line(summary, StyleRole::Default);
@@ -407,6 +410,7 @@ fn append_combined(out: &mut Builder, files: &[combined::File]) {
                     range: range.clone(),
                     body: range.end,
                     collapsed: false,
+                    hunk: true,
                 });
                 out.locations.push(Location {
                     range,

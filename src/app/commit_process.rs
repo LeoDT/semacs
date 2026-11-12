@@ -234,6 +234,7 @@ fn render<'a>(
         range: ByteOffset(0)..body,
         body,
         collapsed: false,
+        hunk: false,
     }];
     let mut operations = Vec::new();
     for record in records {
@@ -275,6 +276,7 @@ fn render<'a>(
             range: start..ByteOffset(text.len()),
             body,
             collapsed: false,
+            hunk: false,
         });
         operations.push(record.operation);
     }

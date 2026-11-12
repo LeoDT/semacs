@@ -220,3 +220,27 @@ python3 tests/emacs/drive.py m3-mouse-click-drag m3-mouse-autoscroll m3-mouse-be
 - `mouse-drag-copy-region` 默认 `nil`；`mouse-shift-adjust-mode` 默认关闭，默认 `S-down-mouse-1` 是 `mouse-appearance-menu`。
 
 观察边界：鼠标事件经 pty 注入，只有 24x80 字符终端坐标与上述固定选项，不覆盖真实桌面指针精度、双击 / 三击 / Shift / 右键、拖动移动文本或 dired 交互；也不覆盖 GUI 下的 fringe / 滚动条或正文区以外空白。本记录也不证明 semacs 的宿主鼠标交互或读入实现通过。semacs 的已批准差异（单击不恢复旧 mark、缺少 dired、滚动按像素换算行）见 [保真度契约](../../docs/emacs-fidelity.md#鼠标选区)。
+
+## M4：point 离开视口与 end-of-buffer 滚动参照
+
+环境同上节：GNU Emacs 31.1、`emacs -Q -nw`、24x80 pty、`TERM=xterm-256color`、fundamental-mode、transient mark。24 行终端中 row1 是 menu bar，row2–22 是正文（21 行），row23 是 mode line，row24 是 echo area。文本为 100 行 `lNN aaaa\n`（每行 9 字节，共 900 字节；point-max 901 是最后换行后的空行），point 从 buffer 起点开始，启动时 `set-window-start` 到 point-min。dump 在 `post-command-hook` 里采集，因此一条命令的滚动通常出现在下一次 dump；`end-of-buffer` 例外，它在命令内部同步 recenter。
+
+```sh
+python3 tests/emacs/drive.py m4-recenter-motion
+```
+
+| 用例 | 操作 | 结果 |
+|---|---|---|
+| m4-recenter-motion | `C-n` ×20 | point 10…181（行 2…21），window-start=1、window-end=190（行 1–21 之后）：point 行始终完整可见，不滚动 |
+| m4-recenter-motion | 再 `C-n`（point 190 = 行 22） | window-start=100（行 12）、window-end=289：point 落在新窗口第 11 行（21 行正文的中间），不是只滚一行让 point 停在末行 |
+| m4-recenter-motion | `C-l` | window-start 仍为 100（行 12）：该处恰好也是 `recenter` 的居中位置 |
+| m4-recenter-motion | `M->` | 命令内同步定位：point=901（行 101，point-max 空行），window-start=739（行 83）；point 在窗口第 19 行，下方留 2 行空白 |
+| m4-recenter-motion | `M-<` | point=1；下一次 dump 显示 window-start 回到 1（行 1），即 redisplay 居中后受 buffer 首夹紧 |
+| 源码核对 | `end-of-buffer` / `beginning-of-buffer` | `end-of-buffer` 在 `(> (point) (window-end nil t))` 时调用 `(recenter -3)`；`beginning-of-buffer` 没有命令级 recenter，只 `goto-char` |
+
+补充源码与选项（`simple.el`、`window.c`，未逐项运行）：
+
+- `recenter` 无参数即 `move-to-window-line` 的 `(displayed_window_lines)/2`，负数表示相对窗口底部（-1 是最后一个完整可见行），所以 `(recenter -3)` 让 point 位于窗口倒数第三行、下面留两行。
+- Emacs 31.1 默认 `scroll-conservatively` = 0、`scroll-step` = 0、`scroll-margin` = 0：point 离开窗口时 redisplay 走 `recenter` 分支（`centering_position = window_box_height / 2`），而不是最小滚动。
+
+观察边界：只有 tty 的固定行高与 21 行正文；终端行高整除窗口，dump 里的 window-start 都是行首，因此不覆盖部分可见行、变高行、`scroll-margin` 非 0 或 GUI 像素布局。该用例只有一条 `C-l` 且结果与自动居中相同，不能区分两者的取整差异，也不重新覆盖 `C-l` 的 top / bottom 循环。Magit hunk 移动的 window-start 规则不在本用例内，只做了源码核对。本记录不证明 semacs 通过。

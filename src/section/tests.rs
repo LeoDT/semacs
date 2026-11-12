@@ -8,6 +8,7 @@ fn tree(hunk: &str) -> (Rope, Sections) {
         range: ByteOffset(start)..ByteOffset(end),
         body: ByteOffset(body),
         collapsed: false,
+        hunk: false,
     };
     let nodes = vec![
         section("root", None, 0, 5, 25),
@@ -61,6 +62,21 @@ fn invalid_hierarchies_and_partial_line_boundaries_are_rejected() {
         mutate(&mut nodes);
         assert!(Sections::new(&text, nodes).is_err());
     }
+}
+
+#[test]
+fn only_a_hunk_heading_reports_a_pinnable_range() {
+    let (_, mut sections) = tree("hunk");
+    sections.nodes[2].hunk = true;
+    assert_eq!(
+        sections.hunk_at(ByteOffset(10)),
+        Some(ByteOffset(10)..ByteOffset(20))
+    );
+    // A hunk body is not its heading, and other sections are not hunks even
+    // when their key happens to mention one.
+    assert_eq!(sections.hunk_at(ByteOffset(16)), None);
+    assert_eq!(sections.hunk_at(ByteOffset(5)), None);
+    assert_eq!(sections.hunk_at(ByteOffset(20)), None);
 }
 
 #[test]

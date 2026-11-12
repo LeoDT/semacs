@@ -1,5 +1,7 @@
 use gpui_kit as gpui;
-use gpui_kit::{InputHandler, Keystroke, TestAppContext, font, px};
+use gpui_kit::{
+    Entity, InputHandler, Keystroke, TestAppContext, VisualTestContext, font, point, px,
+};
 
 use super::input_tests::{handler, open, press_listener, redraw};
 use crate::text::ByteOffset;
@@ -248,6 +250,175 @@ fn visual_motion_reports_boundaries_only_for_a_complete_index(cx: &mut TestAppCo
 }
 
 #[gpui::test]
+fn leaving_the_viewport_recenters_the_point_row(cx: &mut TestAppContext) {
+    let (mut visual, editor) = open(&"abcdef\n".repeat(100), cx);
+    let (line_height, visible) = visual.read(|cx| {
+        let view = editor.read(cx);
+        let height = view.content_bounds.unwrap().size.height;
+        (
+            view.settings.line_height,
+            (height / view.settings.line_height).floor() as usize,
+        )
+    });
+    assert!(visible > 4);
+    let last_visible = visible - 1;
+    let keys = vec!["ctrl-n"; last_visible].join(" ");
+    visual.simulate_keystrokes(&keys);
+    redraw(&mut visual);
+    visual.read(|cx| {
+        let view = editor.read(cx);
+        assert_eq!(view.buffer().point(), ByteOffset(last_visible * 7));
+        assert_eq!(view.scroll.y, px(0.), "a visible point never scrolls");
+    });
+    visual.simulate_keystrokes("ctrl-n");
+    redraw(&mut visual);
+    visual.read(|cx| {
+        let view = editor.read(cx);
+        let row = view
+            .wrap_index()
+            .unwrap()
+            .row_for_offset(view.buffer().point())
+            .unwrap()
+            .index;
+        assert_eq!(row, last_visible + 1);
+        assert!(view.pending_scroll.is_none());
+        assert_row_in_the_middle(view, row);
+    });
+    // Scrolling deeper keeps the upward recenter away from the first line.
+    visual.simulate_keystrokes(&["ctrl-v"; 2].join(" "));
+    redraw(&mut visual);
+    let (point_row, first) = visual.read(|cx| {
+        let view = editor.read(cx);
+        let index = view.wrap_index().unwrap();
+        (
+            index.row_for_offset(view.buffer().point()).unwrap().index,
+            (f32::from(view.scroll.y) / f32::from(line_height)).floor() as usize,
+        )
+    });
+    assert!(point_row >= first && first > 1);
+    let keys = vec!["ctrl-p"; point_row - first + 1].join(" ");
+    visual.simulate_keystrokes(&keys);
+    redraw(&mut visual);
+    visual.read(|cx| {
+        let view = editor.read(cx);
+        let row = view
+            .wrap_index()
+            .unwrap()
+            .row_for_offset(view.buffer().point())
+            .unwrap()
+            .index;
+        assert_eq!(row, first - 1);
+        assert!(view.scroll.y > px(0.), "the upward recenter is not clamped");
+        assert_row_in_the_middle(view, row);
+    });
+}
+
+/// The point row sits inside the window with its middle within one line of the
+/// window middle; the exact pixel offset is this product's rounding.
+fn assert_row_in_the_middle(view: &super::BufferView, row: usize) {
+    let line = view.settings.line_height;
+    let height = view.content_bounds.unwrap().size.height;
+    let top = line * row as f32 - view.scroll.y;
+    assert!(
+        top > px(0.) && top + line < height,
+        "the point row is not fully inside the window"
+    );
+    assert!(
+        (top - height / 2.).abs() < line,
+        "the point row is not near the middle"
+    );
+}
+
+#[gpui::test]
+fn buffer_edges_clamp_the_recenter(cx: &mut TestAppContext) {
+    let (mut visual, editor) = open(&"abcdef\n".repeat(100), cx);
+    visual.simulate_keystrokes("alt->");
+    redraw(&mut visual);
+    let (height, line) = visual.read(|cx| {
+        let view = editor.read(cx);
+        assert_eq!(view.buffer().point(), ByteOffset(700));
+        assert!(view.pending_scroll.is_none());
+        (
+            view.content_bounds.unwrap().size.height,
+            view.settings.line_height,
+        )
+    });
+    // `end-of-buffer` puts the point three lines above the window bottom
+    // instead of centering it like redisplay does for other point moves.
+    assert_eq!(row_offset(&visual, &editor, 700), height - line * 3.);
+    // A partially visible end row is left to redisplay, which centers.
+    visual.update(|_, cx| {
+        editor.update(cx, |view, cx| {
+            let height = view.content_bounds.unwrap().size.height;
+            let line = view.settings.line_height;
+            let target = line * 100. - (height - line + px(8.));
+            view.scroll_by(point(px(0.), target - view.scroll.y), cx);
+        })
+    });
+    redraw(&mut visual);
+    visual.read(|cx| {
+        let view = editor.read(cx);
+        let line = view.settings.line_height;
+        let height = view.content_bounds.unwrap().size.height;
+        let top = line * 100. - view.scroll.y;
+        assert!(
+            top < height && top + line > height,
+            "the end row is partially visible"
+        );
+    });
+    visual.simulate_keystrokes("alt->");
+    redraw(&mut visual);
+    visual.read(|cx| {
+        let view = editor.read(cx);
+        let line = view.settings.line_height;
+        let top = line * 100. - view.scroll.y;
+        assert_ne!(
+            top,
+            view.content_bounds.unwrap().size.height - line * 3.,
+            "a partially visible end is left to redisplay"
+        );
+        assert_row_in_the_middle(view, 100);
+    });
+    visual.simulate_keystrokes("alt-<");
+    redraw(&mut visual);
+    visual.read(|cx| {
+        let view = editor.read(cx);
+        assert_eq!(view.buffer().point(), ByteOffset(0));
+        assert_eq!(view.scroll.y, px(0.));
+    });
+}
+
+/// The offset of the row holding `offset` from the top of the window.
+fn row_offset(
+    visual: &VisualTestContext,
+    editor: &Entity<super::BufferView>,
+    offset: usize,
+) -> gpui::Pixels {
+    visual.read(|cx| {
+        let view = editor.read(cx);
+        let row = view
+            .wrap_index()
+            .unwrap()
+            .row_for_offset(ByteOffset(offset))
+            .unwrap()
+            .index;
+        view.settings.line_height * row as f32 - view.scroll.y
+    })
+}
+
+#[gpui::test]
+fn end_of_buffer_does_not_scroll_when_the_end_is_visible(cx: &mut TestAppContext) {
+    let (mut visual, editor) = open("abc\ndef\n", cx);
+    visual.simulate_keystrokes("alt->");
+    redraw(&mut visual);
+    visual.read(|cx| {
+        let view = editor.read(cx);
+        assert_eq!(view.buffer().point(), ByteOffset(8));
+        assert_eq!(view.scroll.y, px(0.));
+    });
+}
+
+#[gpui::test]
 fn page_boundaries_move_to_edges_before_reporting_errors(cx: &mut TestAppContext) {
     let (mut visual, editor) = open("abc\ndef", cx);
     for (keys, expected, message) in [
@@ -291,7 +462,7 @@ fn recenter_cycles_center_top_bottom_and_allows_blank_space_after_eob(cx: &mut T
             assert_eq!(view.buffer().mark(), Some(ByteOffset(0)));
             assert!(!view.buffer().mark_active());
             assert_eq!(view.display_snapshot().id(), id);
-            assert!(view.pending_recenter.is_none());
+            assert!(view.pending_scroll.is_none());
             assert!(view.layout_ready());
         });
     }
@@ -449,7 +620,7 @@ fn recenter_waits_for_compatible_rows_without_blocking_layout(cx: &mut TestAppCo
         window.draw(cx).clear(cx);
         let view = editor.read(cx);
         assert!(!view.wrap_index().unwrap().is_complete());
-        assert!(view.pending_recenter.is_some());
+        assert!(view.pending_scroll.is_some());
     });
     redraw(&mut visual);
     visual.read(|cx| {
@@ -459,7 +630,7 @@ fn recenter_waits_for_compatible_rows_without_blocking_layout(cx: &mut TestAppCo
             view.scroll.y,
             view.settings.line_height * 10_000. - available / 2.
         );
-        assert!(view.pending_recenter.is_none());
+        assert!(view.pending_scroll.is_none());
         assert!(view.layout_ready());
     });
 }

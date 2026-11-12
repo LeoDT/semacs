@@ -40,7 +40,14 @@ fn history_navigation_loads_real_commit_and_blob_then_quits_locally(cx: &mut Tes
     wait(&mut visual, &shell);
     let revision = visual.read(|cx| shell.read(cx).active_view().clone());
     visual.read(|cx| {
-        assert_eq!(revision.read(cx).buffer().mode(), ModeId::MAGIT_REVISION);
+        let buffer = revision.read(cx).buffer();
+        assert_eq!(buffer.mode(), ModeId::MAGIT_REVISION);
+        let sections = buffer.sections().unwrap();
+        let hunks = sections.nodes().iter().filter(|node| node.hunk).count();
+        assert_eq!(hunks, 1);
+        for node in sections.nodes() {
+            assert_eq!(node.hunk, node.key.contains("/@@"), "{}", node.key);
+        }
     });
     visual.simulate_keystrokes("q");
     visual.read(|cx| assert_eq!(shell.read(cx).active_view(), &log));

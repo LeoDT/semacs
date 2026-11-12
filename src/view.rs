@@ -380,6 +380,17 @@ struct InputGeometry {
     selection: Range<ByteOffset>,
 }
 
+/// A viewport change that waits for the rows it needs before it can be applied.
+enum PendingScroll {
+    /// `recenter-top-bottom`: put the point row at this position.
+    Recenter(RecenterPosition),
+    /// `recenter -N`: put the point row N lines above the window bottom.
+    RecenterFromBottom(usize),
+    /// Section movement: Magit's `magit-hunk-set-window-start` puts the hunk
+    /// heading at the top when the hunk does not fit in the window.
+    Hunk(Range<ByteOffset>),
+}
+
 pub struct BufferView {
     target: EditTarget,
     observed_snapshot: BufferSnapshot,
@@ -409,7 +420,7 @@ pub struct BufferView {
     registration: u64,
     accepting_input: bool,
     reveal_caret: bool,
-    pending_recenter: Option<RecenterPosition>,
+    pending_scroll: Option<PendingScroll>,
     input_geometry: Option<InputGeometry>,
     message: Option<SharedString>,
     message_task: Option<Task<()>>,
@@ -476,7 +487,7 @@ impl BufferView {
             registration: 0,
             accepting_input: true,
             reveal_caret: false,
-            pending_recenter: None,
+            pending_scroll: None,
             input_geometry: None,
             message: None,
             message_task: None,
@@ -678,7 +689,7 @@ impl BufferView {
 
     fn queue_change(&mut self, change: DisplayChange, cx: &mut Context<Self>) {
         self.style_scroll_anchor = None;
-        self.pending_recenter = None;
+        self.pending_scroll = None;
         if self.reflow_base.is_none() {
             self.reflow_base = self
                 .index
@@ -887,13 +898,73 @@ impl BufferView {
     pub fn scroll_by(&mut self, delta: Point<Pixels>, cx: &mut Context<Self>) {
         self.style_scroll_anchor = None;
         self.reveal_caret = false;
-        self.pending_recenter = None;
+        self.pending_scroll = None;
         self.scroll.x = (self.scroll.x + delta.x).max(px(0.));
         self.scroll.y = (self.scroll.y + delta.y).max(px(0.));
         self.geometry = None;
         self.shape_work = None;
         self.shape_range = None;
         cx.notify();
+    }
+
+    fn row_fully_visible(&self, row: usize, height: Pixels) -> bool {
+        let top = self.settings.line_height * row as f32;
+        top >= self.scroll.y && top + self.settings.line_height <= self.scroll.y + height
+    }
+
+    fn centered_scroll(&self, row: usize, height: Pixels) -> Pixels {
+        let line = self.settings.line_height;
+        (line * row as f32 - (height - line).max(px(0.)) / 2.).max(px(0.))
+    }
+
+    fn caret(&self) -> ByteOffset {
+        self.display_snapshot().selected_range().end
+    }
+
+    /// The scroll `pending` resolves to in this layout, or `None` while the
+    /// layout cannot answer yet.
+    fn pending_scroll_target(
+        &self,
+        pending: &PendingScroll,
+        index: &WrapIndex,
+        height: Pixels,
+    ) -> Option<Pixels> {
+        let line = self.settings.line_height;
+        match pending {
+            PendingScroll::Recenter(position) => {
+                let row = index.row_for_offset(self.caret())?.index;
+                let available = (height - line).max(px(0.));
+                let offset = match position {
+                    RecenterPosition::Center => available / 2.,
+                    RecenterPosition::Top => px(0.),
+                    RecenterPosition::Bottom => available,
+                };
+                Some((line * row as f32 - offset).max(px(0.)))
+            }
+            PendingScroll::RecenterFromBottom(lines) => {
+                let row = index.row_for_offset(self.caret())?.index as f32;
+                // `end-of-buffer` only recenters when the end is below the
+                // window; a partially visible point row is left to redisplay.
+                if line * row >= self.scroll.y + height {
+                    let offset = (height - line * (*lines).max(1) as f32).max(px(0.));
+                    Some((line * row - offset).max(px(0.)))
+                } else {
+                    Some(self.scroll.y)
+                }
+            }
+            PendingScroll::Hunk(range) => {
+                let start = index.row_for_offset(range.start)?.index;
+                // `magit-hunk-set-window-start` only checks the position after
+                // the section, which stays outside the overlay that hides a
+                // folded body, so folding does not make the hunk end invisible.
+                let end = index.row_for_offset(range.end)?.index;
+                Some(if self.row_fully_visible(end, height) {
+                    self.scroll.y
+                } else {
+                    line * start as f32
+                })
+            }
+        }
     }
 
     fn current_section(&self) -> Option<std::ops::Range<ByteOffset>> {
@@ -1243,29 +1314,31 @@ impl BufferView {
             self.scroll.y = self.settings.line_height * row.index as f32 + remainder;
             self.style_scroll_anchor = None;
         }
-        if let Some(position) = self.pending_recenter
-            && let Some(row) = index.row_for_offset(self.target.buffer().point())
-        {
-            let available = (bounds.size.height - self.settings.line_height).max(px(0.));
-            let offset = match position {
-                RecenterPosition::Center => available / 2.,
-                RecenterPosition::Top => px(0.),
-                RecenterPosition::Bottom => available,
-            };
-            self.scroll.y = (self.settings.line_height * row.index as f32 - offset).max(px(0.));
-            self.pending_recenter = None;
-            self.reveal_caret = false;
+        if let Some(pending) = self.pending_scroll.take() {
+            match self.pending_scroll_target(&pending, index, bounds.size.height) {
+                Some(y) => {
+                    self.scroll.y = y;
+                    if matches!(pending, PendingScroll::Recenter(_)) {
+                        self.reveal_caret = false;
+                    }
+                }
+                // Retry once the wrap index covers the rows. A complete index
+                // that still cannot answer means the target is folded away, so
+                // the request is dropped instead of waited on forever.
+                None if !index.is_complete() => self.pending_scroll = Some(pending),
+                None => {}
+            }
         }
         let reveal_horizontal = self.reveal_caret;
         if self.reveal_caret
-            && let Some(row) = index.row_for_offset(self.display_snapshot().selected_range().end)
+            && let Some(row) = index.row_for_offset(self.caret())
         {
-            let top = self.settings.line_height * row.index as f32;
-            self.scroll.y = self
-                .scroll
-                .y
-                .min(top)
-                .max((top + self.settings.line_height - bounds.size.height).max(px(0.)));
+            if !self.row_fully_visible(row.index, bounds.size.height) {
+                // Redisplay recenters when the point leaves the window
+                // (`scroll-conservatively` and `scroll-step` are 0) instead of
+                // scrolling the minimum needed to show it.
+                self.scroll.y = self.centered_scroll(row.index, bounds.size.height);
+            }
             self.reveal_caret = self.settings.visible_lines.is_some();
         }
         if index.is_complete() {
@@ -1417,15 +1490,19 @@ impl BufferView {
         if outcome.reveal_point || outcome.viewport.is_some() {
             self.style_scroll_anchor = None;
         }
-        self.pending_recenter = None;
+        self.pending_scroll = None;
         match outcome.viewport {
             Some(ViewportRequest::ScrollToRow(row)) => {
                 let y = self.settings.line_height * row as f32;
                 self.scroll_by(point(px(0.), y - self.scroll.y), cx);
             }
             Some(ViewportRequest::Recenter(position)) => {
-                self.pending_recenter = Some(position);
+                self.pending_scroll = Some(PendingScroll::Recenter(position));
                 self.reveal_caret = false;
+            }
+            Some(ViewportRequest::RecenterFromBottom(lines)) => {
+                self.pending_scroll = Some(PendingScroll::RecenterFromBottom(lines));
+                self.reveal_caret |= outcome.reveal_point;
             }
             None => self.reveal_caret |= outcome.reveal_point,
         }
@@ -1677,7 +1754,7 @@ impl BufferView {
         }
         if self.target.buffer().point() != before_point {
             self.style_scroll_anchor = None;
-            self.pending_recenter = None;
+            self.pending_scroll = None;
             self.reveal_caret = true;
             window.notify_text_selection_changed(&self.focus);
         }

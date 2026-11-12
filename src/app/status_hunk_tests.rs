@@ -142,6 +142,11 @@ fn hunk_folds_and_each_view_point_and_scroll_survive_unchanged_refresh(cx: &mut 
             .collect();
         assert!(hunks[0].collapsed);
         assert!(!hunks[1].collapsed);
+        assert_eq!(hunks.len(), 2);
+        assert!(hunks.iter().all(|node| node.hunk));
+        for node in sections.nodes() {
+            assert_eq!(node.hunk, node.key.contains("/@@ "), "{}", node.key);
+        }
         assert_eq!(
             sections.visible_lines(),
             first.read(cx).buffer().sections().unwrap().visible_lines()

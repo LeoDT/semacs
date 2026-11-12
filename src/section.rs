@@ -16,6 +16,9 @@ pub struct Section {
     pub range: Range<ByteOffset>,
     pub body: ByteOffset,
     pub collapsed: bool,
+    /// A diff hunk heading, the only section type Magit pins to the top of the
+    /// window after section movement.
+    pub hunk: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -250,6 +253,12 @@ impl Sections {
             index.checked_sub(1)?
         };
         self.visible.get(next).map(|line| line.start)
+    }
+
+    /// The range of the hunk section whose heading starts at `point`.
+    pub fn hunk_at(&self, point: ByteOffset) -> Option<Range<ByteOffset>> {
+        let node = &self.nodes[self.current(point)];
+        (node.hunk && node.range.start == point).then(|| node.range.clone())
     }
 
     pub fn navigate(&self, point: ByteOffset, forward: bool) -> Option<ByteOffset> {

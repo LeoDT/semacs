@@ -275,3 +275,42 @@ fn folded_navigation_never_mutates_text_and_text_commands_remain_readonly(cx: &m
     redraw(&mut visual);
     visual.read(|cx| assert_eq!(view.read(cx).buffer().text().to_string(), original));
 }
+
+#[gpui::test]
+fn a_folded_hunk_is_judged_by_the_line_after_it(cx: &mut TestAppContext) {
+    let repo = Repository::new();
+    repo.write("a", "old\n");
+    repo.commit();
+    repo.write("a", "new\n");
+    let buffer = diff_buffer(&repo);
+    let (mut visual, view) = open_buffer(buffer, cx);
+    let hunk = visual.read(|cx| {
+        let view = view.read(cx);
+        let sections = view.buffer().sections().unwrap();
+        let node = sections.nodes().iter().find(|node| node.hunk).unwrap();
+        node.range.clone()
+    });
+    visual.simulate_keystrokes("n n n n");
+    redraw(&mut visual);
+    visual.simulate_keystrokes("tab");
+    redraw(&mut visual);
+    visual.simulate_keystrokes("p");
+    redraw(&mut visual);
+    let before = visual.read(|cx| view.read(cx).scroll.y);
+    visual.simulate_keystrokes("n");
+    redraw(&mut visual);
+    visual.read(|cx| {
+        let view = view.read(cx);
+        let index = view.wrap_index().unwrap();
+        let height = view.content_bounds.unwrap().size.height;
+        // Magit hides the hunk body with an overlay that stops before the
+        // section end, so the folded hunk end is still displayed: here it is
+        // the empty last line. The heading is already on screen and
+        // `magit-hunk-set-window-start` leaves the window alone.
+        let end = index.row_for_offset(hunk.end).unwrap();
+        assert!(view.row_fully_visible(end.index, height));
+        assert_eq!(view.buffer().point(), hunk.start);
+        assert_eq!(view.scroll.y, before);
+        assert!(view.pending_scroll.is_none());
+    });
+}

@@ -105,6 +105,7 @@ pub(super) fn render(status: &Status) -> Result<RenderedStatus, String> {
         range: title.clone(),
         body: title.end,
         collapsed: false,
+        hunk: false,
     }];
     let mut locations = Vec::new();
     for group in Group::ALL {
@@ -123,6 +124,7 @@ pub(super) fn render(status: &Status) -> Result<RenderedStatus, String> {
             range: heading.clone(),
             body: heading.end,
             collapsed: false,
+            hunk: false,
         });
         for (index, entry) in status.group(group) {
             let start = ByteOffset(text.len());
@@ -168,6 +170,7 @@ pub(super) fn render(status: &Status) -> Result<RenderedStatus, String> {
                 range: range.clone(),
                 body: range.end,
                 collapsed: diff.is_some(),
+                hunk: false,
             });
             locations.push(StatusLocation {
                 range,
@@ -204,6 +207,7 @@ pub(super) fn render(status: &Status) -> Result<RenderedStatus, String> {
                         range: heading.clone(),
                         body: heading.end,
                         collapsed: false,
+                        hunk: true,
                     });
                     for line in &hunk.lines {
                         let start = ByteOffset(text.len());

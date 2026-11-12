@@ -74,6 +74,7 @@ pub(crate) fn render_files(title: &str, files: &[FileDiff]) -> Result<RenderedDi
         range: title.clone(),
         body: title.end,
         collapsed: false,
+        hunk: false,
     }];
     let mut styles = vec![(title, StyleRole::SectionHeading)];
     let mut locations = Vec::new();
@@ -88,6 +89,7 @@ pub(crate) fn render_files(title: &str, files: &[FileDiff]) -> Result<RenderedDi
             range: heading.clone(),
             body: heading.end,
             collapsed: false,
+            hunk: false,
         });
         for (file, item) in files.iter().enumerate() {
             let added = format!("+{}", item.added.map_or("binary".into(), |n| n.to_string()));
@@ -116,6 +118,7 @@ pub(crate) fn render_files(title: &str, files: &[FileDiff]) -> Result<RenderedDi
                 range: range.clone(),
                 body: range.end,
                 collapsed: false,
+                hunk: false,
             });
             locations.push(Location {
                 range,
@@ -145,6 +148,7 @@ pub(crate) fn render_files(title: &str, files: &[FileDiff]) -> Result<RenderedDi
             range: range.clone(),
             body: range.end,
             collapsed: item.status == 'D',
+            hunk: false,
         });
         let stat = locations
             .iter()
@@ -179,6 +183,7 @@ pub(crate) fn render_files(title: &str, files: &[FileDiff]) -> Result<RenderedDi
                 range: range.clone(),
                 body: range.end,
                 collapsed: false,
+                hunk: true,
             });
             locations.push(Location {
                 range,

@@ -94,7 +94,25 @@ impl AppShell {
                             view.update(cx, |view, cx| view.restore_section_scroll(anchor, cx));
                         }
                         let point = point.unwrap_or_else(|| origin.read(cx).buffer().point());
-                        origin.update(cx, |view, cx| view.show_location(point, window, cx));
+                        // Every section movement command runs Magit's
+                        // `magit-section-movement-hook`, including `^`; only a
+                        // hunk heading can follow `magit-hunk-set-window-start`.
+                        let hunk = if matches!(
+                            command,
+                            Command::SectionForward | Command::SectionBackward | Command::SectionUp
+                        ) {
+                            origin
+                                .read(cx)
+                                .buffer()
+                                .sections()
+                                .and_then(|sections| sections.hunk_at(point))
+                        } else {
+                            None
+                        };
+                        origin.update(cx, |view, cx| match hunk {
+                            Some(range) => view.show_hunk(range, window, cx),
+                            None => view.show_location(point, window, cx),
+                        });
                     }
                     Err(error) => self.show_message(origin, error, cx),
                 }
