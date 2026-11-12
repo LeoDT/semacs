@@ -8,6 +8,10 @@ use crate::view::BufferView;
 use gpui_kit::{App, AppContext, Context, Entity, Focusable, Window};
 use std::path::Path;
 
+#[cfg(test)]
+#[path = "reads_tests.rs"]
+mod tests;
+
 impl AppShell {
     pub(super) fn begin_read(
         &mut self,
@@ -48,7 +52,12 @@ impl AppShell {
                 .clone();
             editor.update(cx, |view, cx| view.set_read_only(true, cx));
         }
-        self.session = Some(ReadSession::new(id, kind, target.clone()));
+        self.session = Some(ReadSession::new(
+            id,
+            kind,
+            target.clone(),
+            initial.to_owned(),
+        ));
         self.refresh_candidates(window, cx);
         Some(id)
     }
@@ -114,14 +123,20 @@ impl AppShell {
             return;
         }
         let origin = self.session.as_ref().unwrap().origin();
-        let path = files::expand(Path::new(&input), &self.default_directory_for(origin, cx));
-        let path = match path {
+        let directory = self.file_read_directory(origin, cx);
+        let path = match files::expand(Path::new(&input), &directory) {
             Ok(path) => path,
             Err(error) => {
                 self.message_minibuffer(format!("{}: {error}", input), cx);
                 return;
             }
         };
+        // Dired is not implemented, so a directory keeps the session open
+        // instead of visiting it or reading it as a file.
+        if path.is_dir() {
+            self.message_minibuffer("Select a file or enter a file name", cx);
+            return;
+        }
         if let Some(target) = self.end_session(id, window, cx) {
             self.visit_file(path, &target, window, cx);
         }
@@ -384,14 +399,28 @@ impl AppShell {
             self.message_minibuffer("No file name", cx);
             return;
         }
-        let origin = self.session.as_ref().unwrap().origin();
-        match files::expand(Path::new(&input), &self.default_directory_for(origin, cx)) {
-            Ok(path) => {
-                if let Some(target) = self.end_session(id, window, cx) {
-                    self.write_file(&target, path, window, cx);
-                }
+        let Some(session) = &self.session else { return };
+        let origin = session.origin().clone();
+        let directory = self.file_read_directory(&origin, cx);
+        let (current, display_name) = {
+            let buffer = origin.read(cx).buffer();
+            (buffer.path(), buffer.display_name())
+        };
+        let path = match files::write_target(
+            &input,
+            session.initial(),
+            &directory,
+            current.as_deref(),
+            &display_name,
+        ) {
+            Ok(path) => path,
+            Err(error) => {
+                self.message_minibuffer(format!("{input}: {error}"), cx);
+                return;
             }
-            Err(error) => self.message_minibuffer(format!("{input}: {error}"), cx),
+        };
+        if let Some(target) = self.end_session(id, window, cx) {
+            self.write_file(&target, path, window, cx);
         }
     }
 

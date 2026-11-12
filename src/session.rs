@@ -239,11 +239,14 @@ pub struct ReadSession {
     kind: ReadKind,
     origin: Entity<BufferView>,
     keymap: Keymap,
+    /// Input the session opened with, used to recognise an unedited answer
+    /// such as the default directory of a file read.
+    initial: String,
     pub(crate) candidates: Option<CandidateList>,
 }
 
 impl ReadSession {
-    pub fn new(id: u64, kind: ReadKind, origin: Entity<BufferView>) -> Self {
+    pub fn new(id: u64, kind: ReadKind, origin: Entity<BufferView>, initial: String) -> Self {
         let mut keymap = if kind.is_single_key() {
             let mut keymap = Keymap::default();
             let keys: &[&str] = match &kind {
@@ -294,6 +297,7 @@ impl ReadSession {
             kind,
             origin,
             keymap,
+            initial,
             candidates,
         }
     }
@@ -312,6 +316,10 @@ impl ReadSession {
 
     pub fn origin(&self) -> &Entity<BufferView> {
         &self.origin
+    }
+
+    pub fn initial(&self) -> &str {
+        &self.initial
     }
 
     pub(crate) fn keymap(&self) -> &Keymap {

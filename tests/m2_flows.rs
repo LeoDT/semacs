@@ -156,6 +156,7 @@ fn find_file_reuses_the_file_object_for_links_and_dotdot(cx: &mut TestAppContext
         dir.path().file_name().unwrap().to_string_lossy()
     );
     visual.simulate_keystrokes("ctrl-x ctrl-f");
+    clear_input(&mut visual);
     visual.simulate_input(&spelling);
     visual.simulate_keystrokes("enter");
     let dotted = active_view(&mut visual, &shell);
@@ -175,6 +176,7 @@ fn find_file_resolves_relative_paths_against_the_buffer_directory(cx: &mut TestA
     let (mut visual, shell, _) = open(buffer_at(&main, "main"), cx);
 
     visual.simulate_keystrokes("ctrl-x ctrl-f");
+    clear_input(&mut visual);
     visual.simulate_input("other.txt");
     visual.simulate_keystrokes("enter");
     redraw(&mut visual);
@@ -503,6 +505,7 @@ fn path_completion_preserves_relative_and_explicit_directory_prefixes(cx: &mut T
     let (mut visual, shell, _) = open(buffer_at(&source, "source"), cx);
     for (input, expected) in [("al", "alpha.txt"), ("./al", "./alpha.txt")] {
         visual.simulate_keystrokes("ctrl-x ctrl-f");
+        clear_input(&mut visual);
         visual.simulate_input(input);
         visual.simulate_keystrokes("tab");
         redraw(&mut visual);
@@ -608,6 +611,7 @@ fn path_completion_ignores_changed_text_and_replaced_sessions(cx: &mut TestAppCo
     fs::write(dir.path().join("alpha.txt"), b"alpha").unwrap();
     let (mut visual, shell, _) = open(buffer_at(&source, "source"), cx);
     visual.simulate_keystrokes("ctrl-x ctrl-f");
+    clear_input(&mut visual);
     visual.update(|window, cx| {
         for key in ["a", "l", "tab", "z"] {
             let mut stroke = gpui_kit::Keystroke::parse(key).unwrap();
@@ -624,7 +628,10 @@ fn path_completion_ignores_changed_text_and_replaced_sessions(cx: &mut TestAppCo
     visual.simulate_input("al");
     dispatch_keys(&mut visual, &["tab", "ctrl-g", "ctrl-x", "ctrl-f"]);
     redraw(&mut visual);
-    assert_eq!(contents(&mut visual, &shell), "");
+    assert_eq!(
+        contents(&mut visual, &shell),
+        semacs::files::directory_input(dir.path())
+    );
     assert_eq!(prompt(&mut visual, &shell), "Find file: ");
 }
 

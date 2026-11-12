@@ -6,7 +6,7 @@ use crate::session::ReadKind;
 use crate::view::BufferView;
 use gpui_kit::{App, Context, Entity, Window};
 use std::collections::HashSet;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 impl AppShell {
     pub fn create_buffer(
@@ -109,6 +109,32 @@ impl AppShell {
             .path()
             .and_then(|path| path.parent().map(ToOwned::to_owned))
             .unwrap_or_else(|| self.startup_directory.clone())
+    }
+
+    /// Directory a file read starts from: the origin buffer's repository root,
+    /// then its own directory, then the startup directory.
+    pub(super) fn file_read_directory(&self, view: &Entity<BufferView>, cx: &App) -> PathBuf {
+        let buffer = view.read(cx).buffer();
+        if let Some(repository) = buffer.repository() {
+            return repository.root;
+        }
+        buffer
+            .path()
+            .and_then(|path| path.parent().map(Path::to_path_buf))
+            .unwrap_or_else(|| self.startup_directory.clone())
+    }
+
+    /// Starts a file read whose initial input is the default directory, as
+    /// `insert-default-directory` does upstream.
+    pub(super) fn begin_file_read(
+        &mut self,
+        kind: ReadKind,
+        target: &Entity<BufferView>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Option<u64> {
+        let initial = crate::files::directory_input(&self.file_read_directory(target, cx));
+        self.begin_read(kind, target, &initial, window, cx)
     }
 
     pub(super) fn kill_buffer_at(

@@ -715,6 +715,10 @@ impl EditTarget {
         self.buffer.set_point(point).expect("valid display point");
     }
 
+    /// Moves only the point, without a mark or region. Mouse presses and drags
+    /// use [`Self::press_pointer`], [`Self::drag_pointer`] and
+    /// [`Self::release_pointer`]; this helper stays for callers that just place
+    /// the caret at a hit-tested offset.
     pub fn set_point_from_pointer(
         &mut self,
         token: SessionToken,
@@ -726,6 +730,44 @@ impl EditTarget {
         self.keys.clear();
         self.interrupt_command_chain();
         Ok(())
+    }
+
+    /// Starts a mouse selection: mark and point at the pressed offset and the
+    /// region is active until the gesture ends. The press is the only part of a
+    /// drag that starts a new history group.
+    pub fn press_pointer(
+        &mut self,
+        token: SessionToken,
+        point: ByteOffset,
+    ) -> Result<(), RouteError> {
+        self.input.guard_command(&self.buffer, token)?;
+        self.buffer.set_point(point)?;
+        let point = self.buffer.point();
+        self.buffer.set_mark(point)?;
+        self.buffer.break_history_group();
+        self.keys.clear();
+        self.interrupt_command_chain();
+        Ok(())
+    }
+
+    /// Extends a mouse selection without starting another history group or
+    /// command chain.
+    pub fn drag_pointer(
+        &mut self,
+        token: SessionToken,
+        point: ByteOffset,
+    ) -> Result<(), RouteError> {
+        self.input.guard_command(&self.buffer, token)?;
+        self.buffer.set_point(point)?;
+        Ok(())
+    }
+
+    /// Finishes a mouse selection. A press released without moving the point to
+    /// another offset is a plain click and leaves no active region.
+    pub fn release_pointer(&mut self, click: bool) {
+        if click {
+            self.buffer.deactivate_mark();
+        }
     }
 
     fn interrupt_command_chain(&mut self) {

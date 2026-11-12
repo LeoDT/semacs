@@ -35,6 +35,7 @@ mod feedback;
 pub(crate) use feedback::Feedback;
 mod initial;
 mod motion;
+mod pointer;
 mod sections;
 
 pub(crate) use initial::InitialViewport;
@@ -375,10 +376,12 @@ pub struct BufferView {
     shape_range: Option<(LayoutKey, Range<usize>)>,
     cache: HashMap<usize, Arc<ShapedRow>>,
     geometry: Option<ViewportLayout>,
+    view_bounds: Option<Bounds<Pixels>>,
     content_bounds: Option<Bounds<Pixels>>,
     retained_paint_layout: Option<ViewportLayout>,
     style_scroll_anchor: Option<(ByteOffset, Pixels)>,
     scroll: Point<Pixels>,
+    pointer_drag: Option<pointer::PointerDrag>,
     reflow_base: Option<WrapIndex>,
     pending_change: Option<DisplayChange>,
     registration: u64,
@@ -440,10 +443,12 @@ impl BufferView {
             shape_range: None,
             cache: HashMap::new(),
             geometry: None,
+            view_bounds: None,
             content_bounds: None,
             retained_paint_layout: None,
             style_scroll_anchor: None,
             scroll: Point::default(),
+            pointer_drag: None,
             reflow_base: None,
             pending_change: None,
             registration: 0,
@@ -692,6 +697,7 @@ impl BufferView {
         let change = self.target.end_input();
         self.queue_change(change, cx);
         self.input_geometry = None;
+        self.clear_pointer_drag();
         self.invalidate_input_registration();
     }
 
@@ -1201,6 +1207,7 @@ impl BufferView {
         if !self.focus.is_focused(window) && self.target.snapshot_for(self.target.token()).is_ok() {
             self.end_input(cx);
         }
+        self.view_bounds = Some(bounds);
         let bounds = text_bounds(bounds);
         self.content_bounds = Some(bounds);
         self.split_geometry_ready = true;
@@ -1363,37 +1370,7 @@ impl BufferView {
         } else if let Some(retained) = &mut self.retained_paint_layout {
             retained.bounds = bounds;
         }
-    }
-
-    fn mouse_down(&mut self, event: &MouseDownEvent, window: &mut Window, cx: &mut Context<Self>) {
-        if !self.accepting_input {
-            return;
-        }
-        if self.target.input().is_composing() {
-            self.set_message("Input method composition is active; finish it first", cx);
-            return;
-        }
-        let Some(offset) = self
-            .viewport_layout()
-            .and_then(|layout| layout.hit_test(event.position))
-        else {
-            return;
-        };
-        self.resume_input(cx);
-        if let Err(error) = self
-            .target
-            .set_point_from_pointer(self.target.token(), offset)
-        {
-            self.set_message(error.to_string(), cx);
-            return;
-        }
-        self.invalidate_input_registration();
-        self.style_scroll_anchor = None;
-        self.pending_recenter = None;
-        self.clear_message(cx);
-        window.focus(&self.focus, cx);
-        window.notify_text_selection_changed(&self.focus);
-        cx.notify();
+        self.sync_pointer_edge(window, cx);
     }
 
     fn finish_command(
@@ -1701,6 +1678,8 @@ impl Render for BufferView {
             .bg(cx.theme().background)
             .text_color(cx.theme().foreground)
             .on_mouse_down(MouseButton::Left, cx.listener(Self::mouse_down))
+            .on_mouse_move(cx.listener(Self::mouse_moved))
+            .on_mouse_up(MouseButton::Left, cx.listener(Self::mouse_released))
             .on_scroll(cx.listener(Self::scroll_wheel))
             .child(TextCanvas { view: cx.entity() })
     }
@@ -1764,13 +1743,20 @@ impl Element for TextCanvas {
         window: &mut Window,
         cx: &mut App,
     ) {
+        let active = window.is_window_active();
         self.view.update(cx, |view, cx| {
+            if !active && view.pointer_drag.is_some() {
+                // A deactivated window receives no release, so the gesture ends
+                // without changing the region it already selected.
+                view.clear_pointer_drag();
+            }
             let handler = view.bind_input(cx);
             if view.accepting_input {
                 window.handle_input(&view.focus, handler, cx);
                 view.refresh_input_geometry(window);
             }
         });
+        BufferView::register_pointer_listeners(self.view.clone(), window, cx);
         let annotation = self.view.read(cx).annotation_lines(window, cx);
         let (layout, cursor, marked, region, prompt_end, syntax, annotations, committed_text) = {
             let view = self.view.read(cx);
@@ -1957,6 +1943,8 @@ pub(crate) mod input_tests;
 mod minibuffer_tests;
 #[cfg(test)]
 mod motion_tests;
+#[cfg(test)]
+mod mouse_tests;
 #[cfg(test)]
 mod region_tests;
 #[cfg(test)]

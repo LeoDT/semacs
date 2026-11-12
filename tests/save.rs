@@ -16,6 +16,7 @@ fn find_file_edit_save_preserves_bom_crlf_and_the_missing_final_newline(cx: &mut
 
     let (mut visual, shell, _) = open(Buffer::scratch(), cx);
     visual.simulate_keystrokes("ctrl-x ctrl-f");
+    clear_input(&mut visual);
     visual.simulate_input(path.to_str().unwrap());
     visual.simulate_keystrokes("enter");
     let view = active_view(&mut visual, &shell);
@@ -220,6 +221,7 @@ fn find_file_reports_read_errors_on_the_origin_without_leaving_a_session(cx: &mu
     let (mut visual, shell, origin) = open(Buffer::scratch(), cx);
     visual.simulate_input("body");
     visual.simulate_keystrokes("ctrl-x ctrl-f");
+    clear_input(&mut visual);
     visual.simulate_input(path.to_str().unwrap());
     visual.simulate_keystrokes("enter");
     redraw(&mut visual);
@@ -245,6 +247,7 @@ fn find_file_creates_a_new_empty_buffer_for_a_missing_path(cx: &mut TestAppConte
     let path = dir.path().join("new.txt");
     let (mut visual, shell, _) = open(Buffer::scratch(), cx);
     visual.simulate_keystrokes("ctrl-x ctrl-f");
+    clear_input(&mut visual);
     visual.simulate_input(path.to_str().unwrap());
     visual.simulate_keystrokes("enter");
     let view = active_view(&mut visual, &shell);
@@ -334,6 +337,7 @@ fn find_file_completes_a_path_and_reuses_the_same_buffer(cx: &mut TestAppContext
     let (mut visual, shell, _) = open(Buffer::scratch(), cx);
 
     visual.simulate_keystrokes("ctrl-x ctrl-f");
+    clear_input(&mut visual);
     let prefix = format!("{}/al", dir.path().display());
     visual.simulate_input(&prefix);
     visual.simulate_keystrokes("tab");
@@ -537,6 +541,7 @@ fn write_file_writes_bytes_and_updates_the_buffer_identity(cx: &mut TestAppConte
     visual.simulate_keystrokes("ctrl-e");
     visual.simulate_input("X");
     visual.simulate_keystrokes("ctrl-x ctrl-w");
+    clear_input(&mut visual);
     visual.simulate_input(target.to_str().unwrap());
     visual.simulate_keystrokes("enter");
     redraw(&mut visual);
@@ -562,6 +567,7 @@ fn write_file_confirms_existing_targets_and_cancel_keeps_the_old_identity(cx: &m
     let (mut visual, _shell, view) = open(buffer, cx);
 
     visual.simulate_keystrokes("ctrl-x ctrl-w");
+    clear_input(&mut visual);
     visual.simulate_input(target.to_str().unwrap());
     visual.simulate_keystrokes("enter");
     redraw(&mut visual);
@@ -581,6 +587,7 @@ fn write_file_confirms_existing_targets_and_cancel_keeps_the_old_identity(cx: &m
     assert_eq!(fs::read(&target).unwrap(), b"old");
 
     visual.simulate_keystrokes("ctrl-x ctrl-w");
+    clear_input(&mut visual);
     visual.simulate_input(target.to_str().unwrap());
     visual.simulate_keystrokes("enter");
     visual.simulate_keystrokes("y");
@@ -710,6 +717,7 @@ fn terminal_exit_saves_a_named_scratch_buffer_and_closes(cx: &mut TestAppContext
     visual.simulate_input("dirty");
     redraw(&mut visual);
     visual.simulate_keystrokes("ctrl-x ctrl-w");
+    clear_input(&mut visual);
     visual.simulate_input(target.to_str().unwrap());
     visual.simulate_keystrokes("enter");
     redraw(&mut visual);
@@ -759,4 +767,93 @@ fn a_failed_exit_save_aborts_exit_and_keeps_the_dirty_buffer(cx: &mut TestAppCon
     });
     assert_eq!(visual.windows().len(), 1);
     assert!(target.is_dir());
+}
+
+#[gpui::test]
+fn write_file_prefills_the_current_directory_and_an_unedited_ret_keeps_the_file(
+    cx: &mut TestAppContext,
+) {
+    let dir = TempDir::new("write-prefill");
+    let source = dir.path().join("source.txt");
+    fs::write(&source, b"one").unwrap();
+    let (mut visual, shell, view) = open(buffer_at(&source, "one"), cx);
+    visual.simulate_keystrokes("ctrl-e");
+    visual.simulate_input("X");
+    visual.simulate_keystrokes("ctrl-x ctrl-w");
+    redraw(&mut visual);
+    assert_eq!(prompt(&mut visual, &shell), "Write file: ");
+    assert_eq!(
+        contents(&mut visual, &shell),
+        semacs::files::directory_input(dir.path())
+    );
+    visual.simulate_keystrokes("enter");
+    redraw(&mut visual);
+    assert!(prompt(&mut visual, &shell).contains("exists; overwrite?"));
+    visual.simulate_keystrokes("y");
+    redraw(&mut visual);
+    visual.read(|cx| assert!(shell.read(cx).session().is_none()));
+    visual.read(|cx| {
+        assert_eq!(
+            view.read(cx).buffer().path().as_deref(),
+            Some(source.as_path())
+        );
+    });
+    assert_eq!(fs::read(&source).unwrap(), b"oneX");
+}
+
+#[gpui::test]
+fn write_file_directory_input_appends_the_current_file_name(cx: &mut TestAppContext) {
+    let dir = TempDir::new("write-directory");
+    let source = dir.path().join("source.txt");
+    let nested = dir.path().join("sub");
+    fs::create_dir(&nested).unwrap();
+    fs::write(&source, b"one").unwrap();
+    let (mut visual, shell, view) = open(buffer_at(&source, "one"), cx);
+    visual.simulate_keystrokes("ctrl-e");
+    visual.simulate_input("X");
+    visual.simulate_keystrokes("ctrl-x ctrl-w");
+    clear_input(&mut visual);
+    visual.simulate_input(&semacs::files::directory_input(&nested));
+    visual.simulate_keystrokes("enter");
+    redraw(&mut visual);
+    visual.read(|cx| {
+        assert!(shell.read(cx).session().is_none());
+        assert_eq!(
+            view.read(cx).buffer().path().as_deref(),
+            Some(nested.join("source.txt").as_path())
+        );
+    });
+    assert_eq!(fs::read(nested.join("source.txt")).unwrap(), b"oneX");
+    assert_eq!(fs::read(&source).unwrap(), b"one");
+}
+
+#[gpui::test]
+fn write_file_treats_input_restored_to_the_initial_text_as_unedited(cx: &mut TestAppContext) {
+    let dir = TempDir::new("write-restored");
+    let source = dir.path().join("source.txt");
+    fs::write(&source, b"one").unwrap();
+    let (mut visual, shell, view) = open(buffer_at(&source, "one"), cx);
+    visual.simulate_keystrokes("ctrl-e");
+    visual.simulate_input("X");
+    visual.simulate_keystrokes("ctrl-x ctrl-w");
+    redraw(&mut visual);
+    visual.simulate_input("z");
+    visual.simulate_keystrokes("backspace");
+    assert_eq!(
+        contents(&mut visual, &shell),
+        semacs::files::directory_input(dir.path())
+    );
+    visual.simulate_keystrokes("enter");
+    redraw(&mut visual);
+    assert!(prompt(&mut visual, &shell).contains("exists; overwrite?"));
+    visual.simulate_keystrokes("y");
+    redraw(&mut visual);
+    visual.read(|cx| {
+        assert_eq!(
+            view.read(cx).buffer().path().as_deref(),
+            Some(source.as_path())
+        );
+    });
+    assert_eq!(fs::read(&source).unwrap(), b"oneX");
+    assert!(!dir.path().join("z").exists());
 }

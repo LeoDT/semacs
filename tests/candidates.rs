@@ -84,6 +84,7 @@ fn retained_file_candidates_are_not_used_by_pending_actions_or_empty_results(
     let (mut visual, shell, body) = open(buffer_at(&source, "source"), cx);
     for action in ["tab", "enter", "alt-enter"] {
         visual.simulate_keystrokes("ctrl-x ctrl-f");
+        clear_input(&mut visual);
         visual.simulate_input("a");
         redraw(&mut visual);
         visual.update(|window, cx| {
@@ -126,6 +127,7 @@ fn retained_file_candidates_are_not_used_by_pending_actions_or_empty_results(
         }
     }
     visual.simulate_keystrokes("ctrl-x ctrl-f");
+    clear_input(&mut visual);
     visual.simulate_input("a");
     redraw(&mut visual);
     visual.update(|window, cx| {
@@ -208,6 +210,7 @@ fn directory_ret_enters_and_complete_directory_preselects_input_without_opening_
     fs::write(&child, b"child").unwrap();
     let (mut visual, shell, body) = open(buffer_at(&source, "source"), cx);
     visual.simulate_keystrokes("ctrl-x ctrl-f");
+    clear_input(&mut visual);
     redraw(&mut visual);
     let list = candidates(&visual, &shell);
     assert!(list.selected.is_none());
@@ -254,6 +257,7 @@ fn file_fuzzy_matching_preserves_directory_prefix_and_smart_case(cx: &mut TestAp
     fs::write(dir.path().join("AbcDocument.txt"), b"match").unwrap();
     let (mut visual, shell, _) = open(buffer_at(&source, "source"), cx);
     visual.simulate_keystrokes("ctrl-x ctrl-f");
+    clear_input(&mut visual);
     visual.simulate_input("./ad");
     redraw(&mut visual);
     let list = candidates(&visual, &shell);
@@ -284,6 +288,7 @@ fn raw_input_and_input_row_accept_new_paths_even_when_existing_names_match(
     fs::write(&existing, b"existing").unwrap();
     let (mut visual, shell, body) = open(buffer_at(&source, "source"), cx);
     visual.simulate_keystrokes("ctrl-x ctrl-f");
+    clear_input(&mut visual);
     visual.simulate_input("alp");
     redraw(&mut visual);
     assert_eq!(
@@ -308,6 +313,7 @@ fn raw_input_and_input_row_accept_new_paths_even_when_existing_names_match(
     activate(&mut visual, &shell, 0);
     visual.simulate_input("X");
     visual.simulate_keystrokes("ctrl-x ctrl-w");
+    clear_input(&mut visual);
     visual.simulate_input("al");
     redraw(&mut visual);
     visual.simulate_keystrokes("up enter");
@@ -329,6 +335,7 @@ fn selected_existing_save_target_still_requires_explicit_overwrite_confirmation(
     let (mut visual, shell, _) = open(buffer_at(&source, "source"), cx);
     visual.simulate_input("X");
     visual.simulate_keystrokes("ctrl-x ctrl-w");
+    clear_input(&mut visual);
     visual.simulate_input("aat");
     visual.simulate_keystrokes("enter");
     redraw(&mut visual);
@@ -375,4 +382,92 @@ fn raw_buffer_names_require_an_existing_buffer_and_defaults_remain_available(
     );
     visual.simulate_keystrokes("enter");
     assert_eq!(visual.read(|cx| shell.read(cx).buffer_count()), 1);
+}
+
+#[gpui::test]
+fn find_file_prefills_the_buffer_directory_and_lists_its_children(cx: &mut TestAppContext) {
+    let dir = TempDir::new("prefill-find");
+    let source = dir.path().join("source.txt");
+    fs::write(&source, b"source").unwrap();
+    fs::write(dir.path().join("alpha.txt"), b"alpha").unwrap();
+    fs::create_dir(dir.path().join("sub")).unwrap();
+    let (mut visual, shell, _) = open(buffer_at(&source, "source"), cx);
+    visual.simulate_keystrokes("ctrl-x ctrl-f");
+    redraw(&mut visual);
+    let prefix = semacs::files::directory_input(dir.path());
+    assert_eq!(prompt(&mut visual, &shell), "Find file: ");
+    assert_eq!(contents(&mut visual, &shell), prefix);
+    let mut values: Vec<_> = candidates(&visual, &shell)
+        .items
+        .iter()
+        .map(|item| item.candidate.value.to_string())
+        .collect();
+    values.sort();
+    assert_eq!(
+        values,
+        vec![
+            format!("{prefix}alpha.txt"),
+            format!("{prefix}source.txt"),
+            format!("{prefix}sub/")
+        ]
+    );
+
+    visual.simulate_input("al");
+    redraw(&mut visual);
+    let list = candidates(&visual, &shell);
+    assert_eq!(list.items.len(), 1);
+    assert_eq!(list.items[0].candidate.value, format!("{prefix}alpha.txt"));
+    visual.simulate_keystrokes("enter");
+    redraw(&mut visual);
+    visual.read(|cx| {
+        assert!(shell.read(cx).session().is_none());
+        assert_eq!(
+            shell
+                .read(cx)
+                .active_view()
+                .read(cx)
+                .buffer()
+                .path()
+                .as_deref(),
+            Some(dir.path().join("alpha.txt").as_path())
+        );
+    });
+}
+
+#[gpui::test]
+fn ret_on_the_prefilled_directory_keeps_the_find_file_session(cx: &mut TestAppContext) {
+    let dir = TempDir::new("prefill-directory-ret");
+    let source = dir.path().join("source.txt");
+    fs::write(&source, b"source").unwrap();
+    let (mut visual, shell, body) = open(buffer_at(&source, "source"), cx);
+    visual.simulate_keystrokes("ctrl-x ctrl-f");
+    redraw(&mut visual);
+    visual.simulate_keystrokes("enter");
+    redraw(&mut visual);
+    let editor = visual.read(|cx| {
+        shell
+            .read(cx)
+            .minibuffer()
+            .unwrap()
+            .read(cx)
+            .editor()
+            .clone()
+    });
+    visual.read(|cx| {
+        let shell = shell.read(cx);
+        assert!(shell.session().is_some());
+        assert_eq!(shell.buffer_count(), 1);
+        assert_eq!(shell.active_view(), &body);
+        assert_eq!(
+            editor.read(cx).message(),
+            Some("Select a file or enter a file name")
+        );
+        assert_eq!(
+            shell.minibuffer().unwrap().read(cx).contents(cx),
+            semacs::files::directory_input(dir.path())
+        );
+    });
+    visual.simulate_keystrokes("ctrl-g");
+    redraw(&mut visual);
+    visual.read(|cx| assert!(shell.read(cx).session().is_none()));
 }

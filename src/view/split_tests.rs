@@ -93,7 +93,9 @@ fn clicking_another_view_discards_only_marked_text_and_routes_the_next_input_the
 }
 
 #[gpui::test]
-fn pointer_switch_clears_old_pending_prefix_and_keeps_mark_shared(cx: &mut TestAppContext) {
+fn pointer_switch_clears_old_pending_prefix_and_moves_the_mark_to_the_click(
+    cx: &mut TestAppContext,
+) {
     let (mut visual, first, second) = split(cx);
     visual.simulate_keystrokes("ctrl-f ctrl-t ctrl-f ctrl-x");
     redraw(&mut visual);
@@ -106,8 +108,9 @@ fn pointer_switch_clears_old_pending_prefix_and_keeps_mark_shared(cx: &mut TestA
     redraw(&mut visual);
     visual.read(|cx| {
         assert!(!second.read(cx).target.is_pending());
-        assert_eq!(first.read(cx).buffer().mark(), Some(ByteOffset(1)));
-        assert!(first.read(cx).buffer().mark_active());
+        assert_eq!(first.read(cx).buffer().point(), ByteOffset(0));
+        assert_eq!(first.read(cx).buffer().mark(), Some(ByteOffset(0)));
+        assert!(!first.read(cx).buffer().mark_active());
         assert!(first.read(cx).selected);
         assert!(!second.read(cx).selected);
     });

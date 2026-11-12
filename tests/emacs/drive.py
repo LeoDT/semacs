@@ -7,14 +7,21 @@ keystrokes injected as terminal input.
 
 Usage: drive.py <case> [<case> ...]
 Output: .pi/tmp/emacs-reference/emacs-<case>.jsonl (repository-relative) plus a per-step index map on stdout.
+
+Mouse cases send xterm SGR sequences as terminal input after enabling
+`xterm-mouse-mode`; their cases declare a fixed 24x80 pty and `point: start` so
+clicked rows and scrolling line up with the dumped window.
 """
 import base64
+import fcntl
 import json
 import os
 import pty
 import select
+import struct
 import subprocess
 import sys
+import termios
 import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -36,7 +43,19 @@ C_SPC = b"\x00"
 C_X = b"\x18"
 C_W = b"\x17"
 
-# Each case: (initial text, [(label, keys), ...])
+def mouse(button, col, row, release=False):
+    """xterm SGR mouse report; button 0 is left, 32 is motion with left held."""
+    return f"\x1b[<{button};{col};{row}{'m' if release else 'M'}".encode()
+
+
+def click(col, row):
+    return mouse(0, col, row) + mouse(0, col, row, release=True)
+
+
+MOUSE_FIXTURE = "".join(f"l{i:02d} aaaa\n" for i in range(100))
+
+# Each case: (initial text, [(label, keys), ...], optional options).
+# Options: {"size": (rows, cols), "point": "start", "mouse": True}.
 CASES = {
     "m1-minibuffer-motion": ("body", [("open reference input", b"\x03t"),
         ("type abc", b"abc"), ("M-<", ESC + b"<"), ("C-a", C_A),
@@ -119,6 +138,32 @@ CASES = {
     "cq-sep-hello": ("hello", [("C-x", C_X), ("C-g", C_G)]),
     "cq-combined-empty": ("", [("C-x C-g", C_X + C_G)]),
     "cq-sep-empty": ("", [("C-x", C_X), ("C-g", C_G)]),
+    "m3-mouse-click-drag": (MOUSE_FIXTURE, [
+        ("click line 03 col 6", click(6, 3)),
+        ("click line 06 col 6", click(6, 6)),
+        ("press 5,9 / move 9,8 / move 9,11 / release",
+         mouse(0, 5, 9) + mouse(32, 9, 8) + mouse(32, 9, 11) + mouse(0, 9, 11, release=True)),
+    ], {"size": (24, 80), "point": "start", "mouse": True}),
+    "m3-mouse-autoscroll": (MOUSE_FIXTURE, [
+        ("press 5,4", mouse(0, 5, 4)),
+        ("move below rows", mouse(32, 5, 22)),
+        ("move further below", mouse(32, 5, 30)),
+        ("move further below again", mouse(32, 5, 30)),
+        ("release below", mouse(0, 5, 30, release=True)),
+        ("press in text", mouse(0, 4, 3)),
+        ("move right of the pty", mouse(32, 200, 10)),
+        ("move right again", mouse(32, 200, 10)),
+        ("release right", mouse(0, 200, 10, release=True)),
+    ], {"size": (24, 80), "point": "start", "mouse": True}),
+    "m3-read-find-file": ("body", [
+        ("C-x C-f", C_X + b"\x06"),
+        ("RET", RET),
+        ("C-g", C_G),
+    ], {"size": (24, 80)}),
+    "m3-read-write-file": ("body", [
+        ("C-x C-w", C_X + C_W),
+        ("C-g", C_G),
+    ], {"size": (24, 80)}),
     "buffers": ("aa", [("C-e", C_E), ("C-SPC", C_SPC), ("C-a", C_A),
                         ("C-x b foo RET", C_X + b"bfoo\r"),
                         ("type bb", b"bb"), ("C-SPC", C_SPC), ("C-a", C_A),
@@ -194,16 +239,28 @@ def read_lines(path):
 
 
 def run_case(case, init_wait=1.5, settle=0.5):
-    initial, steps = CASES[case]
+    entry = CASES[case]
+    initial, steps = entry[0], entry[1]
+    options = entry[2] if len(entry) > 2 else {}
     os.makedirs(LOG, exist_ok=True)
     state = os.path.join(LOG, f"emacs-{case}.jsonl")
     if os.path.exists(state):
         os.remove(state)
 
-    os.environ.update({"TERM": "xterm-256color", "EMACS_REFERENCE_STATE": state, "EMACS_REFERENCE_INITIAL": initial})
+    os.environ.update({
+        "TERM": "xterm-256color",
+        "EMACS_REFERENCE_STATE": state,
+        "EMACS_REFERENCE_INITIAL": initial,
+        "EMACS_REFERENCE_POINT": options.get("point", "end"),
+        "EMACS_REFERENCE_MOUSE": "1" if options.get("mouse") else "0",
+    })
     pid, master = pty.fork()
     if pid == 0:  # child
         try:
+            size = options.get("size")
+            if size:
+                rows, cols = size
+                fcntl.ioctl(0, termios.TIOCSWINSZ, struct.pack("HHHH", rows, cols, 0, 0))
             os.execvpe(
                 "emacs",
                 ["emacs", "-Q", "-nw", "-l", os.path.join(HERE, "baseline.el")],
@@ -242,7 +299,7 @@ def main():
         for i, line in enumerate(lines):
             d = json.loads(line)
             raw = base64.b64decode(d["text"]).decode("utf-8", "replace")
-            print(f"  [{i}] text={raw!r} point={d['point']} mark={d['mark']} active={d['active']} modified={d.get('modified')} msg={d.get('msg','')!r}")
+            print(f"  [{i}] text={raw!r} point={d['point']} mark={d['mark']} active={d['active']} modified={d.get('modified')} start={d.get('start')} end={d.get('end')} msg={d.get('msg','')!r}")
             if d.get("prompt_end") is not None:
                 end = d["prompt_end"]
                 print(f"      prompt_end={end} input={raw[end - 1:]!r}")

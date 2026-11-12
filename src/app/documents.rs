@@ -244,7 +244,7 @@ impl AppShell {
         }
         if !saving && buffer.path().is_none() {
             return self
-                .begin_read(ReadKind::WriteFile, target, "", window, cx)
+                .begin_file_read(ReadKind::WriteFile, target, window, cx)
                 .is_some();
         }
         self.enqueue_save(target, SaveIntent::Current, window, cx);

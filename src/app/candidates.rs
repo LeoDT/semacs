@@ -55,7 +55,7 @@ impl AppShell {
         mount.candidate_snapshot = Some(snapshot);
         let input = mount.view.read(cx).contents(cx);
         if matches!(kind, ReadKind::FindFile | ReadKind::WriteFile) {
-            let directory = self.default_directory_for(&origin, cx);
+            let directory = self.file_read_directory(&origin, cx);
             self.session
                 .as_mut()
                 .unwrap()
@@ -242,9 +242,6 @@ impl AppShell {
                 self.confirm_session(window, cx);
             }
             CandidateResolution::NoMatch => self.message_minibuffer("No match", cx),
-            CandidateResolution::FileNameRequired => {
-                self.message_minibuffer("Select a file or enter a file name", cx)
-            }
         }
     }
 }

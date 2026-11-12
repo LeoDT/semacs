@@ -128,8 +128,15 @@ pub fn activate(visual: &mut VisualTestContext, shell: &Entity<AppShell>, index:
     redraw(visual);
 }
 
+/// File reads start with the default directory filled in, so tests that type
+/// their own path clear it first.
+pub fn clear_input(visual: &mut VisualTestContext) {
+    visual.simulate_keystrokes("ctrl-a ctrl-k");
+}
+
 pub fn find_file(visual: &mut VisualTestContext, path: &Path) {
     visual.simulate_keystrokes("ctrl-x ctrl-f");
+    clear_input(visual);
     visual.simulate_input(path.to_str().unwrap());
     visual.simulate_keystrokes("enter");
     redraw(visual);
@@ -170,5 +177,6 @@ pub fn contents(visual: &mut VisualTestContext, shell: &Entity<AppShell>) -> Str
 }
 
 pub fn type_path(visual: &mut VisualTestContext, path: &Path) {
+    clear_input(visual);
     visual.simulate_input(path.to_str().unwrap());
 }

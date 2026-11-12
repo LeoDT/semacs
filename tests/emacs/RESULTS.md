@@ -178,3 +178,33 @@ Save file /tmp/x? (y, n, !, ., q, M-~, C-r, C-f, d or C-h)
 | root / merge revision | 真实 batch revision buffer 显示 root 的 `+base`；两父提交的 resolution fixture 由真实 Git show 产生 combined，真实 Magit buffer 含 `@@@` 及 `++resolved`。不是屏幕呈现 / 文件版本访问覆盖。 |
 
 尚未观察：真实 command loop / transient 与选择界面按键、GUI / IME、发布及 merge-range 多步查询、完整 hooks / 签名 / editor 失败生命周期、combined 的各 parent 版本访问。以上源码静态入口和实施待决范围见 [F5 调研](../../docs/work/f5-history-commit.md)，不以本记录替代产品契约或批准差异。
+
+## M3：鼠标选区与文件读入预填参照
+
+环境：GNU Emacs 31.1、`emacs -Q -nw`、24x80 pty、`TERM=xterm-256color`、fundamental-mode、transient mark，按 [README](README.md) 的 pty 驱动方式启动，工作目录为仓库根。`m3-mouse-*` 用例在 `baseline.el` 中额外启用 `xterm-mouse-mode`，并以 xterm SGR 序列注入鼠标（`ESC[<b;col;rowM` 按下 / 移动，`m` 释放；button 0 = 左键，32 = 按住左键移动）。观察值取 `baseline.el` 的 post-command-hook dump，其中新增 `start` / `end` 记录 `window-start` / `window-end`。
+
+```sh
+python3 tests/emacs/drive.py m3-mouse-click-drag m3-mouse-autoscroll m3-read-find-file m3-read-write-file
+```
+
+运行前提：`insert-default-directory` = `t`、`find-file-run-dired` = `t`、`mouse-scroll-delay` = 0.25、`mouse-scroll-min-lines` = 1、`mouse-drag-copy-region` = `nil`、`mouse-shift-adjust-mode` = `nil`（`S-down-mouse-1` 仍是 `mouse-appearance-menu`）；以上取值由 `emacs -Q --batch` 打印确认。`m3-mouse-*` 文本为 100 行 `lNN aaaa\n`（900 字节），point 从 buffer 起点开始。
+
+| 用例 | 操作 | 结果 |
+|---|---|---|
+| m3-mouse-click-drag | 单击 row3 col6 | 按下后 point=mark=15、active；释放后 point=15、mark=15、**region 停用** |
+| m3-mouse-click-drag | 再单击 row6 col6 | 按下 point=mark=42、active；释放后 point=42、**mark=15（恢复点击前的 mark）**、region 停用 |
+| m3-mouse-click-drag | 按下 row9 col5 → 移动 row8 col9 → 移动 row11 col9 → 释放 | point 68→63→90，mark 固定 68，region 全程 active，释放后仍 active |
+| m3-mouse-autoscroll | 按下 row4 col5 → 移动 row22 col5（24 行终端正文末行） | point=185；window-start 仍为 1，不滚动 |
+| m3-mouse-autoscroll | 移动到 row30 col5（窗口下边界外） | window-start 1→217，point=397；再次相同移动 → start 433、point=613 |
+| m3-mouse-autoscroll | 在窗口外释放 | window-start 最终 505，point=685；mark 仍 23、region 仍 active |
+| m3-mouse-autoscroll | 滚动后按下 row3 col4，再向右移到 col200 两次 | point 跟随窗口内位置（517）；col200 在 pty 外，point 与 window-start 均不变（**横向离开不滚动**） |
+| m3-read-find-file | `C-x C-f` | minibuffer 为 `Find file: ~/src/semacs/`，输入即缩写默认目录 |
+| m3-read-find-file | 未编辑 `RET` | 打开 dired（`dired-mode` 列出仓库目录） |
+| m3-read-write-file | `C-x C-w` | minibuffer 为 `Write file: ~/src/semacs/` |
+
+补充观察（同一环境，单独 pty 运行）：
+
+- `find-file-run-dired` 设为 `nil` 时，`(find-file-noselect "…/dir/")` 报 `… is a directory`（源码 `files.el` 对目录的错误分支）；有 dired 时 `find-file` 转 dired，因此“目录答案”在上游没有“保留会话并提示”的分支。
+- 无路径 buffer 的 `C-x C-w` 未编辑 `RET` 使用 `default-directory` + buffer 名：当时 buffer 名 `semacs`，写入 `…/semacs` 并回显 `Wrote …`；与 `write-file` interactive spec 的 `(expand-file-name (file-name-nondirectory (buffer-name)) default-directory)` 一致。
+
+观察边界：鼠标事件经 pty 注入，只有 24x80 字符终端坐标与上述固定选项，不覆盖真实桌面指针精度、双击 / 三击 / Shift / 右键、拖动移动文本或 dired 交互；本记录也不证明 semacs 的宿主鼠标交互或读入实现通过。semacs 的已批准差异（单击不恢复旧 mark、缺少 dired、滚动按像素换算行）见 [保真度契约](../../docs/emacs-fidelity.md#鼠标选区)。

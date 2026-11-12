@@ -13,6 +13,7 @@ python3 tests/emacs/drive.py m1-copy-kill-yank m1-readonly-kill m1-kill-copy-dir
 python3 tests/emacs/drive.py m1-redo-backward-delete m1-redo-forward-delete m1-redo-after-motion m1-save-crossing m1-save-twice
 python3 tests/emacs/drive.py m1-minibuffer-prompt m1-minibuffer-motion m1-minibuffer-history
 python3 tests/emacs/drive.py m2-mx-complete m2-mx-exit m2-mx-unique m2-mx-unknown m2-mx-empty m2-mx-cancel
+python3 tests/emacs/drive.py m3-mouse-click-drag m3-mouse-autoscroll m3-read-find-file m3-read-write-file
 emacs -Q --batch -l tests/emacs/m2-files.el -f ert-run-tests-batch-and-exit
 emacs -Q --batch -l tests/emacs/export-keys.el
 emacs -Q --batch -l tests/emacs/m1-indent.el -l tests/emacs/m1-editing.el -l tests/emacs/m1-motion.el -l tests/emacs/m1-kill.el -l tests/emacs/m1-history.el -l tests/emacs/m1-fields.el -f ert-run-tests-batch-and-exit
@@ -63,4 +64,5 @@ emacs -Q --batch \
 - 初始文本不进入被测历史；采集不能污染 echo。一个步骤可能包含多条命令，按 dumps 范围而非步骤数比较。
 - pty 连发字节可能被同一次 read 合并，改变前缀 / quit 观察；终端结果也不能证明 GUI 键名、AltGr、死键或真实 IME 行为。
 - 保存点 case 中 `C-c m` 仅设置 modified，不写磁盘，不能替代产品保存安全验收。
+- 鼠标用例只注入 xterm SGR 序列并固定 24x80 pty；它们不证明真实桌面指针精度、双击 / 三击 / Shift / 右键或 GUI 行为。`m3-mouse-*` 用例在 `baseline.el` 中启用 `xterm-mouse-mode`，其余用例保持默认。
 - 真实桌面或注键测试必须先获得同意。

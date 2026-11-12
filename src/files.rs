@@ -10,7 +10,7 @@
 use std::fmt;
 use std::fs::{self, OpenOptions};
 use std::io::{self, Read, Write};
-use std::path::{Component, Path, PathBuf};
+use std::path::{Component, MAIN_SEPARATOR, Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::SystemTime;
 
@@ -189,6 +189,24 @@ pub fn absolute(path: &Path) -> io::Result<PathBuf> {
     expand(path, &std::env::current_dir()?)
 }
 
+/// A directory as it starts a file read: `$HOME` replaced by `~` at a component
+/// boundary and always ending with a separator.
+pub fn directory_input(directory: &Path) -> String {
+    let home = std::env::var_os("HOME").map(PathBuf::from);
+    let mut text = match home
+        .as_deref()
+        .and_then(|home| directory.strip_prefix(home).ok())
+    {
+        Some(rest) if rest.as_os_str().is_empty() => "~".to_owned(),
+        Some(rest) => Path::new("~").join(rest).to_string_lossy().into_owned(),
+        None => directory.to_string_lossy().into_owned(),
+    };
+    if !text.ends_with(MAIN_SEPARATOR) {
+        text.push(MAIN_SEPARATOR);
+    }
+    text
+}
+
 fn expand_tilde(path: &Path) -> PathBuf {
     let mut components = path.components();
     let Some(Component::Normal(first)) = components.next() else {
@@ -222,6 +240,32 @@ fn normalize(path: &Path) -> PathBuf {
         }
     }
     normalized
+}
+
+/// The file a `write-file` or `save-buffer` answer writes to. An unedited
+/// answer uses the visited file, or the buffer name inside the default
+/// directory; an answer naming a directory appends the same base name.
+pub fn write_target(
+    input: &str,
+    initial: &str,
+    directory: &Path,
+    current: Option<&Path>,
+    display_name: &str,
+) -> io::Result<PathBuf> {
+    let base_name = current
+        .and_then(Path::file_name)
+        .or_else(|| Path::new(display_name).file_name())
+        .unwrap_or_default();
+    let path = if input == initial {
+        current.map_or_else(|| directory.join(base_name), Path::to_path_buf)
+    } else {
+        expand(Path::new(input), directory)?
+    };
+    Ok(if path.is_dir() {
+        path.join(base_name)
+    } else {
+        path
+    })
 }
 
 /// Metadata for an existing path, or `None` when it does not exist.
@@ -703,6 +747,76 @@ mod tests {
             expand(Path::new("~nobody/notes"), Path::new("/tmp")).unwrap(),
             PathBuf::from("/tmp/~nobody/notes")
         );
+    }
+
+    #[test]
+    fn directory_input_abbreviates_only_whole_home_components() {
+        let Some(home) = std::env::var_os("HOME").map(PathBuf::from) else {
+            return;
+        };
+        assert_eq!(directory_input(&home), "~/");
+        assert_eq!(
+            directory_input(&home.join("src/semacs")),
+            format!("~{MAIN_SEPARATOR}src{MAIN_SEPARATOR}semacs{MAIN_SEPARATOR}")
+        );
+        let similar = home.with_file_name(format!(
+            "{}-elsewhere",
+            home.file_name().unwrap().to_string_lossy()
+        ));
+        assert_eq!(
+            directory_input(&similar),
+            format!("{}{MAIN_SEPARATOR}", similar.display())
+        );
+        assert_eq!(
+            directory_input(Path::new(std::path::MAIN_SEPARATOR_STR)),
+            std::path::MAIN_SEPARATOR_STR
+        );
+    }
+
+    #[test]
+    fn write_target_uses_the_default_name_for_unedited_and_directory_answers() {
+        static NEXT: AtomicU64 = AtomicU64::new(0);
+        let dir = std::env::temp_dir().join(format!(
+            "semacs-write-target-{}-{}",
+            std::process::id(),
+            NEXT.fetch_add(1, Ordering::Relaxed)
+        ));
+        let nested = dir.join("sub");
+        fs::create_dir_all(&nested).unwrap();
+        let current = dir.join("current.txt");
+        let initial = directory_input(&dir);
+
+        assert_eq!(
+            write_target(&initial, &initial, &dir, Some(&current), "current.txt").unwrap(),
+            current
+        );
+        assert_eq!(
+            write_target(&initial, &initial, &dir, None, "draft").unwrap(),
+            dir.join("draft")
+        );
+        assert_eq!(
+            write_target(&initial, &initial, &dir, None, "sub/draft.txt").unwrap(),
+            dir.join("draft.txt"),
+            "a buffer name is reduced to its base name"
+        );
+        let nested_input = directory_input(&nested);
+        assert_eq!(
+            write_target(&nested_input, &initial, &dir, Some(&current), "current.txt").unwrap(),
+            nested.join("current.txt"),
+            "a directory answer appends the visited file name"
+        );
+        assert_eq!(
+            write_target(
+                &format!("{nested_input}other.txt"),
+                &initial,
+                &dir,
+                None,
+                "draft"
+            )
+            .unwrap(),
+            nested.join("other.txt")
+        );
+        fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]

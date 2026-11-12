@@ -417,13 +417,13 @@ impl AppShell {
                 self.change_font_size(command, origin, cx);
             }
             Command::FindFile => {
-                self.begin_read(ReadKind::FindFile, origin, "", window, cx);
+                self.begin_file_read(ReadKind::FindFile, origin, window, cx);
             }
             Command::SaveBuffer => {
                 self.save_buffer(origin, window, cx);
             }
             Command::WriteFile => {
-                self.begin_read(ReadKind::WriteFile, origin, "", window, cx);
+                self.begin_file_read(ReadKind::WriteFile, origin, window, cx);
             }
             Command::SwitchToBuffer => {
                 let default = self

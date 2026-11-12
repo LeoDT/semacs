@@ -9,8 +9,12 @@
 
 (defvar reference/initial-text (or (getenv "EMACS_REFERENCE_INITIAL") ""))
 
+(defvar reference/point-at-start (equal (getenv "EMACS_REFERENCE_POINT") "start"))
+
+(defvar reference/mouse (equal (getenv "EMACS_REFERENCE_MOUSE") "1"))
+
 (defun reference/dump (tag)
-  (let ((line (format "{\"tag\":%s,\"kill_ring\":%s,\"text\":%s,\"point\":%d,\"mark\":%s,\"active\":%s,\"modified\":%s,\"prompt_end\":%s,\"msg\":%s}\n"
+  (let ((line (format "{\"tag\":%s,\"kill_ring\":%s,\"text\":%s,\"point\":%d,\"mark\":%s,\"active\":%s,\"modified\":%s,\"prompt_end\":%s,\"start\":%s,\"end\":%s,\"msg\":%s}\n"
                       (if tag (format "\"%s\"" tag) "null")
                       (concat "[" (mapconcat
                                    (lambda (text)
@@ -23,6 +27,10 @@
                       (if mark-active "true" "false")
                       (if (buffer-modified-p) "true" "false")
                       (if (minibufferp) (number-to-string (minibuffer-prompt-end)) "null")
+                      (if (and (not (minibufferp)) (window-live-p (selected-window)))
+                          (number-to-string (window-start)) "null")
+                      (if (and (not (minibufferp)) (window-live-p (selected-window)) (window-end nil t))
+                          (number-to-string (window-end nil t)) "null")
                       (prin1-to-string (substring-no-properties (or (current-message) ""))))))
     (let ((inhibit-message t))
       (with-temp-buffer
@@ -41,7 +49,9 @@
   (setq buffer-undo-list nil)
   (erase-buffer)
   (insert reference/initial-text)
-  (goto-char (point-max))
+  (goto-char (if reference/point-at-start (point-min) (point-max)))
+  (when reference/point-at-start
+    (set-window-start nil (point-min)))
   (setq mark-active nil)
   (setq buffer-undo-list nil)
   (set-buffer-modified-p nil)
@@ -50,6 +60,8 @@
   (local-set-key (kbd "C-c r") (lambda () (interactive) (setq buffer-read-only t) (message "readonly")))
   (local-set-key (kbd "C-c t")
                  (lambda () (interactive) (read-from-minibuffer "Input: ")))
+  (when reference/mouse
+    (xterm-mouse-mode 1))
   (add-hook 'post-command-hook (lambda () (reference/dump nil))))
 
 (add-hook 'window-setup-hook #'reference/setup)

@@ -51,7 +51,6 @@ pub(crate) enum CandidateResolution {
     Insert(String),
     Accept(String),
     NoMatch,
-    FileNameRequired,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -119,14 +118,16 @@ impl CandidateList {
             return NoMatch;
         }
         if self.raw_directory {
-            return if matches!(action, CandidateAction::Accept)
+            if matches!(action, CandidateAction::Accept)
                 && !input.is_empty()
                 && !input.ends_with(std::path::MAIN_SEPARATOR)
             {
-                Insert(format!("{input}/"))
-            } else {
-                FileNameRequired
-            };
+                return Insert(format!("{input}/"));
+            }
+            // The confirm step owns what a directory answer means: a directory
+            // keeps `find-file` open and appends the buffer name for
+            // `write-file`.
+            return Accept(input.to_owned());
         }
         Accept(input.to_owned())
     }
@@ -303,11 +304,11 @@ mod tests {
         let list = CandidateList::ready(Vec::new(), "dir/", None, true);
         assert_eq!(
             list.resolve(Action::Accept, "dir/"),
-            Resolution::FileNameRequired
+            Resolution::Accept("dir/".into())
         );
         assert_eq!(
             list.resolve(Action::Raw, "dir/"),
-            Resolution::FileNameRequired
+            Resolution::Accept("dir/".into())
         );
         assert_eq!(list.resolve(Action::Insert, "dir/"), Resolution::NoMatch);
         let mut list = CandidateList::ready(Vec::new(), "dir", None, false);

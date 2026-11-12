@@ -39,6 +39,7 @@ fn settle(visual: &mut VisualTestContext, view: &Entity<BufferView>) {
 
 fn write_file(visual: &mut VisualTestContext, target: &Path) {
     visual.simulate_keystrokes("ctrl-x ctrl-w");
+    clear_input(visual);
     visual.simulate_input(target.to_str().unwrap());
     visual.simulate_keystrokes("alt-enter");
     redraw(visual);
