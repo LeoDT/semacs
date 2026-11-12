@@ -149,6 +149,7 @@
 - 拖动时 mark 固定在按下位置，point 跟随指针，region 保持 active；松开后 region 仍 active，和键盘设置的 region 一样由后续编辑、kill、顶层 `C-g` 等停用。按下是拖动中唯一打断历史组与命令链的位置。
 - 鼠标只改变 point / mark 与 region active 状态，不修改文本、modified、undo 历史、kill ring 或平台 selected range；region 高亮沿用既有 committed point / mark 投影，不启用 delete-selection。
 - 指针越过本 view 上下边界时按垂直距离滚动，至少一行，之后每 250 ms 重复同一步进（对齐 `mouse-scroll-subr` 复用首次跳数及 `mouse-scroll-delay`）；只在指针位于本 view 水平范围内时滚动，滚动到 buffer 首尾后停止，point 停在新可见边界。指针回到 view 内立即停止并恢复跟随；水平离开本 view 时停止滚动；指针移出 OS 窗口时保留最后一次窗口外位置继续滚动（与参照一致），直到松开、窗口失活或输入生命周期结束。
+- view 内任意位置都是正文命中范围：最后一行以下的空白按普通点击处理，位置取最后一个可见行之后（普通文件即 buffer 末尾，含结尾换行；折叠 / 生成 buffer 取最后一个可见行之后，不进入隐藏行）；从该处按下可向上拖出 region，向该处拖动时 point 夹在该位置、region 保持 active 且不触发自动滚动。行文本右侧空白仍是该行行尾（换行之前），与最后一行以下的空白不同。视图内边距同样命中最近的正文位置；mode line、echo area 与 minibuffer 不属于正文命中范围。上游 31.1 的对应观察见[参照记录](../tests/emacs/RESULTS.md#m3鼠标选区与文件读入预填参照)。
 - 组合期间按下沿用既有拒绝提示；有读入会话时正文不开始选区。
 - 已批准差异：上游普通单击在松开时用 `pop-mark` 恢复点击前的 mark，本实现按已批准范围让 mark 停在点击位置；上游 `mouse-scroll-subr` 按窗口字符行比较越界距离，本实现按像素距离换算行。双击选词、三击选行、Shift 调整 region、右键 `mouse-save-then-kill` / `mouse-drag-copy-region` 与拖动移动文本均未实现，见[实施计划](plan.md)未排期事项。
 

@@ -193,7 +193,7 @@ fn below_bottom(
 ) {
     visual.read(|cx| {
         let view = view.read(cx);
-        let bounds = view.viewport_layout().unwrap().bounds();
+        let bounds = view.view_bounds.unwrap();
         let caret = view
             .viewport_layout()
             .unwrap()
@@ -205,6 +205,18 @@ fn below_bottom(
             point(caret.left(), bounds.bottom() + distance),
             view.settings.line_height,
         )
+    })
+}
+
+/// A pointer position in the view but below the last text row, or in its padding.
+fn empty_area(
+    visual: &mut VisualTestContext,
+    view: &Entity<BufferView>,
+    inset: gpui_kit::Pixels,
+) -> Point<gpui_kit::Pixels> {
+    visual.read(|cx| {
+        let bounds = view.read(cx).view_bounds.unwrap();
+        point(bounds.left() + px(20.), bounds.bottom() - inset)
     })
 }
 
@@ -301,7 +313,7 @@ fn dragging_above_the_text_scrolls_up(cx: &mut TestAppContext) {
         let caret = layout.bounds_for_range(start..start, index).unwrap();
         (
             point(caret.left(), layout.bounds().bottom() - px(4.)),
-            point(caret.left(), layout.bounds().top() - px(30.)),
+            point(caret.left(), view.view_bounds.unwrap().top() - px(30.)),
             view.settings.line_height,
         )
     });
@@ -487,5 +499,106 @@ fn a_generated_readonly_buffer_follows_pointer_without_editing(cx: &mut TestAppC
         assert!(view.buffer().mark_active());
         assert_eq!(view.buffer().text().to_string(), content);
         assert!(!view.buffer().is_modified());
+    });
+}
+
+#[gpui::test]
+fn a_click_below_the_last_line_sets_point_and_mark_to_the_end_of_the_text(cx: &mut TestAppContext) {
+    let (mut visual, editor) = open("l00 aaaa\nl01 aaaa\nl02 aaaa\n", cx);
+    let press = empty_area(&mut visual, &editor, px(20.));
+    visual.simulate_mouse_down(press, MouseButton::Left, Default::default());
+    redraw(&mut visual);
+    visual.read(|cx| {
+        let view = editor.read(cx);
+        assert_eq!(view.buffer().point(), ByteOffset(27));
+        assert_eq!(view.buffer().mark(), Some(ByteOffset(27)));
+        assert!(view.buffer().mark_active());
+        assert_eq!(view.message(), Some("Mark set"));
+    });
+    visual.simulate_mouse_up(press, MouseButton::Left, Default::default());
+    redraw(&mut visual);
+    visual.read(|cx| {
+        let view = editor.read(cx);
+        assert_eq!(view.buffer().point(), ByteOffset(27));
+        assert_eq!(view.buffer().mark(), Some(ByteOffset(27)));
+        assert!(!view.buffer().mark_active());
+        assert_eq!(view.buffer().region(), None);
+    });
+}
+
+#[gpui::test]
+fn dragging_from_below_the_last_line_selects_up_to_the_pointer(cx: &mut TestAppContext) {
+    let (mut visual, editor) = open("l00 aaaa\nl01 aaaa\nl02 aaaa\n", cx);
+    let press = empty_area(&mut visual, &editor, px(20.));
+    visual.simulate_mouse_down(press, MouseButton::Left, Default::default());
+    redraw(&mut visual);
+    let target = caret(&mut visual, &editor, 5);
+    visual.simulate_mouse_move(target, MouseButton::Left, Default::default());
+    redraw(&mut visual);
+    visual.simulate_mouse_up(target, MouseButton::Left, Default::default());
+    redraw(&mut visual);
+    visual.read(|cx| {
+        let buffer = editor.read(cx).buffer();
+        assert_eq!(buffer.point(), ByteOffset(5));
+        assert_eq!(buffer.mark(), Some(ByteOffset(27)));
+        assert!(buffer.mark_active());
+        assert_eq!(buffer.region(), Some(ByteOffset(5)..ByteOffset(27)));
+    });
+}
+
+#[gpui::test]
+fn dragging_into_the_area_below_the_text_stops_at_the_end_without_autoscrolling(
+    cx: &mut TestAppContext,
+) {
+    let (mut visual, editor) = open("l00 aaaa\nl01 aaaa\nl02 aaaa\n", cx);
+    let press = caret(&mut visual, &editor, 2);
+    visual.simulate_mouse_down(press, MouseButton::Left, Default::default());
+    redraw(&mut visual);
+    let target = empty_area(&mut visual, &editor, px(10.));
+    visual.simulate_mouse_move(target, MouseButton::Left, Default::default());
+    redraw(&mut visual);
+    visual.read(|cx| {
+        let view = editor.read(cx);
+        assert_eq!(view.buffer().point(), ByteOffset(27));
+        assert_eq!(view.buffer().mark(), Some(ByteOffset(2)));
+        assert!(view.buffer().mark_active());
+        assert_eq!(view.scroll.y, px(0.));
+        assert_eq!(view.pointer_drag.as_ref().unwrap().exterior, None);
+    });
+}
+
+#[gpui::test]
+fn a_click_in_the_view_padding_hits_the_nearest_text_position(cx: &mut TestAppContext) {
+    let (mut visual, editor) = open("l00 aaaa\nl01 aaaa\nl02 aaaa\n", cx);
+    let text = caret(&mut visual, &editor, 20);
+    visual.simulate_mouse_down(text, MouseButton::Left, Default::default());
+    redraw(&mut visual);
+    visual.simulate_mouse_up(text, MouseButton::Left, Default::default());
+    redraw(&mut visual);
+    let corner = visual.read(|cx| {
+        let bounds = editor.read(cx).view_bounds.unwrap();
+        point(bounds.left() + px(2.), bounds.top() + px(2.))
+    });
+    visual.simulate_mouse_down(corner, MouseButton::Left, Default::default());
+    redraw(&mut visual);
+    visual.read(|cx| {
+        let buffer = editor.read(cx).buffer();
+        assert_eq!(buffer.point(), ByteOffset(0));
+        assert_eq!(buffer.mark(), Some(ByteOffset(0)));
+    });
+}
+
+#[gpui::test]
+fn a_click_below_the_last_line_reaches_the_buffer_end_when_scrolled_to_it(cx: &mut TestAppContext) {
+    let (mut visual, editor) = open(&"line\n".repeat(200), cx);
+    visual.simulate_keystrokes("alt->");
+    redraw(&mut visual);
+    let press = empty_area(&mut visual, &editor, px(6.));
+    visual.simulate_mouse_down(press, MouseButton::Left, Default::default());
+    redraw(&mut visual);
+    visual.read(|cx| {
+        let view = editor.read(cx);
+        assert_eq!(view.buffer().point(), ByteOffset(1000));
+        assert_eq!(view.buffer().mark(), Some(ByteOffset(1000)));
     });
 }

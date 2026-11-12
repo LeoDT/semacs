@@ -184,10 +184,10 @@ Save file /tmp/x? (y, n, !, ., q, M-~, C-r, C-f, d or C-h)
 环境：GNU Emacs 31.1、`emacs -Q -nw`、24x80 pty、`TERM=xterm-256color`、fundamental-mode、transient mark，按 [README](README.md) 的 pty 驱动方式启动，工作目录为仓库根。`m3-mouse-*` 用例在 `baseline.el` 中额外启用 `xterm-mouse-mode`，并以 xterm SGR 序列注入鼠标（`ESC[<b;col;rowM` 按下 / 移动，`m` 释放；button 0 = 左键，32 = 按住左键移动）。观察值取 `baseline.el` 的 post-command-hook dump，其中新增 `start` / `end` 记录 `window-start` / `window-end`。
 
 ```sh
-python3 tests/emacs/drive.py m3-mouse-click-drag m3-mouse-autoscroll m3-read-find-file m3-read-write-file
+python3 tests/emacs/drive.py m3-mouse-click-drag m3-mouse-autoscroll m3-mouse-below-eob m3-read-find-file m3-read-write-file
 ```
 
-运行前提：`insert-default-directory` = `t`、`find-file-run-dired` = `t`、`mouse-scroll-delay` = 0.25、`mouse-scroll-min-lines` = 1、`mouse-drag-copy-region` = `nil`、`mouse-shift-adjust-mode` = `nil`（`S-down-mouse-1` 仍是 `mouse-appearance-menu`）；以上取值由 `emacs -Q --batch` 打印确认。`m3-mouse-*` 文本为 100 行 `lNN aaaa\n`（900 字节），point 从 buffer 起点开始。
+运行前提：`insert-default-directory` = `t`、`find-file-run-dired` = `t`、`mouse-scroll-delay` = 0.25、`mouse-scroll-min-lines` = 1、`mouse-drag-copy-region` = `nil`、`mouse-shift-adjust-mode` = `nil`（`S-down-mouse-1` 仍是 `mouse-appearance-menu`）；以上取值由 `emacs -Q --batch` 打印确认。`m3-mouse-*` 文本为 100 行 `lNN aaaa\n`（900 字节），`m3-mouse-below-eob` 为 3 行同名格式（27 字节，point-max 为 28），point 从 buffer 起点开始。24 行终端中 row1 是 menu bar，row2–22 是正文，row23 是 mode line，row24 是 echo area。
 
 | 用例 | 操作 | 结果 |
 |---|---|---|
@@ -198,13 +198,20 @@ python3 tests/emacs/drive.py m3-mouse-click-drag m3-mouse-autoscroll m3-read-fin
 | m3-mouse-autoscroll | 移动到 row30 col5（窗口下边界外） | window-start 1→217，point=397；再次相同移动 → start 433、point=613 |
 | m3-mouse-autoscroll | 在窗口外释放 | window-start 最终 505，point=685；mark 仍 23、region 仍 active |
 | m3-mouse-autoscroll | 滚动后按下 row3 col4，再向右移到 col200 两次 | point 跟随窗口内位置（517）；col200 在 pty 外，point 与 window-start 均不变（**横向离开不滚动**） |
+| m3-mouse-below-eob | 单击 row10 col5 / row20 col5（最后一行以下空白） | 按下 point=28=**point-max**、mark=28、active；释放 point=28、mark=28、region 停用 |
+| m3-mouse-below-eob | 单击 row3 col40（第 2 行文本右侧空白） | 按下 point=18=行尾（换行之前），与最后一行以下的空白不同 |
+| m3-mouse-below-eob | 按下 row10 col5 → 移动 row2 col5 → 释放 | point 28→5，mark 固定 28，region 全程 active，释放后仍 active |
+| m3-mouse-below-eob | 按下 row2 col5 → 移动 row12 col5 → 释放 | point 5→28（空白处夹到 point-max），mark 5，region active |
 | m3-read-find-file | `C-x C-f` | minibuffer 为 `Find file: ~/src/semacs/`，输入即缩写默认目录 |
 | m3-read-find-file | 未编辑 `RET` | 打开 dired（`dired-mode` 列出仓库目录） |
 | m3-read-write-file | `C-x C-w` | minibuffer 为 `Write file: ~/src/semacs/` |
 
 补充观察（同一环境，单独 pty 运行）：
 
+- 短 buffer 下单击 row19–row22 均为 point-max，单击 row23 / row24（mode line / echo area）point、mark、region 均不变；100 行 buffer 用 `M->` 滚到末尾后（start=739、end=901），单击正文最后一行的 row19 得到 896，row20–22 均为 901=point-max。
+- 上表 row10 / row20 的两次单击中，释放前的 mark 都是上一次执行后的 mark，释放后按 `pop-mark` 回到该值；该恢复行为是 semacs 未实现的上游分支，见保真度契约的已批准差异。
+
 - `find-file-run-dired` 设为 `nil` 时，`(find-file-noselect "…/dir/")` 报 `… is a directory`（源码 `files.el` 对目录的错误分支）；有 dired 时 `find-file` 转 dired，因此“目录答案”在上游没有“保留会话并提示”的分支。
 - 无路径 buffer 的 `C-x C-w` 未编辑 `RET` 使用 `default-directory` + buffer 名：当时 buffer 名 `semacs`，写入 `…/semacs` 并回显 `Wrote …`；与 `write-file` interactive spec 的 `(expand-file-name (file-name-nondirectory (buffer-name)) default-directory)` 一致。
 
-观察边界：鼠标事件经 pty 注入，只有 24x80 字符终端坐标与上述固定选项，不覆盖真实桌面指针精度、双击 / 三击 / Shift / 右键、拖动移动文本或 dired 交互；本记录也不证明 semacs 的宿主鼠标交互或读入实现通过。semacs 的已批准差异（单击不恢复旧 mark、缺少 dired、滚动按像素换算行）见 [保真度契约](../../docs/emacs-fidelity.md#鼠标选区)。
+观察边界：鼠标事件经 pty 注入，只有 24x80 字符终端坐标与上述固定选项，不覆盖真实桌面指针精度、双击 / 三击 / Shift / 右键、拖动移动文本或 dired 交互；也不覆盖 GUI 下的 fringe / 滚动条或正文区以外空白。本记录也不证明 semacs 的宿主鼠标交互或读入实现通过。semacs 的已批准差异（单击不恢复旧 mark、缺少 dired、滚动按像素换算行）见 [保真度契约](../../docs/emacs-fidelity.md#鼠标选区)。

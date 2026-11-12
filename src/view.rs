@@ -238,10 +238,16 @@ impl ShapedRow {
 #[derive(Clone)]
 pub struct ViewportLayout {
     key: LayoutKey,
+    /// Where the text rows are laid out; the selection and caret geometry.
     bounds: Bounds<Pixels>,
+    /// The whole view, so pointer positions in its padding still hit the text.
+    view_bounds: Bounds<Pixels>,
     scroll: Point<Pixels>,
     rows: Vec<Arc<ShapedRow>>,
     requested_rows: usize,
+    /// Index of the last prepared row with the position after it; the empty area
+    /// below the text resolves to that position.
+    below_text: Option<(usize, ByteOffset)>,
 }
 
 impl ViewportLayout {
@@ -251,6 +257,10 @@ impl ViewportLayout {
     pub fn bounds(&self) -> Bounds<Pixels> {
         self.bounds
     }
+    /// The whole view; hit testing accepts positions anywhere inside it.
+    pub fn view_bounds(&self) -> Bounds<Pixels> {
+        self.view_bounds
+    }
     pub fn scroll(&self) -> Point<Pixels> {
         self.scroll
     }
@@ -258,16 +268,28 @@ impl ViewportLayout {
         self.rows.len()
     }
 
+    /// Any position inside the view resolves to the nearest text position: the
+    /// row under the pointer, or the position after the last row for the empty
+    /// area below the text.
     pub fn hit_test(&self, position: Point<Pixels>) -> Option<ByteOffset> {
-        if !self.bounds.contains(&position) {
+        if !self.view_bounds.contains(&position) {
             return None;
         }
-        let y = position.y - self.bounds.top() + self.scroll.y;
+        let x = position.x.max(self.bounds.left()) - self.bounds.left() + self.scroll.x;
+        let y = position
+            .y
+            .min(self.bounds.bottom() - px(1.))
+            .max(self.bounds.top())
+            - self.bounds.top()
+            + self.scroll.y;
         let row = (f32::from(y) / f32::from(self.key.settings.line_height))
             .floor()
             .max(0.) as usize;
-        let line = self.rows.iter().find(|line| line.source.index == row)?;
-        Some(line.offset_for_x(position.x - self.bounds.left() + self.scroll.x))
+        let Some(line) = self.rows.iter().find(|line| line.source.index == row) else {
+            let (last, end) = self.below_text?;
+            return (row > last).then_some(end);
+        };
+        Some(line.offset_for_x(x))
     }
 
     fn origin(&self, row: &ShapedRow) -> Point<Pixels> {
@@ -1208,6 +1230,7 @@ impl BufferView {
             self.end_input(cx);
         }
         self.view_bounds = Some(bounds);
+        let view_bounds = bounds;
         let bounds = text_bounds(bounds);
         self.content_bounds = Some(bounds);
         self.split_geometry_ready = true;
@@ -1351,15 +1374,20 @@ impl BufferView {
                 self.reveal_caret = false;
             }
         }
+        let below_text = rows
+            .last()
+            .map(|row| (row.index, ByteOffset(row.start.0 + row.row.byte_len)));
         self.geometry = Some(ViewportLayout {
             key,
             bounds,
+            view_bounds,
             scroll: self.scroll,
             requested_rows: rows.len(),
             rows: rows
                 .into_iter()
                 .filter_map(|row| self.cache.get(&row.index).cloned())
                 .collect(),
+            below_text,
         });
         if self
             .geometry
@@ -1369,6 +1397,7 @@ impl BufferView {
             self.retained_paint_layout = None;
         } else if let Some(retained) = &mut self.retained_paint_layout {
             retained.bounds = bounds;
+            retained.view_bounds = view_bounds;
         }
         self.sync_pointer_edge(window, cx);
     }

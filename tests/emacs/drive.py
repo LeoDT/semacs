@@ -53,6 +53,7 @@ def click(col, row):
 
 
 MOUSE_FIXTURE = "".join(f"l{i:02d} aaaa\n" for i in range(100))
+SHORT_FIXTURE = "".join(f"l{i:02d} aaaa\n" for i in range(3))
 
 # Each case: (initial text, [(label, keys), ...], optional options).
 # Options: {"size": (rows, cols), "point": "start", "mouse": True}.
@@ -155,8 +156,19 @@ CASES = {
         ("move right again", mouse(32, 200, 10)),
         ("release right", mouse(0, 200, 10, release=True)),
     ], {"size": (24, 80), "point": "start", "mouse": True}),
-    "m3-read-find-file": ("body", [
-        ("C-x C-f", C_X + b"\x06"),
+    "m3-mouse-below-eob": (SHORT_FIXTURE, [
+        ("press 5,10 / release below eob",
+         mouse(0, 5, 10) + mouse(0, 5, 10, release=True)),
+        ("press 5,20 / release below eob",
+         mouse(0, 5, 20) + mouse(0, 5, 20, release=True)),
+        ("press 40,3 / release past line end",
+         mouse(0, 40, 3) + mouse(0, 40, 3, release=True)),
+        ("press 5,10 / move 5,2 / release",
+         mouse(0, 5, 10) + mouse(32, 5, 2) + mouse(0, 5, 2, release=True)),
+        ("press 5,2 / move 5,12 / release",
+         mouse(0, 5, 2) + mouse(32, 5, 12) + mouse(0, 5, 12, release=True)),
+    ], {"size": (24, 80), "point": "start", "mouse": True}),
+    "m3-read-find-file": ("body", [("C-x C-f", C_X + b"\x06"),
         ("RET", RET),
         ("C-g", C_G),
     ], {"size": (24, 80)}),

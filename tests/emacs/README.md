@@ -13,7 +13,7 @@ python3 tests/emacs/drive.py m1-copy-kill-yank m1-readonly-kill m1-kill-copy-dir
 python3 tests/emacs/drive.py m1-redo-backward-delete m1-redo-forward-delete m1-redo-after-motion m1-save-crossing m1-save-twice
 python3 tests/emacs/drive.py m1-minibuffer-prompt m1-minibuffer-motion m1-minibuffer-history
 python3 tests/emacs/drive.py m2-mx-complete m2-mx-exit m2-mx-unique m2-mx-unknown m2-mx-empty m2-mx-cancel
-python3 tests/emacs/drive.py m3-mouse-click-drag m3-mouse-autoscroll m3-read-find-file m3-read-write-file
+python3 tests/emacs/drive.py m3-mouse-click-drag m3-mouse-autoscroll m3-mouse-below-eob m3-read-find-file m3-read-write-file
 emacs -Q --batch -l tests/emacs/m2-files.el -f ert-run-tests-batch-and-exit
 emacs -Q --batch -l tests/emacs/export-keys.el
 emacs -Q --batch -l tests/emacs/m1-indent.el -l tests/emacs/m1-editing.el -l tests/emacs/m1-motion.el -l tests/emacs/m1-kill.el -l tests/emacs/m1-history.el -l tests/emacs/m1-fields.el -f ert-run-tests-batch-and-exit

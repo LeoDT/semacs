@@ -90,10 +90,18 @@ fn geometry_roundtrips_tabs_eof_and_nonzero_origin(cx: &mut TestAppContext) {
         assert!(
             layout
                 .hit_test(point(
-                    layout.bounds().left() - px(1.),
-                    layout.bounds().top()
+                    layout.view_bounds().left() - px(1.),
+                    layout.view_bounds().top()
                 ))
                 .is_none()
+        );
+        // The view's own padding hits the nearest text position.
+        assert_eq!(
+            layout.hit_test(point(
+                layout.bounds().left() - px(1.),
+                layout.bounds().top()
+            )),
+            layout.hit_test(point(layout.bounds().left(), layout.bounds().top()))
         );
     });
 }

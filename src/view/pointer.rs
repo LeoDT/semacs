@@ -97,7 +97,7 @@ impl BufferView {
     }
 
     /// Pointer positions anywhere in the window while a press is tracked. Only
-    /// positions outside the text are handled here; in-view movement goes
+    /// positions outside the view are handled here; in-view movement goes
     /// through the element listener so a single event never updates twice.
     pub(super) fn window_pointer_moved(
         &mut self,
@@ -112,7 +112,7 @@ impl BufferView {
             self.finish_pointer(window, cx);
             return;
         }
-        let (Some(view_bounds), Some(text_bounds)) = (self.view_bounds, self.content_bounds) else {
+        let Some(view_bounds) = self.view_bounds else {
             return;
         };
         let position = event.position;
@@ -120,10 +120,6 @@ impl BufferView {
             return;
         }
         if position.x < view_bounds.left() || position.x > view_bounds.right() {
-            self.stop_autoscroll();
-            return;
-        }
-        if position.y >= text_bounds.top() && position.y <= text_bounds.bottom() {
             self.stop_autoscroll();
             return;
         }
@@ -150,7 +146,7 @@ impl BufferView {
         let Some(position) = self.pointer_drag.as_ref().and_then(|drag| drag.exterior) else {
             return;
         };
-        let Some(bounds) = self.geometry.as_ref().map(ViewportLayout::bounds) else {
+        let Some(bounds) = self.view_bounds else {
             return;
         };
         let y = if position.y < bounds.top() {
@@ -205,7 +201,7 @@ impl BufferView {
     /// Rows between the pointer and the edge it is beyond, at least one.
     fn exterior_rows(&self) -> Option<(bool, usize)> {
         let position = self.pointer_drag.as_ref()?.exterior?;
-        let bounds = self.content_bounds?;
+        let bounds = self.view_bounds?;
         let line_height = f32::from(self.settings.line_height).max(1.);
         let (up, distance) = if position.y < bounds.top() {
             (true, f32::from(bounds.top() - position.y))

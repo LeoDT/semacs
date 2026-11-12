@@ -355,10 +355,24 @@ fn scrolling_replaces_platform_geometry_and_bounds_match_the_drawn_region(cx: &m
         let rect = input.bounds_for_range(offset..offset, window, cx).unwrap();
         assert_eq!(rect.top(), bounds.top());
         assert_eq!(input.element_bounds(window, cx), Some(bounds));
+        let view_bounds = editor.read(cx).view_bounds.unwrap();
         assert!(
             input
-                .character_index_for_point(point(bounds.left() - px(1.), bounds.top()), window, cx)
+                .character_index_for_point(
+                    point(view_bounds.left() - px(1.), view_bounds.top()),
+                    window,
+                    cx
+                )
                 .is_none()
+        );
+        // The view's own padding hits the nearest text position.
+        assert_eq!(
+            input.character_index_for_point(
+                point(bounds.left() - px(1.), bounds.top()),
+                window,
+                cx
+            ),
+            input.character_index_for_point(point(bounds.left(), bounds.top()), window, cx)
         );
     });
 }
