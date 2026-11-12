@@ -58,6 +58,18 @@ impl Buffer {
         Ok(())
     }
 
+    pub(crate) fn cycle_sections_global(&mut self) -> Result<(), String> {
+        let mut doc = self.document.borrow_mut();
+        let sections = doc.sections.as_mut().ok_or("No sections in this buffer")?;
+        Arc::make_mut(sections).cycle_global();
+        let sections = doc.sections.as_ref().unwrap().clone();
+        for point in doc.points.iter().filter_map(|point| point.upgrade()) {
+            point.set(sections.collapse_point(ByteOffset(point.get())).0);
+        }
+        doc.touch();
+        Ok(())
+    }
+
     pub(crate) fn reveal_section(&mut self, point: ByteOffset) {
         let mut doc = self.document.borrow_mut();
         if let Some(sections) = &mut doc.sections {

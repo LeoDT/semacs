@@ -15,12 +15,10 @@ R0–F5、日常编辑增强及 F5 后插入项均已完成，交付摘要见 [R
 用户已确认以下小增强要在 tree viewer 之前完成；具体行为、默认键与验收在实施前确定。静态参照、现状与待决项见 [tree viewer 前的小增强参照](work/pre-tree-enhancements.md)。
 
 1. **point 离开视口时的滚动**：按 Emacs 默认 recenter（约半页），不再只做最小一行 reveal；diff / Magit 的 `n` / `p` 导航还要保证目标 hunk / section 正文可见，hunk 参照 Magit `magit-hunk-set-window-start`。
-2. **Magit `S-TAB` 全局 section 可见性**：`Shift+Tab` 对 diff / status / process / log / revision 的顶级 section 做全局可见性 cycle；按 Magit `magit-section-cycle-global` 三态实现，而不是简单二元 toggle。
-3. **鼠标滚轮与 point**：按 Emacs `mwheel-scroll` / `scroll-up` / `scroll-down` 的实际语义实现，不按“滚轮等于 point 移动一行”的观察简化；当前 semacs 只滚视图不改 point。精确屏幕表现实施前做一次对照观察，不另造语义。
-4. **find-file 候选排序与信息**：按 Emacs completion 的实际排序语义补齐候选顺序，并参考用户 Emacs 的 Marginalia 显示权限 / 类型、大小、修改时间等；不自行规定 mtime 排序，mtime 作为信息字段是否参与排序在实施前按 Emacs / 用户配置核对。
-5. **`kill-current-buffer`**：新增命令，默认沿用用户配置的 `C-x C-k`；`C-x k` 仍为 `kill-buffer`，minibuffer 内按 Emacs abort 当前会话，dirty 确认沿用现有规则。
+2. **鼠标滚轮与 point**：按 Emacs `mwheel-scroll` / `scroll-up` / `scroll-down` 的实际语义实现，不按“滚轮等于 point 移动一行”的观察简化；当前 semacs 只滚视图不改 point。精确屏幕表现实施前做一次对照观察，不另造语义。
+3. **find-file 候选排序与信息**：按用户 Emacs 的 Vertico + Marginalia 实际行为——新增持久化 file-name history，排序为历史 → 长度 → 字母序，fuzzy 只做过滤；注解照抄 Marginalia；mtime 不参与排序，不补 `./` / `../`。
 
-这些是 tree viewer 的前置项，不改变已交付 F1–F5 的契约；实施时再更新对应的[保真度契约](emacs-fidelity.md)与验收入口。
+`kill-current-buffer`（`C-x C-k`，含 minibuffer 内退出会话）与 Magit `S-TAB` 全局 section 可见性已交付，契约见[保真度](emacs-fidelity.md#4-v1-默认键位)。其余是 tree viewer 的前置项，不改变已交付 F1–F5 的契约；实施时再更新对应的[保真度契约](emacs-fidelity.md)与验收入口。
 
 ## 下一步方向（方向已确认，首版待细化）
 

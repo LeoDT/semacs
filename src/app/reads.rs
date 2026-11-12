@@ -596,7 +596,7 @@ impl AppShell {
         }
     }
 
-    fn cancel_session(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    pub(super) fn cancel_session(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(session) = self.session.as_ref() else {
             return;
         };

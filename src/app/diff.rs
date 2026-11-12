@@ -43,7 +43,10 @@ impl AppShell {
             }),
             _ => {
                 let mut buffer = origin.read(cx).buffer().new_view();
-                let anchors: Vec<_> = if command == Command::SectionToggle {
+                let anchors: Vec<_> = if matches!(
+                    command,
+                    Command::SectionToggle | Command::SectionCycleGlobal
+                ) {
                     let id = buffer.snapshot_id().buffer;
                     self.all_views()
                         .into_iter()
@@ -58,6 +61,8 @@ impl AppShell {
                 };
                 let result = if command == Command::SectionToggle {
                     buffer.toggle_section().map(|_| None)
+                } else if command == Command::SectionCycleGlobal {
+                    buffer.cycle_sections_global().map(|_| None)
                 } else if command == Command::MagitDiffJump {
                     buffer.diff_peer().map(Some)
                 } else {

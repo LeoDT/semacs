@@ -66,6 +66,8 @@ fn default_bindings_match_the_emacs_reference_or_approved_contracts() {
                 "M-d" => Some("kill-word"),
                 "M-DEL" => Some("backward-kill-word"),
                 "C-x 0" => Some("delete-window"),
+                // Approved override: the user binds kill-current-buffer here.
+                "C-x C-k" => Some("kill-current-buffer"),
                 "C-h e" => messages_reference.get("C-h e").copied(),
                 key => reference.get(key).copied(),
             };

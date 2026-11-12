@@ -62,3 +62,19 @@ fn invalid_hierarchies_and_partial_line_boundaries_are_rejected() {
         assert!(Sections::new(&text, nodes).is_err());
     }
 }
+
+#[test]
+fn global_cycle_expands_all_then_collapses_only_top_level_sections() {
+    let (_, mut sections) = tree("hunk");
+    sections.toggle(2).unwrap();
+    sections.cycle_global();
+    assert!(sections.nodes().iter().skip(1).all(|node| !node.collapsed));
+
+    sections.cycle_global();
+    assert!(sections.nodes()[1].collapsed);
+    assert!(!sections.nodes()[2].collapsed);
+    assert!(!sections.nodes()[3].collapsed);
+
+    sections.cycle_global();
+    assert!(sections.nodes().iter().skip(1).all(|node| !node.collapsed));
+}

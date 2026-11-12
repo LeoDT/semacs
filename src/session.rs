@@ -286,6 +286,12 @@ impl ReadSession {
         } else {
             Keymap::for_scope(Scope::ReadSession)
         };
+        keymap
+            .bind(
+                &parse_sequence("ctrl-x ctrl-k").unwrap(),
+                Command::KillCurrentBuffer,
+            )
+            .unwrap();
         if kind.has_candidates() {
             for &(key, command) in CANDIDATE_BINDINGS {
                 keymap.bind(&parse_sequence(key).unwrap(), command).unwrap();

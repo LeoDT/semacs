@@ -299,10 +299,10 @@ fn kill_commands_preserve_composition_registration_but_revoke_callbacks_after_co
         );
     });
     redraw(&mut visual);
-    visual.simulate_keystrokes("ctrl-x ctrl-k");
+    visual.simulate_keystrokes("ctrl-x ctrl-g");
     visual.read(|cx| {
         let view = editor.read(cx);
-        assert_eq!(view.message(), Some("C-x C-k is undefined"));
+        assert_eq!(view.message(), Some("C-x C-g is undefined"));
         assert_eq!(view.target.kill_ring().entries().len(), 1);
     });
 }

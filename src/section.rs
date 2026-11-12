@@ -137,6 +137,58 @@ impl Sections {
         Ok(())
     }
 
+    /// Magit `magit-section-cycle-global`: expand every body unless all bodies
+    /// are already visible, in which case collapse the top-level sections.
+    pub fn cycle_global(&mut self) {
+        let children = self.child_indices();
+        let top_level = children[0].clone();
+        let partially_collapsed = top_level.iter().any(|&index| self.nodes[index].collapsed)
+            && top_level.iter().any(|&index| !children[index].is_empty());
+        if partially_collapsed
+            || top_level
+                .iter()
+                .any(|&index| self.hidden_body(index, &children))
+        {
+            for node in &mut self.nodes {
+                if node.collapsed {
+                    node.collapsed = false;
+                    self.remembered.insert(node.key.clone(), false);
+                }
+            }
+        } else {
+            for index in top_level {
+                let node = &mut self.nodes[index];
+                if node.body < node.range.end && !node.collapsed {
+                    node.collapsed = true;
+                    self.remembered.insert(node.key.clone(), true);
+                }
+            }
+        }
+        self.rebuild();
+    }
+
+    fn child_indices(&self) -> Vec<Vec<usize>> {
+        let mut children = vec![Vec::new(); self.nodes.len()];
+        for (index, node) in self.nodes.iter().enumerate().skip(1) {
+            if let Some(parent) = node.parent {
+                children[parent].push(index);
+            }
+        }
+        children
+    }
+
+    /// Mirrors `magit-section-hidden-body`: a leaf's body counts only when it has
+    /// one, and a section with children defers to them.
+    fn hidden_body(&self, index: usize, children: &[Vec<usize>]) -> bool {
+        if children[index].is_empty() {
+            self.nodes[index].body < self.nodes[index].range.end && self.nodes[index].collapsed
+        } else {
+            children[index]
+                .iter()
+                .any(|&child| self.hidden_body(child, children))
+        }
+    }
+
     pub fn reveal(&mut self, point: ByteOffset) {
         let mut index = self.nodes[self.current(point)].parent;
         while let Some(parent) = index {

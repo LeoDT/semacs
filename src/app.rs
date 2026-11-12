@@ -396,6 +396,7 @@ impl AppShell {
             Command::MagitDiffStaged
             | Command::MagitDiffUnstaged
             | Command::SectionToggle
+            | Command::SectionCycleGlobal
             | Command::SectionForward
             | Command::SectionBackward
             | Command::SectionUp
@@ -450,6 +451,27 @@ impl AppShell {
                 }
                 let default = origin.read(cx).buffer().display_name();
                 self.begin_read(ReadKind::KillBuffer { default }, origin, "", window, cx);
+            }
+            Command::KillCurrentBuffer => {
+                if self.session.is_some() {
+                    self.cancel_session(window, cx);
+                    return;
+                }
+                let id = origin.read(cx).buffer().snapshot_id().buffer;
+                #[cfg(unix)]
+                if self.commit_editors.contains_key(&id) {
+                    self.finish_commit_editor(
+                        origin,
+                        crate::commit::EditorOutcome::Cancel,
+                        true,
+                        window,
+                        cx,
+                    );
+                    return;
+                }
+                if let Some(index) = self.buffers.index_of(id) {
+                    self.kill_buffer_at(index, window, cx);
+                }
             }
             Command::SplitWindowBelow
             | Command::SplitWindowRight

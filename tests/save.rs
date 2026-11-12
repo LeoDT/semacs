@@ -1,7 +1,8 @@
 mod support;
 
 use gpui_kit as gpui;
-use gpui_kit::TestAppContext;
+use gpui_kit::{Entity, TestAppContext, VisualTestContext};
+use semacs::app::AppShell;
 use semacs::buffer::Buffer;
 use semacs::files::{self, FileFormat, LineEnding};
 use std::fs;
@@ -527,6 +528,140 @@ fn kill_buffer_can_save_first(cx: &mut TestAppContext) {
         );
     });
     assert_eq!(fs::read(&alpha).unwrap(), b"Xalpha");
+}
+
+fn file_buffers(
+    visual: &mut VisualTestContext,
+    shell: &Entity<AppShell>,
+) -> Vec<std::path::PathBuf> {
+    let mut paths = visual.read(|cx| {
+        shell
+            .read(cx)
+            .buffers()
+            .filter_map(|buffer| buffer.path())
+            .collect::<Vec<_>>()
+    });
+    paths.sort();
+    paths
+}
+
+#[gpui::test]
+fn kill_current_buffer_kills_the_active_buffer_and_confirms_dirty_buffers(cx: &mut TestAppContext) {
+    let dir = TempDir::new("kill-current");
+    let alpha = dir.path().join("alpha.txt");
+    let beta = dir.path().join("beta.txt");
+    fs::write(&alpha, b"alpha").unwrap();
+    fs::write(&beta, b"beta").unwrap();
+    let (mut visual, shell, _) = open(Buffer::new(Some(alpha.clone()), decoded("alpha")), cx);
+    let _beta = create(&mut visual, &shell, "beta", Some(&beta));
+    activate(&mut visual, &shell, 0);
+
+    visual.simulate_input("X");
+    redraw(&mut visual);
+    visual.simulate_keystrokes("ctrl-x ctrl-k");
+    redraw(&mut visual);
+    visual.read(|cx| {
+        let prompt = shell.read(cx).minibuffer().unwrap().read(cx).prompt(cx);
+        assert!(prompt.contains("modified; kill anyway?"), "{prompt}");
+        assert!(!prompt.contains("Kill buffer"), "{prompt}");
+    });
+    visual.simulate_keystrokes("n");
+    redraw(&mut visual);
+    visual.read(|cx| assert!(shell.read(cx).minibuffer().is_none()));
+    assert_eq!(
+        file_buffers(&mut visual, &shell),
+        vec![alpha.clone(), beta.clone()]
+    );
+    assert!(visual.read(|cx| shell.read(cx).active_view().read(cx).buffer().is_modified()));
+
+    visual.simulate_keystrokes("ctrl-x ctrl-k");
+    redraw(&mut visual);
+    visual.read(|cx| assert!(shell.read(cx).minibuffer().is_some()));
+    visual.simulate_keystrokes("y");
+    redraw(&mut visual);
+    assert_eq!(file_buffers(&mut visual, &shell), vec![beta.clone()]);
+    visual.read(|cx| {
+        assert!(shell.read(cx).minibuffer().is_none());
+        assert_eq!(
+            shell
+                .read(cx)
+                .active_view()
+                .read(cx)
+                .buffer()
+                .path()
+                .as_deref(),
+            Some(beta.as_path())
+        );
+    });
+    assert_eq!(fs::read(&alpha).unwrap(), b"alpha");
+}
+
+#[gpui::test]
+fn kill_current_buffer_kills_a_clean_buffer_without_reading_a_name(cx: &mut TestAppContext) {
+    let dir = TempDir::new("kill-current-clean");
+    let alpha = dir.path().join("alpha.txt");
+    let beta = dir.path().join("beta.txt");
+    fs::write(&alpha, b"alpha").unwrap();
+    let (mut visual, shell, _) = open(Buffer::new(Some(alpha.clone()), decoded("alpha")), cx);
+    let _beta = create(&mut visual, &shell, "beta", Some(&beta));
+    activate(&mut visual, &shell, 0);
+
+    visual.simulate_keystrokes("ctrl-x ctrl-k");
+    redraw(&mut visual);
+    visual.read(|cx| assert!(shell.read(cx).minibuffer().is_none()));
+    assert_eq!(file_buffers(&mut visual, &shell), vec![beta.clone()]);
+    visual.read(|cx| {
+        assert_eq!(
+            shell
+                .read(cx)
+                .active_view()
+                .read(cx)
+                .buffer()
+                .path()
+                .as_deref(),
+            Some(beta.as_path())
+        );
+    });
+}
+
+#[gpui::test]
+fn kill_current_buffer_aborts_a_minibuffer_read(cx: &mut TestAppContext) {
+    let dir = TempDir::new("kill-current-abort");
+    let alpha = dir.path().join("alpha.txt");
+    fs::write(&alpha, b"alpha").unwrap();
+    let (mut visual, shell, _) = open(Buffer::new(Some(alpha.clone()), decoded("alpha")), cx);
+
+    visual.simulate_keystrokes("ctrl-x ctrl-f");
+    redraw(&mut visual);
+    visual.read(|cx| assert!(shell.read(cx).minibuffer().is_some()));
+    visual.simulate_keystrokes("ctrl-x ctrl-k");
+    redraw(&mut visual);
+    visual.read(|cx| {
+        assert!(shell.read(cx).minibuffer().is_none());
+        assert_eq!(
+            shell.read(cx).active_view().read(cx).message(),
+            Some("Quit")
+        );
+    });
+    assert_eq!(file_buffers(&mut visual, &shell), vec![alpha.clone()]);
+
+    // A single-key confirmation prompt aborts the same way.
+    visual.simulate_input("X");
+    redraw(&mut visual);
+    visual.simulate_keystrokes("ctrl-x ctrl-k");
+    redraw(&mut visual);
+    visual.read(|cx| assert!(shell.read(cx).minibuffer().is_some()));
+    visual.simulate_keystrokes("ctrl-x ctrl-k");
+    redraw(&mut visual);
+    visual.read(|cx| {
+        assert!(shell.read(cx).minibuffer().is_none());
+        assert_eq!(
+            shell.read(cx).active_view().read(cx).message(),
+            Some("Quit")
+        );
+        assert!(shell.read(cx).active_view().read(cx).buffer().is_modified());
+    });
+    assert_eq!(file_buffers(&mut visual, &shell), vec![alpha.clone()]);
 }
 
 #[gpui::test]

@@ -90,6 +90,7 @@
 | `M-x` | execute-extended-command | 是 |
 | `C-x C-f` / `C-x C-s` / `C-x C-w` | find-file / save-buffer / write-file | 是 |
 | `C-x b` / `C-x k` | switch-to-buffer / kill-buffer | 是 |
+| `C-x C-k` | kill-current-buffer | 是（已批准默认键位差异） |
 | `C-x C-c` | save-buffers-kill-terminal | 是 |
 | `C-s` / `C-r` | isearch-forward / isearch-backward | 延后 |
 | `C-u` | universal-argument | v1 后评估 |
@@ -141,7 +142,7 @@
 - 字段边界独立于只读属性，由共享命令层使用。目前支持在不可变前缀中固定的分界：C-a 从输入字段移到当前逻辑行首，但不进入 prompt；已在 prompt 内时仍可移到该字段内的行首。C-k 的范围止于所在字段的行尾 / 末端。字符移动和 buffer 跳转不统一截断到输入区；C-e 仍到逻辑行末，不能把所有 motion 都限制在字段内。
 - 删除 prompt 的 kill 先复制，再报告只读文本错误；C-k 还移到复制范围末端。yank 的整个 buffer 只读检查发生在设置 mark 前；仅插入位置为只读文本时，非空 yank 设置 mark 后因插入受保护而失败。空 ring 和空字符串 yank 保留既定的 mark 副作用，不创建文本编辑。
 - prompt / 初始输入在创建目标时初始化，不属于用户 undo 组；minibuffer 的 modified 不代表文件未保存。正文与 minibuffer 的 history、point / mark、输入会话和布局独立，kill ring 仍应用内共享。
-- 读入 / 查询会话在 minibuffer 之上增加会话层：文本读入用 RET 确认、TAB 补全；单键查询直接作答，不要求 RET，也不回落到编辑 keymap。C-g 取消并回显 `Quit`；没有会话的裸挂载仍是普通编辑目标，沿用编辑 keymap。同一时间只允许一个会话，不做递归 minibuffer。确认与取消都先结束会话、恢复 active 正文的输入会话与焦点，保留 origin 的 point / mark / 滚动，再在 origin 上执行命令；origin 可为退出协调中的非 active buffer，不把操作转发给当前碰巧聚焦的其它目标。旧会话和旧输入快照的迟到结果均被隔离。
+- 读入 / 查询会话在 minibuffer 之上增加会话层：文本读入用 RET 确认、TAB 补全；单键查询直接作答，不要求 RET，也不回落到编辑 keymap。C-g 取消并回显 `Quit`；会话中 `C-x C-k`（kill-current-buffer）同样退出当前会话，沿用该取消路径；没有会话的裸挂载仍是普通编辑目标，沿用编辑 keymap。同一时间只允许一个会话，不做递归 minibuffer。确认与取消都先结束会话、恢复 active 正文的输入会话与焦点，保留 origin 的 point / mark / 滚动，再在 origin 上执行命令；origin 可为退出协调中的非 active buffer，不把操作转发给当前碰巧聚焦的其它目标。旧会话和旧输入快照的迟到结果均被隔离。
 
 ### 鼠标选区
 
@@ -311,6 +312,7 @@
 - `M-x magit-diff-unstaged` 查看 index → worktree，`M-x magit-diff-staged` 查看 HEAD → index；未有首个 commit 时仍可查看 staged 新增文件。仓库从发起文件的目录发现；在 diff 中切换比较时沿用该仓库。比较针对磁盘 / index，不自动保存编辑 buffer，也不把未保存文本当作 worktree 内容。
 - 显示 diffstat、文件与 hunk heading 和 unified 正文；普通文件 / hunk 默认展开，删除文件默认折叠。binary、symlink / 文件类型及 submodule 变更只提供摘要；未合并 / combined 等不支持结构明确报错，不伪造逐行 hunk。
 - `TAB` / `C-i` 切换当前 section 正文，保留 heading；root 不能隐藏。父节点折叠不改写子节点自身状态；隐藏正文中的各 view point 移至折叠 heading。正文仍保留在只读 buffer 中，普通 region / 复制沿用文本语义，不提供 Magit 结构化选择语义。
+- `S-TAB` / `<backtab>` 执行 `magit-section-cycle-global`：仍有正文隐藏时全部展开；全部正文可见时只折叠顶级 section，子孙自身状态保留、heading 仍在。折叠使 point 落入隐藏正文时移到该 section heading；多 view 共享折叠，各自 point / scroll 维持既有规则。
 - `n` 到下一个可见 section heading；`p` 在正文先回当前 section 起点，在起点再到前一个可见 heading；`^` 到父节点。`j` 在 diffstat 文件项与对应文件间跳转，必要时打开目标祖先。SPC / DEL / S-SPC 及原通用翻页键按可见行翻页，普通文本移动跳过隐藏正文。
 - status / diff 使用独立的分组标题、分支、hash、文件头、hunk 头、上下文、增删行和 diffstat 命名样式，见[主题 API](scripting.md#主题与命名样式)。当前 section 按各 view 的 point 提供独立于 region 的背景反馈及对应 diff 高亮样式；角色背景铺满逻辑行，字体变化参与 view 的布局身份。使用自有可配置配色，不引入 Delta、隐藏增删标记或词级高亮；折叠 heading 带指示。长行不软换行，M-右 / M-左（`scroll-left` / `scroll-right`）水平查看，point 移动到屏幕外列时跟随。普通编辑 buffer 的软换行不变。
 - `g` 重新读取相同比较。按 section 类型 / 路径 / 父链及 hunk heading 身份尽量保留折叠、各 view point 与顶部 section 相对行列；节点消失时回退到最近仍存在的祖先 heading，不能保证 hunk 内容变化后仍匹配。只读刷新没有文本 undo，也不标记 modified。
@@ -380,7 +382,7 @@ F2 仅提供 status 与单文件整文件级 index 操作，不包含 hunk / 批
 ### 消息文件与恢复
 
 - 访问 Git 传入的真实路径，支持 hook 请求的其他消息文件，不假定总是 `.git/COMMIT_EDITMSG`。复用已访问文件时若磁盘已变化，按上游询问是否重读，dirty 文案明确会放弃编辑；拒绝保留草稿，后续保存仍走既有外部修改确认。后台载入不替换其他读入，未决重读在该消息 buffer 结束编辑前处理；确认后出现的新编辑不被旧答复覆盖。
-- 隐藏 / 关闭 view 或配置 reload 不结束 editor 请求。当前消息的 `kill-buffer` 命令按 cancel 处理，其他直接删除活动 editor buffer 的路径拒绝并提示使用 cancel；重复请求复用消息 buffer，各自答复其 helper。
+- 隐藏 / 关闭 view 或配置 reload 不结束 editor 请求。当前消息的 `kill-buffer` / `kill-current-buffer` 命令按 cancel 处理，其他直接删除活动 editor buffer 的路径拒绝并提示使用 cancel；重复请求复用消息 buffer，各自答复其 helper。
 - `write-file` 改变当前访问路径，finish / cancel 保存当前访问文件；Git 等待的原文件路径不因此重定向，不禁止另存，也不偷偷回写原路径。
 - 消息 ring 在进程内跨窗口共享，默认 32 条；开始 / 结束编辑保存消息，`C-c M-s` 显式保存，`M-p` / `M-n` 用逐编辑会话的位置浏览，浏览前保留新草稿。去重并移到前端，忽略纯空白 / 注释及 scissors 后正文；恢复替换消息部分、保留 Git 注释并可 undo。不改写交付给 Git 的消息文件，不承诺跨重启。
 - finish 默认在第二行非空时询问是否仍提交；这是上游样式询问，不替代 Git 的消息有效性或 cleanup 判定。保存失败 / 拒绝保存确认不答复 editor 成功，也不收起编辑界面；Git 后续失败不强制重开界面，可在下一次编辑从 ring 恢复消息。

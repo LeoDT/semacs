@@ -147,6 +147,7 @@ commands! {
     CommitNextMessage => "git-commit-next-message", Application("git-commit"), ["alt-n" => "M-n"];
     MagitDiffUnstaged => "magit-diff-unstaged", Application, [];
     MagitDiffStaged => "magit-diff-staged", Application, [];
+    SectionCycleGlobal => "magit-section-cycle-global", Application("magit-diff", "magit-status", "magit-process", "magit-log", "magit-log-select", "magit-revision"), ["shift-tab" => "<backtab>"];
     SectionToggle => "section-toggle", Application("magit-diff", "magit-status", "magit-process", "magit-log", "magit-log-select", "magit-revision"), ["tab" => "TAB", "ctrl-i" => "C-i"];
     SectionForward => "section-forward", Application("magit-diff", "magit-status", "magit-process", "magit-log", "magit-log-select", "magit-revision"), ["n" => "n"];
     SectionBackward => "section-backward", Application("magit-diff", "magit-status", "magit-process", "magit-log", "magit-log-select", "magit-revision"), ["p" => "p"];
@@ -167,6 +168,7 @@ commands! {
     WriteFile => "write-file", Application, ["ctrl-x ctrl-w" => "C-x C-w"];
     SwitchToBuffer => "switch-to-buffer", Application, ["ctrl-x b" => "C-x b"];
     KillBuffer => "kill-buffer", Application, ["ctrl-x k" => "C-x k"];
+    KillCurrentBuffer => "kill-current-buffer", Application, ["ctrl-x ctrl-k" => "C-x C-k"];
     SplitWindowBelow => "split-window-below", Application, ["ctrl-x 2" => "C-x 2"];
     SplitWindowRight => "split-window-right", Application, ["ctrl-x 3" => "C-x 3"];
     OtherWindow => "other-window", Application, ["ctrl-x o" => "C-x o"];

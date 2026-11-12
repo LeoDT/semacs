@@ -207,3 +207,83 @@ fn unstaged_visit_reuses_editable_worktree_and_mode_keys_stay_out_of_minibuffer(
         assert!(editor.read(cx).buffer().text().to_string().ends_with('n'));
     });
 }
+
+#[gpui::test]
+fn global_section_cycle_expands_everything_then_collapses_top_level_sections(
+    cx: &mut TestAppContext,
+) {
+    let repo = Repository::new();
+    repo.write("a", "one\ntwo\n");
+    repo.commit();
+    repo.write("a", "one\nTWO\n");
+    let (mut visual, shell) = open(&repo, cx);
+    command(&mut visual, &shell, Command::MagitDiffUnstaged);
+    wait(&mut visual, &shell);
+    let first = visual.read(|cx| shell.read(cx).active_view().clone());
+    command(&mut visual, &shell, Command::SplitWindowRight);
+    visual.update(|window, cx| window.draw(cx).clear(cx));
+    command(&mut visual, &shell, Command::OtherWindow);
+    let second = visual.read(|cx| shell.read(cx).active_view().clone());
+
+    let sections = visual.read(|cx| first.read(cx).buffer().sections().unwrap());
+    let hunk_index = sections
+        .nodes()
+        .iter()
+        .position(|node| node.key.contains("/@@"))
+        .unwrap();
+    let hunk = &sections.nodes()[hunk_index];
+    let (hunk_heading, hunk_body) = (hunk.range.start, hunk.body);
+    let mut owning = hunk_index;
+    while let Some(parent) = sections.nodes()[owning].parent
+        && parent != 0
+    {
+        owning = parent;
+    }
+    let file = sections.nodes()[owning].range.start;
+    visual.update(|window, cx| {
+        first.update(cx, |view, cx| view.show_location(hunk_body, window, cx));
+        second.update(cx, |view, cx| view.show_location(hunk_heading, window, cx));
+    });
+
+    visual.simulate_keystrokes("shift-tab");
+    visual.update(|window, cx| window.draw(cx).clear(cx));
+    visual.read(|cx| {
+        let sections = first.read(cx).buffer().sections().unwrap();
+        assert!(
+            sections
+                .nodes()
+                .iter()
+                .skip(1)
+                .filter(|node| node.parent == Some(0))
+                .all(|node| node.collapsed)
+        );
+        assert!(
+            sections
+                .nodes()
+                .iter()
+                .skip(1)
+                .filter(|node| node.parent != Some(0))
+                .all(|node| !node.collapsed)
+        );
+        assert_eq!(first.read(cx).buffer().point(), file);
+        assert_eq!(second.read(cx).buffer().point(), file);
+    });
+
+    visual.simulate_keystrokes("shift-tab");
+    visual.update(|window, cx| window.draw(cx).clear(cx));
+    visual.read(|cx| {
+        assert!(
+            first
+                .read(cx)
+                .buffer()
+                .sections()
+                .unwrap()
+                .nodes()
+                .iter()
+                .skip(1)
+                .all(|node| !node.collapsed)
+        );
+        assert_eq!(first.read(cx).buffer().point(), file);
+        assert_eq!(second.read(cx).buffer().point(), file);
+    });
+}

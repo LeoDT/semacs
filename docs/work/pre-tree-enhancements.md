@@ -22,20 +22,13 @@
 
 **实施原则**：普通 motion 按 Emacs redisplay 默认 recenter，不另造“固定滚动半页”常量；hunk 导航按 Magit `magit-hunk-set-window-start` 的 window-start 规则，其他 section 不额外发明可见性约束。实施前只需核对与现有 `C-l`、翻页、`goal column`、软换行和 sections 投影的交互。
 
-## 2. Magit 的 Shift+Tab 全局 section 可见性
+## 2. Magit 的 Shift+Tab 全局 section 可见性（已实施）
 
-**现象 / 目标**：diff / Magit 中 `Shift+Tab` 应能全局展开 / 收起顶级 section，例如 diff 中的文件、status 中的 staged / unstaged 组。实际行为按 Magit 上游 cycle 语义。
+已实施：契约见[保真度](../emacs-fidelity.md)。真实 Magit 的可见状态是两态循环（仍有正文隐藏时全部展开；全部正文可见时只折叠顶级 section），不是本稿原先记的“三态”；观察见 [冻结记录](../records/magit-section-cycle-global-observation.md)。
 
-**静态依据**：
+**静态依据**：Magit `magit-section-mode-map` 把 `<backtab>` 绑定到 `magit-section-cycle-global`；源码里的三个 cond 分支中，前两支（部分子 section 隐藏且有 children、深层正文隐藏）都展开全部正文，第三支才折叠顶级子 section，所以可见状态实际是两态循环。折叠使 point 落入隐藏正文时移回该 section heading。该命令适用于所有基于 `magit-section-mode` 的 buffer：diff、status、process、log、log-select、revision，顶级 section 类型随 mode 不同。
 
-- Magit `magit-section-mode-map` 把 `<backtab>` 绑定到 `magit-section-cycle-global`。
-- `magit-section-cycle-global` 对 root 的子 section 做三态循环，不是简单二元 toggle：
-  1. 若有子 section 隐藏、且部分子 section 有 children：显示所有 headings、隐藏正文；
-  2. 否则若有子 section 的正文隐藏：显示所有 children 正文；
-  3. 否则隐藏所有顶级子 section。
-- 该行为适用于所有基于 `magit-section-mode` 的 buffer，包括 diff、status、process、log、log-select、revision；顶级 section 类型随 mode 不同。
-
-**实施原则**：按 Magit 上游的三态 cycle 实现，不另做简化的二元 toggle。普通 `TAB` 只切换当前 section；`S-TAB` 只做全局 cycle。折叠状态、point 与多 view 的恢复规则沿用现有 section 模型。
+**实施结果**：普通 `TAB` 只切换当前 section；`S-TAB` 只做全局 cycle，折叠状态、point 与多 view 沿用现有 section 模型。
 
 ## 3. 鼠标滚轮与 point
 
@@ -47,6 +40,8 @@
 - `scroll-up` / `scroll-down` 都带 `scroll-command` 属性；默认 `scroll-preserve-screen-position` 为 nil，表示 point 不保持屏幕位置，但在滚动余量 / 窗口边界处会被调整。
 - 因此“滚轮 = 光标移动一行”是不准确的简化：实际是滚动窗口，point 在边界条件下调整。精确屏幕上表现仍需要真实 GUI 观察。
 - semacs 当前滚轮只调用 `scroll_by`，point 不变，光标可能离开可视区。
+
+**用户 GUI 观察（Emacs 31.1，真实桌面，窗口固定）**：单格 1 行、point 被推至窗口首 / 末行、首尾贴边及 region 取消均与上文一致；快速连滚能感到加速，但读不出每格行数；触摸板难以精确停在单行，但不是像素级滚动；`Shift+滚轮` 水平滚动一列。
 
 **实施原则**：按 Emacs `mwheel-scroll` / `scroll-up` / `scroll-down` 的 scroll-command 语义实现，不改成 `next-line`。默认 amount 为 1 行、progressive speed 为 t 可作为起点；边界处 point 落点及水平滚动继续按 Emacs 行为核对。精确屏幕表现实施前在真实 Emacs GUI 与 semacs 桌面上做一次对照观察，不把观察现象直接写成新契约。
 
@@ -60,21 +55,17 @@
 - Marginalia 只负责注解；Vertico 默认排序是 history / length / alpha，不是按 mtime。
 - semacs 当前 `path_candidates` 使用 `fs::read_dir` 的直接顺序，注解只有 `file` / `directory`。
 
-**实施原则 / 实施前核对**：
+**已确认（实施前核对结论）**：
 
-- 候选顺序遵循 Emacs completion 的实际排序语义，包括 `display-sort-function` 和用户配置可观察到的顺序；不自行固定 mtime 排序。mtime 先作为注解字段，是否参与排序按 Emacs / 用户配置核对。
+- 用户 Emacs 的 file completion 没有 `display-sort-function` / `annotation-function`，Vertico 用默认 `vertico-sort-history-length-alpha`，Marginalia 注解；用用户的 Vertico 与 `~/.emacs.d/history` 在 batch 复现了该顺序。mtime 不参与排序。
+- 用户确认：新增持久化 file-name history 并参与排序；过滤保持现有 fuzzy，排序改为历史 → 长度 → 字母序；注解照抄 Marginalia left 对齐格式；不补 `./` / `../` 候选。
+
 - 注解参考用户 Emacs 的 Marginalia：权限 / 类型、人类可读大小、修改时间、必要时 owner；窄窗口下截断。
 - 每个候选读取 metadata 的成本、缓存与有界更新需要在实施前测量；避免在候选刷新中阻塞前台。
 - 影响范围先限定文件候选，不自动改动 buffer / 命令候选的排序。
 
 ## 5. kill-current-buffer
 
-**需求**：需要 `kill-current-buffer` 命令，行为按 Emacs 定义。
+已实施：`C-x C-k` 绑定 `kill-current-buffer`，minibuffer 内退出当前会话；契约见[保真度](../emacs-fidelity.md)。
 
-**静态依据**：
-
-- Emacs 31.1 定义 `kill-current-buffer`，默认没有全局键位；`C-x k` 仍是 `kill-buffer`。
-- 用户配置把 `C-x C-k` 绑定到 `kill-current-buffer`。
-- 行为：在普通窗口调用 `kill-buffer` 当前 buffer；在 minibuffer 中调用 `abort-recursive-edit` 退出；dirty 确认沿用 `kill-buffer`。
-
-**实施原则**：semacs 默认键位采用用户配置的 `C-x C-k`；`C-x k` 保持 `kill-buffer`。minibuffer 中按 Emacs `abort-recursive-edit` 退出当前会话，与现有 `C-g` 会话取消路径合并，不另建语义。dirty buffer 确认、退出保存协调及最后 buffer 回退沿用现有 kill-buffer 规则。
+**静态依据**：Emacs 31.1 的 `kill-current-buffer` 默认没有全局键位，`C-x k` 仍是 `kill-buffer`；用户配置把 `C-x C-k` 绑定到 `kill-current-buffer`，在 minibuffer 中调用 `abort-recursive-edit`。

@@ -526,7 +526,7 @@ fn overwrite_accepts_one_key_without_enter_and_restores_body_input(cx: &mut Test
     visual.simulate_keystrokes("enter");
     redraw(&mut visual);
     assert!(prompt(&mut visual, &shell).contains("(y or n)"));
-    visual.simulate_keystrokes("enter tab ctrl-x");
+    visual.simulate_keystrokes("enter tab");
     redraw(&mut visual);
     assert!(prompt(&mut visual, &shell).contains("(y or n)"));
     assert_eq!(contents(&mut visual, &shell), "");
@@ -584,7 +584,7 @@ fn canceled_save_as_drops_dependent_saves_and_allows_a_later_save(cx: &mut TestA
     dispatch_keys(&mut visual, &["ctrl-x", "ctrl-s"]);
     redraw(&mut visual);
     assert!(prompt(&mut visual, &shell).contains("overwrite?"));
-    visual.simulate_keystrokes("ctrl-x ctrl-g");
+    visual.simulate_keystrokes("ctrl-g");
     redraw(&mut visual);
     visual.read(|cx| {
         assert!(shell.read(cx).session().is_none());
