@@ -1,6 +1,6 @@
 # 冻结记录索引
 
-本目录保存固定版本下的验收与诊断证据，包括失败、修复、用户确认及未测边界；不是当前待办，也不表示后续代码自动通过。先从 [实施计划](../plan.md) 确认当前工作，需要历史上下文时再查 [R0–F1 归档](../archive/completed-through-f1.md)、[F2 归档](../archive/f2-status.md)、[F3 归档](../archive/f3-window-commit.md)和对应批次。
+本目录保存固定版本下的验收与诊断证据，包括失败、修复、用户确认及未测边界；不是当前待办，也不表示后续代码自动通过。先从 [实施计划](../plan.md) 确认当前工作，需要历史上下文时再查 [R0–F1 归档](../archive/completed-through-f1.md)、[F2 归档](../archive/f2-status.md)、[F3 归档](../archive/f3-window-commit.md)、[F4 归档](../archive/f4-status-hunks.md)、[F5 归档](../archive/f5-history-commit.md)、[F5 后插入项归档](../archive/post-f5-insertions.md)和对应批次。
 
 记录正文不随当前实现更新，后续复测另记；允许修复引用，不改写历史结论。维护规则见 [文档说明](../README.md#冻结证据)。本索引随新增记录维护，不复制测试数量、完整批次经过或当前问题清单。
 

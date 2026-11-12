@@ -1,6 +1,6 @@
 # 验收流程
 
-本文维护验证范围的选择、本地 / 宿主分工、可执行入口与安全规则。行为见 [保真度契约](emacs-fidelity.md)，预算与指标见 [性能预算](performance.md)，当前工作从 [计划](plan.md) 查阅，历史结论见 [R0–F1 归档](archive/completed-through-f1.md)、[F2 归档](archive/f2-status.md)、[F3 归档](archive/f3-window-commit.md)和 [冻结记录索引](records/README.md)，不在本文逐阶段累积覆盖清单或批次结论。
+本文维护验证范围的选择、本地 / 宿主分工、可执行入口与安全规则。行为见 [保真度契约](emacs-fidelity.md)，预算与指标见 [性能预算](performance.md)，当前工作从 [计划](plan.md) 查阅，历史结论见 [R0–F1 归档](archive/completed-through-f1.md)、[F2 归档](archive/f2-status.md)、[F3 归档](archive/f3-window-commit.md)、[F4 归档](archive/f4-status-hunks.md)、[F5 归档](archive/f5-history-commit.md)、[F5 后插入项归档](archive/post-f5-insertions.md)和 [冻结记录索引](records/README.md)，不在本文逐阶段累积覆盖清单或批次结论。
 
 ## 宿主验证的适用条件
 

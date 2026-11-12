@@ -198,7 +198,7 @@
 
 ## 7. 显示设置
 
-本节定义阶段 A 的产品行为，不追求 Emacs 外观或 text-scale-mode 的完整兼容；当前工作只在 [实施计划](plan.md) 维护，阶段结论见 [显示设置归档](archive/completed-through-f1.md#阶段-a显示设置)。
+本节定义阶段 A 的产品行为，不追求 Emacs 外观或 text-scale-mode 的完整兼容；阶段结论见 [显示设置归档](archive/completed-through-f1.md#阶段-a显示设置)，后续工作只在 [实施计划](plan.md) 维护。
 
 ### 字体与字号
 
@@ -321,7 +321,7 @@ F1 不包含 status、transient、Git 写操作、任意 revision / range、patc
 
 ## 阶段 F2：status 与单文件 index 操作
 
-本节定义 F2 的产品行为；阶段 D / F1 的历史边界不变。当前工作见[计划](plan.md)，交付结论与证据边界见 [F2 归档](archive/f2-status.md)。
+本节定义 F2 的产品行为；阶段 D / F1 的历史边界不变。交付结论与证据边界见 [F2 归档](archive/f2-status.md)，后续工作见[计划](plan.md)。
 
 F2 仅提供 status 与单文件整文件级 index 操作，不包含 hunk / 批量、discard、commit、冲突解决或 transient；不开放任意 Git / 进程 API、异步脚本或持久化 Job。
 
@@ -355,7 +355,7 @@ F2 仅提供 status 与单文件整文件级 index 操作，不包含 hunk / 批
 
 ## 阶段 F3：临时 window 与普通 commit
 
-本节定义 F3 已确认的行为，扩展 F1 / F2 的历史范围；不是实现完成声明。当前进度与待决细节见[计划](plan.md)，静态核对入口与来源身份见 [F3 上游参照](work/f3-window-commit.md)。
+本节定义 F3 已确认的行为，扩展 F1 / F2 的历史范围；交付结论与未测边界见 [F3 归档](archive/f3-window-commit.md)，静态核对入口与来源身份见 [F3 上游参照](work/f3-window-commit.md)，后续工作见[计划](plan.md)。
 
 ### 临时显示与退出
 
@@ -395,7 +395,7 @@ F2 仅提供 status 与单文件整文件级 index 操作，不包含 hunk / 批
 
 ## 阶段 F4：status 内嵌 diff 与单 hunk index 操作
 
-本节扩展 F2 的 status / 单文件范围，不改写其历史边界；当前进度见[计划](plan.md)。
+本节扩展 F2 的 status / 单文件范围，不改写其历史边界；交付结论见 [F4 归档](archive/f4-status-hunks.md)，后续工作见[计划](plan.md)。
 
 - status 的 staged / unstaged 文件包含所属比较的文件正文与 hunk sections，文件默认折叠，hunk 默认展开；untracked / unmerged 保持现有清单，不提供冲突 hunk 写入。文件头沿用 XY / 原始路径身份，正文使用既有 diff 语义样式。binary、非 UTF-8 正文、symlink / 类型变化等明确显示摘要，metadata-only 明示；不伪造可操作文本 hunk。其他 F1 / F2 支持边界不扩大。
 - `TAB`、section 导航、当前 section 高亮、共享折叠与独立 view point / scroll 沿用既有 section 模型。刷新以组 / 原始路径 / hunk heading / 父链恢复，hunk 消失或身份变化回退最近存活祖先；不保证内容变化后仍命中原 hunk。
@@ -407,7 +407,7 @@ F2 仅提供 status 与单文件整文件级 index 操作，不包含 hunk / 批
 
 ## 阶段 F5：本地提交历史与提交整理
 
-本节扩展 F1–F4 的历史范围，不追溯改写旧阶段的排除项或验收结论。上游来源与外部参照见 [F5 调研](work/f5-history-commit.md)，当前进度只见[计划](plan.md)。
+本节扩展 F1–F4 的历史范围，不追溯改写旧阶段的排除项或验收结论。交付结论见 [F5 归档](archive/f5-history-commit.md)，上游来源与外部参照见 [F5 调研](work/f5-history-commit.md)，后续工作只见[计划](plan.md)。
 
 ### 日志与固定提交查看
 

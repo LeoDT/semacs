@@ -1,48 +1,90 @@
 # 实施计划
 
-本文是当前工作和跨会话待办的唯一入口；维护与归档规则见 [文档说明](README.md#维护规则)。范围见 [需求](requirements.md)，行为见 [保真度契约](emacs-fidelity.md)。里程碑按可验收行为划分，不按工期估算。
+本文是当前工作和跨会话待办的唯一入口；维护与归档规则见 [文档说明](README.md#维护规则)。范围与当前方向见 [需求](requirements.md#当前方向v1-后)，行为见 [保真度契约](emacs-fidelity.md)。里程碑按可验收行为划分，不按工期估算。
 
-## 当前状态：F5 提交历史与提交整理完成
+## 当前状态：基础功能收尾，方向调整为代码查看
 
-R0–M3、A–E3、日常编辑增强及 F1 只读 Magit diff 的交付结论见 [R0–F1 归档](archive/completed-through-f1.md)，F2 status / 单文件 stage / unstage 见 [F2 归档](archive/f2-status.md)。F3 临时 window 与普通 commit 已完成实现、集中审查修复、本地验证及获准的单窗口宿主功能验证，见 [F3 归档](archive/f3-window-commit.md)；固定源码 / 环境、结果和未测边界见[冻结记录索引](records/README.md)。
+R0–F5、日常编辑增强及 F5 后插入项均已完成，交付摘要见 [R0–F1 归档](archive/completed-through-f1.md)、[F2 归档](archive/f2-status.md)、[F3 归档](archive/f3-window-commit.md)、[F4 归档](archive/f4-status-hunks.md)、[F5 归档](archive/f5-history-commit.md) 与 [F5 后插入项归档](archive/post-f5-insertions.md)。固定源码 / 环境、结果和未测边界见[冻结记录索引](records/README.md)。
 
-F3 没有已知阻塞性遗留项；密码 / passphrase 读入已由用户明确排除于 F3，不因它继续维持阶段未完成。原性能预算、历史非阻塞观察及各阶段未测边界不变，不把功能收尾解释为全部性能预算通过。
+没有已知阻塞性遗留；已接受的性能观察、字体 / 中文输入差异和未测边界保持原结论，不因功能收尾或方向调整视为预算通过。
 
-## 已完成插入项：Magit 样式、M-x 历史与 scratch 退出
+用户已确认方向调整：从继续复刻 Emacs / Magit 基础功能，转为“使用 Emacs 操作逻辑的代码查看工具”。基础编辑保留；后续编辑能力以自动 / 智能缩进为主；主要精力放在 diff、文件夹 tree viewer，并加入基础 project 功能。已交付的 Git 写入不回退，但不自动扩展为完整 Magit / Git 客户端。长期边界见 [D29](decisions.md#d29-代码查看优先)。
 
-已交付语义样式 / view-local 高亮、M-x 历史排序及持久化、普通非文件 buffer 的退出保存豁免；本地验证与当时的 headless 证据见[记录](records/magit-style-history-scratch-local.md)。用户随后确认新样式已目视验证、没有问题；该确认不扩展为性能或其他宿主矩阵通过，也不改写冻结记录当时的未测结论。
+## 先于 tree viewer 的小增强（已确认，待细化）
 
-## 已完成插入项：语法发布的局部强调重排
+用户已确认以下小增强要在 tree viewer 之前完成；具体行为、默认键与验收在实施前确定。静态参照、现状与待决项见 [tree viewer 前的小增强参照](work/pre-tree-enhancements.md)。
 
-语法解析完成后的发布不再无条件重建整份 wrap 索引：显示文本与字体 / 宽度等输入不变、且新旧排版都保留语法快照时，后台比较按主题角色折叠后的有效强调 run（bold / italic）。完全一致只把新 `Typography` 记到索引 key；局部变化只重排首个到最后一个差异所在的逻辑行，并保留首个受影响行之前的 shaping 缓存。首次启用语法强调、空快照、单独的主题变化、`marked` / overlay / named / section 字体变化及 `visible_lines` 投影仍走原整份重建；与发布同帧的角色强调变化按实际差异处理。
+1. **point 离开视口时的滚动**：按 Emacs 默认 recenter（约半页），不再只做最小一行 reveal；diff / Magit 的 `n` / `p` 导航还要保证目标 hunk / section 正文可见，hunk 参照 Magit `magit-hunk-set-window-start`。
+2. **Magit `S-TAB` 全局 section 可见性**：`Shift+Tab` 对 diff / status / process / log / revision 的顶级 section 做全局可见性 cycle；按 Magit `magit-section-cycle-global` 三态实现，而不是简单二元 toggle。
+3. **鼠标滚轮与 point**：按 Emacs `mwheel-scroll` / `scroll-up` / `scroll-down` 的实际语义实现，不按“滚轮等于 point 移动一行”的观察简化；当前 semacs 只滚视图不改 point。精确屏幕表现实施前做一次对照观察，不另造语义。
+4. **find-file 候选排序与信息**：按 Emacs completion 的实际排序语义补齐候选顺序，并参考用户 Emacs 的 Marginalia 显示权限 / 类型、大小、修改时间等；不自行规定 mtime 排序，mtime 作为信息字段是否参与排序在实施前按 Emacs / 用户配置核对。
+5. **`kill-current-buffer`**：新增命令，默认沿用用户配置的 `C-x C-k`；`C-x k` 仍为 `kill-buffer`，minibuffer 内按 Emacs abort 当前会话，dirty 确认沿用现有规则。
 
-已完成集中审查修复及获准的 P1 专项复核；本地默认 / native-profiler 全目标测试、两套 clippy、fmt 和 diff 检查通过。用户简单试用后反馈已明显改善，并同意提交；未提供具体操作覆盖或测量数据，不扩展为完整宿主矩阵或性能预算通过。助手未启动真实桌面；后台比较成本与宿主输入时延未测。
+这些是 tree viewer 的前置项，不改变已交付 F1–F5 的契约；实施时再更新对应的[保真度契约](emacs-fidelity.md)与验收入口。
 
-## 已完成阶段 F4：status 内嵌 diff 与单 hunk 操作
+## 下一步方向（方向已确认，首版待细化）
 
-已交付批准范围，并完成一次集中审查修复、本地全目标检查及 status / 独立 diff headless 专项；没有已知阻塞性遗留。交付摘要见 [F4 归档](archive/f4-status-hunks.md)，固定身份、结果与未测边界见[本地记录](records/f4-status-hunks-local.md)。用户随后确认已试用、没有明显问题并同意收尾提交；未提供具体操作覆盖或测量数据，不扩展为完整宿主矩阵或原生性能通过。助手未启动真实桌面。
+用户已确认：tree viewer 使用文本 UI 和 Emacs 操作逻辑，参考 treemacs；project 先做基础能力；diff 以查看为主，补 range / revision；indent 只记录、不排期。以下具体首版建议仍需确认，不是已批准实施阶段；交互细节与验收边界确认后才进入实施。
 
-## 已完成阶段 F5：本地提交历史与提交整理
+### 1. 文件夹 tree viewer（小增强之后的主要方向）
 
-已交付批准范围（含历史 merge 的只读 combined 及 parent / result 版本访问），完成一次集中审查修复、默认 / profiler 全目标检查及独立 diff headless 回归，没有已知阻塞性遗留。摘要见 [F5 归档](archive/f5-history-commit.md)，固定源码、结果及未测边界见[本地记录](records/f5-history-commit-local.md)。用户随后确认已大致试用、没有明显问题，但未做完整测试，并同意先收尾提交；该反馈不扩展为完整宿主矩阵或原生性能通过，也不改写冻结记录当时的未测结论。助手未启动真实桌面。
+- 形态（已确认）：独立文本 buffer + 专用左侧 side window；side window 独立于普通 split，不新建 GUI 树控件。建议固定宽度、`C-x 1` 不关闭、`q` bury、显式 toggle；具体交互待细化。复用现有 section 树、可视行、多 view、mode 局部键位与临时 window 语义；直接复用 section 还是建立专用 filetree 模型，在细化时确认。
+- 建议首版：单项目根、目录 / 文件树、懒加载、展开折叠、键盘导航、打开文件、刷新、dotfiles 开关、当前文件定位。
+- 建议首版不做：文件增删改 / 移动、workspaces、图标、tags / imenu、filewatch、peek、完整 git 注解、持久化、远程 / Tramp。
+- side window 细节（宽度、位置、`C-x 1` / `C-x 0` / `C-x o`、toggle 命令与焦点返回）按 treemacs 参照在实施前确定，不现在锁定。
+- 待定：键位是否照搬 treemacs（`n` / `p`、`M-n` / `M-p` 在 tree mode 内生效；需确认默认值与用户配置边界）、根来源、dotfiles / gitignore 策略、follow / 当前文件高亮是否进入首版。
+- 依赖：项目根识别可作为 tree viewer 的前置；项目切换与项目内文件查找可在 tree 之后。
+- 上游参照见 [treemacs 参照](work/treemacs-reference.md)；其中建议不是契约。
 
-## 已完成插入项：鼠标基础选区与文件路径预填
+### 2. 基础 project
 
-按已确认方案交付鼠标基础选区（单击、拖动、拖出上下边界自动滚动）与文件读入默认目录预填（`C-x C-f` / `C-x C-w` / 无路径 `C-x C-s` 共用解析，未编辑 RET、目录答案与默认文件名对齐已核实的 Emacs 语义）。
+- 首版范围：项目根识别（先 `.git`，手动目录作为兜底）、项目切换、项目内文件查找。
+- 项目内内容搜索是已确认的增强方向（搜索优先）；是否并入 project 首版待定，不默认扩大。
+- 不预设完整 `project.el` 兼容、多根 / workspace 或远程 / TRAMP 支持。
 
-实现要点：`EditTarget` 新增按下 / 拖动 / 释放入口，`BufferView` 用单一拖动态与 250 ms 滚动任务管理自动滚动，窗口级监听只处理文本区外的指针；文件读入目录按“origin 仓库根 → 文件父目录 → 启动目录”解析，`$HOME` 仅按组件缩写，候选与确认共用同一解析，候选层的目录接受改为由确认层按 kind 决定（`find-file` 保留会话并提示，`write-file` 追加 buffer 文件名）。
+### 3. diff range / revision
 
-契约见[鼠标选区](emacs-fidelity.md#鼠标选区)与[文件读入的默认目录与路径答案](emacs-fidelity.md#文件读入的默认目录与路径答案)；Emacs 31.1 的 pty 鼠标 / 读入观察见[参照记录](../tests/emacs/RESULTS.md#m3鼠标选区与文件读入预填参照)，不是 semacs 通过证据。已登记差异：单击不恢复点击前的 mark（上游 `pop-mark`）、缺少 dired、自动滚动按像素换算行。本地全目标测试、两套 clippy、fmt 与 diff 检查通过；真实桌面鼠标与候选窗未测。
+- 在现有 status / diff / log / revision 查看器上增加任意 revision 与 range 的查看；命令名、输入格式与从 log 选择 range 的交互待定。
+- 比较身份固定到解析后的 OID / range，读取失败保留旧投影；不自动保存编辑 buffer。
+- 不扩展 Git 写工作流；已交付的 stage / commit / amend / reword 维持现有契约。
 
-## 已完成插入项：view 内正文之外的鼠标命中
+### 4. 自动 / 智能缩进（仅记录）
 
-正文最后一行以下的空白与视图内边距现在参与鼠标命中：位置取最后一个可见行之后（普通文件即 buffer 末尾，含结尾换行），从该处按下可向上拖出 region，向该处拖动时 point 夹在末尾、region 保持 active 且不触发自动滚动；命中范围改由 view 边界决定，自动滚动的越界距离也按 view 边界计算。契约见[鼠标选区](emacs-fidelity.md#鼠标选区)，Emacs 31.1 的 pty 观察见[参照记录](../tests/emacs/RESULTS.md#m3鼠标选区与文件读入预填参照)。本地全目标测试、两套 clippy、fmt 与 diff 检查通过；真实桌面鼠标未测。
+- 需求保留；触发时机、语言范围、tree-sitter 规则与是否包含格式化均未定，不排期。
+- 复用 [D24](decisions.md#d24-缩进边界) 的缩进 / 编辑分离和唯一 Edit 入口；不引入 major-mode 插件框架。
 
-## 下一步
+## 已确认的浏览体验增强（未排期）
 
-目前没有另行批准的新实施阶段。先使用已交付的行为，按实际需求或问题确认后续最小范围；真实环境验证另行授权，不自动追加宿主矩阵。
+用户已确认以下方向都想要，搜索相关优先；代码折叠与 jump list / 返回明确不纳入当前方向。以下仍不是已批准的实施顺序。
 
-更多 Magit 操作 / 完整 transient、脚本扩展 / async、LSP 或 Job 持久化均需另行确认。按需参考 [脚本扩展与热重载调研](work/scripting-extension-research.md) 和 [Magit 上游参照](work/f-magit-reference.md)，两者不额外授权其他范围。有效用户行为仍见[保真度契约](emacs-fidelity.md)，不会改写 F1 / F2 的历史排除范围。
+### 搜索（优先）
+
+- **isearch / diff 内搜索**：当前 buffer 增量搜索；diff 隐藏 section 的展开 / 收起策略需单独定义。
+- **项目内搜索 / occur**：ripgrep 或匹配行列表，结果可跳转；依赖 project 根、有界进程与结果 buffer。
+- **搜索范围与结果呈现**：项目 / buffer / diff 的范围选择、匹配高亮、结果列表与重复搜索；结果跳转沿用现有文件 / 位置打开方式，不新增 jump list。
+
+### 结构导航与阅读辅助
+
+- **imenu / tree-sitter outline**：按函数 / 类 / Markdown 标题列出并跳转；复用现有语言查询，不引入 LSP。
+- **面包屑 / 当前符号**：在 mode line 或 header 显示路径与 tree-sitter 外层结构；不依赖 LSP。
+- **更多语言 / 符号导航**：按实际代码库补 grammar 与 outline 查询，不预建语言平台。
+
+### tree 集成
+
+- **tree follow / 当前文件定位**：切换 buffer 时高亮并展开当前文件；参考 treemacs follow-mode。
+- **tree git 注解**：显示文件状态；复用现有 Git 读取与刷新边界。
+- **peek / 临时预览**：从 tree 短暂查看文件而不切换焦点；复用 F3 临时 window 语义。
+
+### 持久化
+
+- **最近项目 / 文件、树状态持久化**：按实际使用决定，不提前建设。
+
+### 明确不纳入当前方向
+
+- **代码折叠**：按 tree-sitter 结构折叠普通文件。
+- **jump list / 返回**：在文件、outline、搜索结果之间跳转后回到上一位置。
+
+这两项用户已明确不纳入；如以后重新提出，按新方向确认，不因本列表自动恢复。
 
 ## 已知问题与未排期事项
 
@@ -58,11 +100,11 @@ F3 没有已知阻塞性遗留项；密码 / passphrase 读入已由用户明确
 
 ### 未排期需求
 
-- **密码 / passphrase 交互（F3 之外）**：用户已确认排除于 F3；保留后续按 Magit 细化提示识别、保密读入（遮蔽与历史隔离）、取消及进程归属的需求。需先落实输入基础设施并确认实施范围，不使用普通文本读入冒充支持；该需求不属于已交付的 F3 范围。
+- **密码 / passphrase 交互**：保留后续按 Magit 细化提示识别、保密读入（遮蔽与历史隔离）、取消及进程归属的需求。只有继续扩展 Git 提交流程时才提升优先级；需先落实输入基础设施并确认范围，不使用普通文本读入冒充支持。
 - **任务持久化与恢复**：认可核心 Job、跨 reload 存活和分级恢复的方向，尚未批准实现或存储方案；具体待决项见[调研](work/scripting-extension-research.md#9-待确认事项)。先由实际任务推动，不能把自动重跑视为安全恢复。
-- **鼠标多击 / Shift / 右键交互**：基础选区已交付；双击选词、三击选行（含行尾换行）、Shift 调整 region、右键 `mouse-save-then-kill` 与 `mouse-drag-copy-region`、拖动移动文本尚未实现。Emacs 31.1 的参照行为记录在[本阶段工作稿](work/mouse-region-file-prefill.md#已核实的上游参照)，实施前先按该工作稿确认范围。
-- **日常编辑增强**：isearch、`M-y`、`C-u`、occur 等，实际需要时再确认优先级与范围。
+- **鼠标多击 / Shift / 右键交互**：基础选区已交付；双击选词、三击选行（含行尾换行）、Shift 调整 region、右键 `mouse-save-then-kill` / `mouse-drag-copy-region`、拖动移动文本尚未实现。该交互不属于当前查看优先方向，暂缓；Emacs 参照边界见 [M3 记录](../tests/emacs/RESULTS.md#m3鼠标选区与文件读入预填参照)，实施前再确认范围。
 - **自动保存与备份**：保留为数据安全增强需求；排期前先确认触发、写入位置与恢复行为。
+- **更完整的 Emacs 编辑命令**：`M-y`、`C-u`、更完整的 kill / mark 交互等不在当前方向；实际使用受阻时再单独确认最小范围，不因既有 v1 列表自动补齐。
 
 ## 完成标准
 

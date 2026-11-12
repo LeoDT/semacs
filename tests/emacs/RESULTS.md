@@ -214,4 +214,9 @@ python3 tests/emacs/drive.py m3-mouse-click-drag m3-mouse-autoscroll m3-mouse-be
 - `find-file-run-dired` 设为 `nil` 时，`(find-file-noselect "…/dir/")` 报 `… is a directory`（源码 `files.el` 对目录的错误分支）；有 dired 时 `find-file` 转 dired，因此“目录答案”在上游没有“保留会话并提示”的分支。
 - 无路径 buffer 的 `C-x C-w` 未编辑 `RET` 使用 `default-directory` + buffer 名：当时 buffer 名 `semacs`，写入 `…/semacs` 并回显 `Wrote …`；与 `write-file` interactive spec 的 `(expand-file-name (file-name-nondirectory (buffer-name)) default-directory)` 一致。
 
+补充源码 / 选项核对（未逐项运行）：
+
+- `down-mouse-1` 走 `mouse-drag-region`；双击选词、三击选整行（含行尾换行），`mouse-skip-word` 还区分空白、标点与 symbol。
+- `mouse-drag-copy-region` 默认 `nil`；`mouse-shift-adjust-mode` 默认关闭，默认 `S-down-mouse-1` 是 `mouse-appearance-menu`。
+
 观察边界：鼠标事件经 pty 注入，只有 24x80 字符终端坐标与上述固定选项，不覆盖真实桌面指针精度、双击 / 三击 / Shift / 右键、拖动移动文本或 dired 交互；也不覆盖 GUI 下的 fringe / 滚动条或正文区以外空白。本记录也不证明 semacs 的宿主鼠标交互或读入实现通过。semacs 的已批准差异（单击不恢复旧 mark、缺少 dired、滚动按像素换算行）见 [保真度契约](../../docs/emacs-fidelity.md#鼠标选区)。

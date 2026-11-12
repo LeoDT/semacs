@@ -1,6 +1,6 @@
 # F3 上游参照：window 与 Git editor 生命周期
 
-本页只保留静态核对入口与来源身份，不维护实现进度、测试矩阵或另一份行为规格。有效行为见 [F3 契约](../emacs-fidelity.md#阶段-f3临时-window-与普通-commit)，当前工作见[计划](../plan.md)，本地验证见[冻结记录](../records/f3-window-commit-local.md)。密码 / passphrase 读入已由用户排除于 F3，不是阶段收尾前置条件。
+本页只保留静态核对入口与来源身份，不维护实现进度、测试矩阵或另一份行为规格。有效行为见 [F3 契约](../emacs-fidelity.md#阶段-f3临时-window-与普通-commit)，交付结论见 [F3 归档](../archive/f3-window-commit.md)，后续工作见[计划](../plan.md)，本地验证见[冻结记录](../records/f3-window-commit-local.md)。密码 / passphrase 读入已由用户排除于 F3，不是阶段收尾前置条件。
 
 ## 来源身份与参照边界
 
