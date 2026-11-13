@@ -56,7 +56,10 @@ impl AppShell {
         mount.pending_candidate_action = None;
         mount.candidate_snapshot = Some(snapshot);
         let input = mount.view.read(cx).contents(cx);
-        if matches!(kind, ReadKind::FindFile | ReadKind::WriteFile) {
+        if matches!(
+            kind,
+            ReadKind::FindFile | ReadKind::WriteFile | ReadKind::TreeRoot | ReadKind::TreeFile
+        ) {
             let directory = self.file_read_directory(&origin, cx);
             let history = cx
                 .global::<crate::file_history::FileHistory>()
@@ -82,8 +85,13 @@ impl AppShell {
                     .background_executor()
                     .spawn(async move {
                         let listing = files::path_candidates(&input, &directory, &worker_cancelled);
+                        let candidates = listing
+                            .candidates
+                            .into_iter()
+                            .filter(|candidate| kind != ReadKind::TreeRoot || candidate.directory)
+                            .collect();
                         let mut items = completion::filter_unranked(
-                            listing.candidates,
+                            candidates,
                             &listing.query,
                             &worker_cancelled,
                         );

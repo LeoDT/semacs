@@ -7,6 +7,7 @@ import json
 from pathlib import Path
 
 import magit_fixture
+import tree_fixture
 
 OBSERVATIONS = (
     "keyboard-file-loop", "body-ime", "minibuffer-ime",
@@ -443,6 +444,7 @@ INSTRUCTIONS = {
     "syntax": SYNTAX_INSTRUCTIONS, "languages": LANGUAGES_INSTRUCTIONS,
     "flicker": FLICKER_INSTRUCTIONS, "styles": STYLES_INSTRUCTIONS,
     "magit": magit_fixture.INSTRUCTIONS,
+    "tree": tree_fixture.INSTRUCTIONS,
 }
 
 PROFILES = {
@@ -455,6 +457,7 @@ PROFILES = {
     "flicker": (FLICKER_SEEDS, FLICKER_SEEDS, FLICKER_OBSERVATIONS),
     "styles": (STYLES_SEEDS, STYLES_EXPECTED, STYLES_OBSERVATIONS),
     "magit": (magit_fixture.SEEDS, magit_fixture.SEEDS, magit_fixture.OBSERVATIONS),
+    "tree": (tree_fixture.SEEDS, tree_fixture.SEEDS, tree_fixture.OBSERVATIONS),
 }
 
 
@@ -467,6 +470,8 @@ def prepare(directory, profile="m2"):
         path.write_bytes(data)
     if profile == "magit":
         magit_fixture.prepare_repository(directory)
+    if profile == "tree":
+        (directory / "instructions.txt").write_text(tree_fixture.INSTRUCTIONS)
     (directory / "fixture.json").write_text(json.dumps({
         "purpose": "disposable manual Wayland acceptance; NOT performance data",
         "profile": profile,
@@ -477,13 +482,20 @@ def prepare(directory, profile="m2"):
 def verify(directory, profile="m2"):
     _, expected_files, required_observations = PROFILES[profile]
     errors = []
-    manifest = json.loads((directory / "fixture.json").read_text())
+    paths_verified = True
+    if profile == "tree":
+        try:
+            tree_fixture.verify_paths(directory)
+        except RuntimeError as error:
+            paths_verified = False
+            errors.append(str(error))
+    manifest = json.loads((directory / "fixture.json").read_text()) if paths_verified else {"profile": profile}
     if manifest.get("profile", "m2") != profile:
         errors.append("fixture profile does not match verification profile")
     checks = {}
     for name, expected in expected_files.items():
         path = directory / name
-        actual = path.read_bytes() if path.is_file() and not path.is_symlink() else None
+        actual = path.read_bytes() if paths_verified and path.is_file() and not path.is_symlink() else None
         checks[name] = actual == expected
         if not checks[name]:
             errors.append(f"disk-byte mismatch: {name}")
@@ -503,8 +515,12 @@ def verify(directory, profile="m2"):
         "errors": errors, "evidence": "user-observed real desktop plus independent disk bytes",
         "performance": "unmeasured",
     }
-    if profile in ("messages", "themes", "syntax", "languages", "flicker", "styles", "magit"):
+    if profile in ("messages", "themes", "syntax", "languages", "flicker", "styles", "magit", "tree"):
         result.update(ime="unmeasured", ime_latency="unmeasured", gpu="unmeasured", screenshots=False)
+    if profile == "tree":
+        result.update(fixture_paths=paths_verified, key_injection=False,
+                      follow_delay_ms="unmeasured; qualitative user observation only",
+                      presentation="unmeasured; user-observed layout and focus only")
     if profile == "languages":
         confirmed = all(observations.get(name) == "yes" for name in
                         ("languages-markdown-ime-history", "languages-html-ime"))

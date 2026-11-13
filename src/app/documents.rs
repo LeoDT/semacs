@@ -16,7 +16,13 @@ pub(super) struct Opening {
     origin: Entity<BufferView>,
     view: Entity<BufferView>,
     viewport: Option<InitialViewport>,
-    location: Option<(usize, usize)>,
+    options: VisitOptions,
+}
+
+#[derive(Clone, Copy, Default)]
+pub(super) struct VisitOptions {
+    pub location: Option<(usize, usize)>,
+    pub tree: Option<super::tree::Visit>,
 }
 
 impl AppShell {
@@ -77,13 +83,8 @@ impl AppShell {
                                 && other.identity() == buffer.identity())
                     });
                     if let Some(index) = existing {
-                        let location = opening.location;
-                        shell.activate(index, window, cx);
-                        if let Some((line, column)) = location {
-                            shell.active_view().clone().update(cx, |view, cx| {
-                                view.show_line_column(line, column, window, cx)
-                            });
-                        }
+                        let options = opening.options;
+                        shell.activate_visited(index, options, window, cx);
                         return;
                     }
                     if !view.update(cx, |view, cx| {
@@ -94,8 +95,9 @@ impl AppShell {
                         return;
                     }
                     view.update(cx, |view, cx| view.install_input_lifecycle(window, cx));
+                    let options = opening.options;
                     let index = shell.insert_view(view, cx);
-                    shell.activate(index, window, cx);
+                    shell.activate_visited(index, options, window, cx);
                 })
                 .ok();
             if let Some(prepared) = prepared {
@@ -126,18 +128,54 @@ impl AppShell {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.visit_file_with(
+            path,
+            origin,
+            VisitOptions {
+                location,
+                ..Default::default()
+            },
+            window,
+            cx,
+        );
+    }
+
+    fn activate_visited(
+        &mut self,
+        index: usize,
+        options: VisitOptions,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if !self.activate(index, window, cx) {
+            return;
+        }
+        if let Some((line, column)) = options.location {
+            self.active_view().clone().update(cx, |view, cx| {
+                view.show_line_column(line, column, window, cx)
+            });
+        }
+        if let Some(visit) = options.tree {
+            self.finish_tree_visit(visit, window, cx);
+        }
+    }
+
+    pub(super) fn visit_file_with(
+        &mut self,
+        path: PathBuf,
+        origin: &Entity<BufferView>,
+        options: VisitOptions,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         self.cancel_file_open();
+        let location = options.location;
         let existing = self
             .buffers
             .iter()
             .position(|slot| slot.buffer.path().as_deref() == Some(path.as_path()));
         if let Some(index) = existing {
-            self.activate(index, window, cx);
-            if let Some((line, column)) = location {
-                self.active_view().clone().update(cx, |view, cx| {
-                    view.show_line_column(line, column, window, cx)
-                });
-            }
+            self.activate_visited(index, options, window, cx);
             return;
         }
         let origin = origin.clone();
@@ -180,12 +218,7 @@ impl AppShell {
                                     || (identity.is_some() && other.identity() == identity)
                             });
                             if let Some(index) = existing {
-                                shell.activate(index, window, cx);
-                                if let Some((line, column)) = location {
-                                    shell.active_view().clone().update(cx, |view, cx| {
-                                        view.show_line_column(line, column, window, cx)
-                                    });
-                                }
+                                shell.activate_visited(index, options, window, cx);
                             } else {
                                 let view = cx.new(|cx| BufferView::new(buffer, cx));
                                 if let Some((line, column)) = location {
@@ -197,12 +230,15 @@ impl AppShell {
                                     origin: origin.clone(),
                                     view,
                                     viewport: None,
-                                    location,
+                                    options,
                                 });
                                 cx.notify();
                             }
                         }
-                        Err(message) => shell.show_message(&origin, message, cx),
+                        Err(message) => {
+                            shell.cancel_file_open();
+                            shell.show_message(&origin, message, cx);
+                        }
                     }
                 })
                 .ok();

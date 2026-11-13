@@ -74,7 +74,7 @@ impl AppShell {
         if pane.is_none() {
             pane = self
                 .panes
-                .leaves()
+                .ordinary_leaves()
                 .into_iter()
                 .find(|pane| pane != self.panes.selected());
         }
@@ -106,7 +106,7 @@ impl AppShell {
             old.update(cx, |view, cx| view.suspend_input(cx));
         }
         self.body_panes.get_mut(&pane).unwrap().show_buffer(id);
-        self.update_selected_views(cx);
+        self.update_selected_views(window, cx);
         view.update(cx, |view, cx| {
             view.show_end(cx);
             if pane == *self.panes.selected() {

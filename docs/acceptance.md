@@ -39,6 +39,7 @@
 | 脚本配置冒烟驱动 | `python3 -B -m unittest discover -s scripts -p 'test_scripting_manual.py' -v` |
 | split IME 驱动 | `python3 -B -m unittest discover -s scripts -p 'test_split_ime.py' -v`，不访问桌面 |
 | F3 单窗口 commit 入口 / fixture | `python3 -B -m unittest discover -s scripts -p 'test_magit_commit_manual.py' -v`；与 F2 / F1 共用入口变更时补相应工具回归，不启动桌面 |
+| F6 tree fixture / 子进程配置与 history 隔离 | `python3 -B -m unittest discover -s scripts -p 'test_tree_fixture.py' -v`；共用 fixture 工具变更时同时跑 `test_m2_manual.py` |
 | fish 入口 | `fish --no-execute scripts/acceptance.fish` |
 | JS 示例 / 类型声明 | 本地已有 tsc 时运行 `tsc --allowJs --checkJs --noEmit --strict --target es2020 --lib es2020 examples/init.js types/semacs.d.ts`；它不是运行依赖 |
 
@@ -101,11 +102,20 @@ fish scripts/acceptance.fish MODE NEW_OUTPUT_DIRECTORY --consent
 | `diff-perf` / `diff-diagnostic` | F1 diff 原生 CPU / 提交专项，约 256 KiB patch 三轮，每轮一个窗口及内部左右分屏；前者超限即停，后者显式完整诊断、记录性能超限后继续，见 [专项说明](acceptance/profiles.md#f1-diff-专项性能) |
 | `magit` | 一个窗口，隔离配置与临时 Git 仓库；四组 diff 显示 / 折叠导航、分屏刷新、长行水平查看、旧侧 / index / worktree 访问，见 [fixture 说明](../scripts/magit_fixture.py) |
 | `magit-commit` | 一个窗口及内部分屏，独立空配置与临时仓库；临时显示 / `q`、消息与 companion / 进程焦点、取消、活动提交的 OS 关闭拒绝、保存成功 / 刷新及独立 Git / 消息检查，见 [F3 定向流程](acceptance/profiles.md#f3-最小定向验证) |
+| `tree` | 一个窗口及其内部侧窗 / split，独立空配置与 history state；侧窗布局 / toggle / 宽度、访问焦点与前缀、当前文件定位及空闲后 follow，见 [F6 定向流程](#f6-最小定向验证) |
 | `magit-status` | 一个窗口及内部分屏，独立空配置和临时仓库；status 可读性 / 焦点、默认 `s` / `u` 与 diff `[stale]`，每组后独立核对完整 index，见 [F2 定向流程](acceptance/profiles.md#f2-最小定向验证) |
 | `styles` | 一个窗口，隔离 rich / plain 主题下的 Rust / Markdown 字体、装饰、背景与换行，用户手动做两处 IME 取消 / 提交；四组观察及独立字节核对 |
 | `styles-perf` | mixed 约 8 MiB 三轮，再 Markdown 约 256 KiB 三轮；至多六个顺序窗口，复用原生 CPU 驱动，不展开全矩阵 |
 
-人工模式先读终端提示；`scripting` / `messages` / `themes` / `syntax` / `flicker` / `magit` / `magit-status` / `magit-commit` 使用英文输入，不自动注键、不改变 IME、不截图，不测原生性能。`languages` / `styles` 由用户在指定两处手动使用日常中文输入法；脚本不注键、不切换输入法、不截图，其 IME 结论来自用户观察及保存字节，不是自动状态断言或时延测量。详细键序列只在驱动中维护，不在本文再复制。不要直接照抄历史批次目录名。
+人工模式先读终端提示；`scripting` / `messages` / `themes` / `syntax` / `flicker` / `magit` / `magit-status` / `magit-commit` / `tree` 使用英文输入，不自动注键、不改变 IME、不截图，不测原生性能。`languages` / `styles` 由用户在指定两处手动使用日常中文输入法；脚本不注键、不切换输入法、不截图，其 IME 结论来自用户观察及保存字节，不是自动状态断言或时延测量。详细键序列只在驱动中维护，不在本文再复制。不要直接照抄历史批次目录名。
+
+### F6 最小定向验证
+
+`tree` 复用人工 profile 入口，只有一个 semacs 窗口；使用可丢弃 `project` 文件、独立空 JS 配置与子进程专用 `XDG_STATE_HOME`，不读写日常配置 / history。`.git` / `.jj` 目录仅为根识别 / 隐藏用 marker，不是 Git 操作样本。
+
+三组具体操作以 [tree fixture](../scripts/tree_fixture.py) 及生成的 `files/instructions.txt` 为准：先侧窗布局 / 保护 / 三态 toggle 与宽度，再访问目标 / split / 前缀焦点，最后定位与 follow。窗口正常关闭后逐组确认，并记录实际 / 大致尺寸、可读性与是否有明显 follow 延迟；任一步失败或未观察立即停止后续操作、关闭测试窗口并答 no，不修复 fixture 或重试。工具核对完整 project / 配置路径及文件字节，原始输出全部保留。
+
+这批不自动注键、不改变输入法、不截图、不测性能。follow 只作空闲后定位与焦点的人工定性观察，不能记作宿主精确 0.2 秒测量通过；headless 时钟断言与真实窗口观察分别解释。
 
 ### F3 最小定向验证
 

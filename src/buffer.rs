@@ -22,6 +22,7 @@ mod process;
 mod repository_history;
 mod selection;
 mod status;
+pub(crate) mod tree;
 pub(crate) use history::EditGroup;
 use history::HistoryState;
 pub(crate) use selection::RegionId;
@@ -130,6 +131,7 @@ struct Document {
     status: Option<status::StatusSession>,
     process: Option<process::ProcessSession>,
     repository_history: Option<repository_history::HistorySession>,
+    tree: Option<tree::TreeSession>,
 }
 
 impl Document {
@@ -211,6 +213,7 @@ impl Buffer {
             status: None,
             process: None,
             repository_history: None,
+            tree: None,
             revision: 0,
             last_edit: None,
             points,

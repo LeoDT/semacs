@@ -25,6 +25,10 @@ impl AppShell {
         if self.minibuffer.is_some() {
             return;
         }
+        if self.panes.side() == Some(self.panes.selected()) {
+            let pane = self.panes.ordinary_leaves()[0];
+            self.select_pane(pane, window, cx);
+        }
         let buffer = self.buffers[index].id();
         let source = *self.panes.selected();
         if self.active_buffer_id() == buffer {
@@ -40,15 +44,11 @@ impl AppShell {
             return;
         }
         let previous = self.active_buffer_id();
-        let split = self
-            .active_view()
-            .read(cx)
-            .check_split(Axis::Vertical)
-            .is_ok();
+        let split = self.check_split(Axis::Vertical, cx).is_ok();
         if split {
             self.cancel_file_open();
             let view = Self::create_view(self.buffers[index].buffer.new_view(), window, cx);
-            let pane = self.split_selected(view, Axis::Vertical, cx);
+            let pane = self.split_selected(view, Axis::Vertical, window, cx);
             self.body_panes
                 .get_mut(&pane)
                 .unwrap()
@@ -90,7 +90,7 @@ impl AppShell {
         }
         let source = *self.panes.selected();
         let owner = Some(self.active_buffer_id());
-        let reusable = self.panes.leaves().into_iter().find(|pane| {
+        let reusable = self.panes.ordinary_leaves().into_iter().find(|pane| {
             *pane != source
                 && self
                     .buffers
@@ -118,15 +118,12 @@ impl AppShell {
                 previous: Some(previous),
                 source,
             });
-            self.update_selected_views(cx);
+            self.update_selected_views(window, cx);
             pane_id
         } else {
-            self.active_view()
-                .read(cx)
-                .check_split(Axis::Vertical)
-                .ok()?;
+            self.check_split(Axis::Vertical, cx).ok()?;
             let view = Self::create_view(self.buffers[index].buffer.new_view(), window, cx);
-            let pane = self.split_selected(view, Axis::Vertical, cx);
+            let pane = self.split_selected(view, Axis::Vertical, window, cx);
             self.body_panes
                 .get_mut(&pane)
                 .unwrap()
@@ -199,7 +196,7 @@ impl AppShell {
         if let Some(restore) = &restore
             && restore.previous.is_none()
             && previous.is_none()
-            && self.panes.leaves().len() > 1
+            && self.panes.can_close_selected()
         {
             self.panes.close_selected();
             self.body_panes.remove(&pane_id);
@@ -233,7 +230,7 @@ impl AppShell {
         }
         self.buffers.touch(self.active_buffer_id());
         self.buffers.bury(buffer);
-        self.update_selected_views(cx);
+        self.update_selected_views(window, cx);
         if self.minibuffer.is_none() {
             self.active_view().clone().update(cx, |view, cx| {
                 view.invalidate_split_geometry();

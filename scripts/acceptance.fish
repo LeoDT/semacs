@@ -8,8 +8,8 @@ function fail
     exit 1
 end
 
-if test (count $argv) -ne 3; or not contains -- $argv[1] perf display-perf split-perf ime split-ime manual candidates scripting messages themes syntax languages flicker styles magit magit-status magit-commit diff-perf diff-diagnostic styles-perf syntax-perf open-diagnostic; or test "$argv[3]" != --consent
-    echo "Usage: fish scripts/acceptance.fish <perf|display-perf|split-perf|ime|split-ime|manual|candidates|scripting|messages|themes|syntax|languages|flicker|styles|magit|magit-status|magit-commit|diff-perf|diff-diagnostic|styles-perf|syntax-perf|open-diagnostic> NEW_OUTPUT_DIRECTORY --consent" >&2
+if test (count $argv) -ne 3; or not contains -- $argv[1] perf display-perf split-perf ime split-ime manual candidates scripting messages themes syntax languages flicker styles magit magit-status magit-commit tree diff-perf diff-diagnostic styles-perf syntax-perf open-diagnostic; or test "$argv[3]" != --consent
+    echo "Usage: fish scripts/acceptance.fish <perf|display-perf|split-perf|ime|split-ime|manual|candidates|scripting|messages|themes|syntax|languages|flicker|styles|magit|magit-status|magit-commit|tree|diff-perf|diff-diagnostic|styles-perf|syntax-perf|open-diagnostic> NEW_OUTPUT_DIRECTORY --consent" >&2
     exit 2
 end
 set -l mode $argv[1]
@@ -50,7 +50,7 @@ echo "Output: $output"
 echo "Build logs are saved; hard failures stop without retries; explicit diagnostics record budget failures and continue."
 if contains -- "$mode" diff-perf diff-diagnostic
     echo "The diff driver archives and builds its actual probe in the new diff subdirectory."
-else if contains -- "$mode" candidates scripting messages themes syntax languages flicker styles magit magit-status magit-commit
+else if contains -- "$mode" candidates scripting messages themes syntax languages flicker styles magit magit-status magit-commit tree
     cargo build --release --bin semacs --target-dir "$root/target" > "$output/build.log" 2>&1
 else if test "$mode" = split-ime
     cargo build --release --bin semacs --example native_split_ime --target-dir "$root/target" > "$output/build.log" 2>&1
@@ -215,7 +215,7 @@ else if test "$mode" = magit-status
     echo "Follow each printed group; stage and unstage have independent complete-index checkpoints."
     python3 -B scripts/magit_status_manual.py "$output/status" --binary "$root/target/release/semacs" --consent
     or fail "F2 manual status check stopped; keep and report this directory, do not rerun"
-else if contains -- "$mode" themes syntax languages flicker styles magit
+else if contains -- "$mode" themes syntax languages flicker styles magit tree
     begin
         uname -a
         rustc --version
@@ -244,9 +244,11 @@ else if contains -- "$mode" themes syntax languages flicker styles magit
     else if test "$mode" = magit
         set body 00-main.txt
         set checks magit-display-navigation magit-shared-refresh magit-horizontal magit-version-visits
+    else if test "$mode" = tree
+        set checks tree-side-window tree-visits tree-locate-follow
     end
     python3 -B scripts/m2_manual.py prepare "$output/files" --profile "$mode"
-    or fail "theme/syntax fixture generation failed"
+    or fail "manual fixture generation failed"
     echo "One manual $mode window; isolated configuration and disposable files only."
     if contains -- "$mode" languages styles
         echo "Use your usual Chinese IME manually for the two prompted body targets; no scripted IME changes."
@@ -255,7 +257,9 @@ else if contains -- "$mode" themes syntax languages flicker styles magit
         echo "No screenshots, OS key injection, IME changes or performance measurements."
     end
     echo "Follow the "(count $checks)" printed groups; stop on a problem, close the window and answer no."
-    if test "$mode" = magit
+    if test "$mode" = tree
+        env XDG_CONFIG_HOME="$output/files/config" XDG_STATE_HOME="$output/state" "$root/target/release/semacs" "$output/files/project/00-main.txt" > "$output/$mode.stdout.log" 2> "$output/$mode.stderr.log"
+    else if test "$mode" = magit
         python3 -B scripts/magit_fixture.py "$output/files" --binary "$root/target/release/semacs" --consent > "$output/$mode.stdout.log" 2> "$output/$mode.stderr.log"
     else
         env XDG_CONFIG_HOME="$output/files/config" "$root/target/release/semacs" "$output/files/$body" > "$output/$mode.stdout.log" 2> "$output/$mode.stderr.log"
@@ -276,7 +280,10 @@ else if contains -- "$mode" themes syntax languages flicker styles magit
     printf '%s\n' "$geometry" >> "$output/notes.txt"
     python3 -B scripts/m2_manual.py verify "$output/files" --profile "$mode" > "$output/verification.log" 2>&1
     or fail "theme/syntax observations or independent disk/config bytes failed; see $output/verification.log"
-    if test "$mode" = magit
+    if test "$mode" = tree
+        echo "F6 user-observed layout/focus/follow and independent fixture/config paths and bytes verified."
+        echo "Exact 0.2-second follow timing, native performance, IME and GPU/presentation remain unmeasured."
+    else if test "$mode" = magit
         echo "F1 user observations and independent worktree/config/HEAD/index bytes verified; performance/IME/GPU remain unmeasured."
     else if test "$mode" = styles
         echo "E3 user-observed font/IME behavior and independent disk/config bytes verified; native performance/IME latency/GPU remain unmeasured."

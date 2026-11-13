@@ -22,13 +22,17 @@ pub(crate) enum Pane<T> {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct Panes<T: Clone + PartialEq> {
     root: Pane<T>,
+    side: Option<T>,
     selected: T,
+    recent: Vec<T>,
 }
 
 impl<T: Clone + PartialEq> Panes<T> {
     pub(crate) fn new(initial: T) -> Self {
         Self {
             root: Pane::Leaf(initial.clone()),
+            side: None,
+            recent: vec![initial.clone()],
             selected: initial,
         }
     }
@@ -39,6 +43,12 @@ impl<T: Clone + PartialEq> Panes<T> {
 
     /// Return leaf identities in deterministic depth-first (first, second) order.
     pub(crate) fn leaves(&self) -> Vec<T> {
+        let mut leaves: Vec<T> = self.side.iter().cloned().collect();
+        collect_leaves(&self.root, &mut leaves);
+        leaves
+    }
+
+    pub(crate) fn ordinary_leaves(&self) -> Vec<T> {
         let mut leaves = Vec::new();
         collect_leaves(&self.root, &mut leaves);
         leaves
@@ -48,9 +58,41 @@ impl<T: Clone + PartialEq> Panes<T> {
         &self.root
     }
 
+    pub(crate) fn side(&self) -> Option<&T> {
+        self.side.as_ref()
+    }
+
+    pub(crate) fn show_side(&mut self, identity: T) -> bool {
+        if self.side.is_some() || contains(&self.root, &identity) {
+            return false;
+        }
+        self.side = Some(identity);
+        true
+    }
+
+    pub(crate) fn can_close_selected(&self) -> bool {
+        self.side.as_ref() == Some(&self.selected) || !matches!(self.root, Pane::Leaf(_))
+    }
+
+    pub(crate) fn recent_ordinary(&self) -> Option<T> {
+        let leaves = self.ordinary_leaves();
+        self.recent
+            .iter()
+            .find(|id| *id != &self.selected && leaves.contains(id))
+            .cloned()
+    }
+
+    fn remember_selected(&mut self) {
+        let leaves = self.leaves();
+        self.recent
+            .retain(|id| id != &self.selected && leaves.contains(id));
+        self.recent.insert(0, self.selected.clone());
+    }
+
     pub(crate) fn select(&mut self, identity: &T) -> bool {
-        if contains(&self.root, identity) {
+        if self.side.as_ref() == Some(identity) || contains(&self.root, identity) {
             self.selected = identity.clone();
+            self.remember_selected();
             true
         } else {
             false
@@ -64,22 +106,28 @@ impl<T: Clone + PartialEq> Panes<T> {
             .iter()
             .position(|leaf| leaf == &self.selected)
             .unwrap_or(0);
-        self.selected = leaves[(index + 1) % leaves.len()].clone();
+        self.select(&leaves[(index + 1) % leaves.len()]);
         &self.selected
     }
 
     /// Replace the selected leaf by a split, retaining it as the first child.
-    pub(crate) fn split(&mut self, new: T, axis: Axis) {
+    pub(crate) fn split(&mut self, new: T, axis: Axis) -> bool {
         let selected = &self.selected;
-        split_leaf(&mut self.root, selected, new, axis);
+        split_leaf(&mut self.root, selected, new, axis)
     }
 
     /// Remove the selected leaf and collapse its parent. The final leaf cannot be removed.
     pub(crate) fn close_selected(&mut self) -> bool {
-        let before = self.leaves();
-        if before.len() <= 1 {
+        if !self.can_close_selected() {
             return false;
         }
+        if self.side.as_ref() == Some(&self.selected) {
+            self.side = None;
+            self.selected = self.leaves()[0].clone();
+            self.remember_selected();
+            return true;
+        }
+        let before = self.leaves();
         let old_index = before
             .iter()
             .position(|leaf| leaf == &self.selected)
@@ -88,12 +136,18 @@ impl<T: Clone + PartialEq> Panes<T> {
             .expect("selected leaf exists in a non-empty tree");
         let after = self.leaves();
         self.selected = after[old_index.min(after.len() - 1)].clone();
+        self.remember_selected();
         true
     }
 
-    /// Discard every other leaf and make the selected identity the root leaf.
-    pub(crate) fn retain_selected(&mut self) {
+    /// Retain the selected ordinary leaf and the protected side window.
+    pub(crate) fn retain_selected(&mut self) -> bool {
+        if self.side.as_ref() == Some(&self.selected) {
+            return false;
+        }
         self.root = Pane::Leaf(self.selected.clone());
+        self.remember_selected();
+        true
     }
 }
 
@@ -159,6 +213,42 @@ fn remove_leaf<T: Clone + PartialEq>(pane: Pane<T>, identity: &T) -> Option<Pane
 #[cfg(test)]
 mod tests {
     use super::{Axis, Pane, Panes};
+
+    #[test]
+    fn side_is_outside_the_split_tree_but_participates_in_traversal() {
+        let mut panes = Panes::new(1);
+        assert!(panes.show_side(9));
+        assert!(!panes.show_side(8));
+        assert_eq!(panes.root(), &Pane::Leaf(1));
+        assert_eq!(panes.leaves(), vec![9, 1]);
+        assert_eq!(panes.ordinary_leaves(), vec![1]);
+        assert_eq!(panes.next(), &9);
+        assert_eq!(panes.next(), &1);
+        assert!(!panes.close_selected());
+        panes.select(&9);
+        assert!(!panes.split(2, Axis::Vertical));
+        assert!(!panes.retain_selected());
+        assert_eq!(panes.leaves(), vec![9, 1]);
+        assert!(panes.close_selected());
+        assert_eq!(panes.leaves(), vec![1]);
+        assert_eq!(panes.selected(), &1);
+        assert!(panes.side().is_none());
+    }
+
+    #[test]
+    fn retaining_an_ordinary_leaf_preserves_the_side_and_reopening_restores_protection() {
+        let mut panes = Panes::new(1);
+        panes.show_side(9);
+        panes.split(2, Axis::Horizontal);
+        panes.select(&2);
+        assert!(panes.retain_selected());
+        assert_eq!(panes.leaves(), vec![9, 2]);
+        panes.select(&9);
+        panes.close_selected();
+        assert!(panes.show_side(10));
+        assert!(panes.retain_selected());
+        assert_eq!(panes.leaves(), vec![10, 2]);
+    }
 
     #[test]
     fn nested_splits_preserve_axes_and_depth_first_order() {

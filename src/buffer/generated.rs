@@ -15,6 +15,16 @@ impl Buffer {
         if let Some(old) = &old {
             sections.restore(old);
         }
+        self.replace_projection(text, sections, styles);
+    }
+
+    pub(super) fn replace_projection(
+        &mut self,
+        text: &str,
+        sections: Sections,
+        styles: Vec<(Range<ByteOffset>, StyleRole)>,
+    ) {
+        let old = self.sections();
         let anchors: Vec<_> = self
             .document
             .borrow()

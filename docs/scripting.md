@@ -110,7 +110,7 @@ semacs.bindKey("ctrl-c g", "status-or-refresh");
 
 ### `semacs.bindKey(keys, commandName | null, options?)`
 
-绑定或取消一个正文键序列；可多次绑定不同键到同一命令。不传 `options` 保持正文通用绑定；传 `{ mode: "magit-diff" }`、`{ mode: "magit-status" }`、`{ mode: "git-commit" }`、`{ mode: "magit-process" }`、`{ mode: "magit-log" }`、`{ mode: "magit-log-select" }`、`{ mode: "magit-revision" }` 或 `{ mode: "fundamental" }` 仅配置对应 mode 的局部层。未知 mode / 选项拒绝整份配置，当前没有 JS mode 注册 API。局部层优先于通用层；局部 `null` 屏蔽该 mode 内的低层回落，删除声明恢复默认。跨层前缀与上下文规则见 [F1 契约](emacs-fidelity.md#mode-与键位)。
+绑定或取消一个正文键序列；可多次绑定不同键到同一命令。不传 `options` 保持正文通用绑定；传 `{ mode: "magit-diff" }`、`{ mode: "magit-status" }`、`{ mode: "git-commit" }`、`{ mode: "magit-process" }`、`{ mode: "magit-log" }`、`{ mode: "magit-log-select" }`、`{ mode: "magit-revision" }`、`{ mode: "treemacs" }` 或 `{ mode: "fundamental" }` 仅配置对应 mode 的局部层。未知 mode / 选项拒绝整份配置，当前没有 JS mode 注册 API。局部层优先于通用层；局部 `null` 屏蔽该 mode 内的低层回落，删除声明恢复默认。跨层前缀与上下文规则见 [F1 契约](emacs-fidelity.md#mode-与键位)。
 
 ```js
 semacs.bindKey("tab", "section-toggle", { mode: "magit-diff" });

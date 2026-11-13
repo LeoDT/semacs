@@ -4,6 +4,101 @@ use crate::keymap::{Lookup, lookup, parse_sequence};
 use crate::mode::ModeId;
 
 #[test]
+fn tree_default_keys_and_prefixes_are_local_and_keep_ordinary_line_motion() {
+    let (_, config) = load("").unwrap();
+    let local = &config.mode_keymaps[&ModeId::TREEMACS];
+    let layers = &[local, &config.body_keymap];
+    for (key, command) in [
+        ("tab", Command::TreemacsToggle),
+        ("enter", Command::TreemacsReturn),
+        ("l", Command::TreemacsReturn),
+        ("h", Command::TreemacsCollapse),
+        ("H", Command::TreemacsCollapseParent),
+        ("n", Command::TreemacsNext),
+        ("p", Command::TreemacsPrevious),
+        ("alt-n", Command::TreemacsNextNeighbour),
+        ("alt-p", Command::TreemacsPreviousNeighbour),
+        ("u", Command::TreemacsParent),
+        ("q", Command::TreemacsQuit),
+        ("Q", Command::TreemacsKill),
+        ("g", Command::TreemacsRefresh),
+        ("r", Command::TreemacsRefresh),
+        ("t h", Command::TreemacsHidden),
+        ("t f", Command::TreemacsFollow),
+        ("w", Command::TreemacsWidth),
+        ("<", Command::TreemacsNarrow),
+        (">", Command::TreemacsWiden),
+        ("=", Command::TreemacsFit),
+        ("o o", Command::TreemacsVisit),
+        ("o h", Command::TreemacsVisitHorizontal),
+        ("o v", Command::TreemacsVisitVertical),
+        ("o r", Command::TreemacsVisitRecent),
+        ("o c", Command::TreemacsVisitClose),
+        ("ctrl-u enter", Command::TreemacsReturnStay),
+        ("ctrl-u ctrl-u enter", Command::TreemacsReturnClose),
+        ("ctrl-u ctrl-m", Command::TreemacsReturnStay),
+        ("ctrl-u ctrl-u l", Command::TreemacsReturnClose),
+        ("ctrl-n", Command::NextLine),
+        ("ctrl-p", Command::PreviousLine),
+    ] {
+        assert_eq!(
+            lookup(layers, &parse_sequence(key).unwrap()),
+            Lookup::Command(command),
+            "{key}"
+        );
+        assert!(
+            config
+                .commands
+                .available_in(command.into(), ModeId::TREEMACS)
+        );
+    }
+    for key in ["ctrl-u", "t", "o"] {
+        assert_eq!(
+            lookup(layers, &parse_sequence(key).unwrap()),
+            Lookup::Prefix
+        );
+    }
+    assert_eq!(
+        lookup(&[&config.body_keymap], &parse_sequence("ctrl-u").unwrap()),
+        Lookup::Unbound
+    );
+    for name in [
+        "treemacs-select-window",
+        "treemacs-find-file",
+        "treemacs-COLLAPSE-action",
+        "treemacs-collapse-parent-node",
+    ] {
+        assert!(config.commands.named(name).is_some());
+    }
+}
+
+#[test]
+fn tree_commands_use_the_same_mode_keymap_and_command_registry() {
+    let (_, config) = load("semacs.bindKey('tab', 'treemacs-TAB-action', {mode:'treemacs'}); semacs.bindKey('g', 'treemacs-refresh', {mode:'treemacs'})").unwrap();
+    assert_eq!(
+        lookup(
+            &[&config.mode_keymaps[&ModeId::TREEMACS]],
+            &parse_sequence("tab").unwrap()
+        ),
+        Lookup::Command(Command::TreemacsToggle)
+    );
+    assert_eq!(
+        config.commands.named("treemacs"),
+        Some(Command::Treemacs.into())
+    );
+    assert!(
+        config
+            .commands
+            .available_in(Command::TreemacsRefresh.into(), ModeId::TREEMACS)
+    );
+    assert!(
+        !config
+            .commands
+            .available_in(Command::TreemacsRefresh.into(), ModeId::FUNDAMENTAL)
+    );
+}
+
+#[test]
 fn local_defaults_overrides_disables_and_annotations_are_contextual() {
     let (_, config) = load(
         r#"

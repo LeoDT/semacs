@@ -201,7 +201,7 @@ impl AppShell {
                 shell.process_next_exit(window, cx);
             }
         });
-        self.update_selected_views(cx);
+        self.update_selected_views(window, cx);
         let target = session.origin().clone();
         let active = self.active_view().clone();
         active.update(cx, |view, cx| view.restore_input(window, cx));
@@ -314,7 +314,7 @@ impl AppShell {
             return false;
         }
         self.remove_minibuffer(cx);
-        self.update_selected_views(cx);
+        self.update_selected_views(window, cx);
         let view = self.active_view().clone();
         view.update(cx, |view, cx| view.restore_input(window, cx));
         cx.notify();
@@ -379,6 +379,9 @@ impl AppShell {
                 if let Some(target) = self.end_session(id, window, cx) {
                     self.visit_git_location(version.visit, &target, window, cx);
                 }
+            }
+            ReadKind::TreeRoot | ReadKind::TreeFile | ReadKind::TreeWidth => {
+                self.confirm_tree_read(kind, id, window, cx)
             }
             ReadKind::FindFile => self.confirm_find_file(id, window, cx),
             ReadKind::WriteFile => self.confirm_write_file(id, window, cx),

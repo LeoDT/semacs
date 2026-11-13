@@ -52,6 +52,7 @@ mod scripting;
 mod scripting_tests;
 mod status;
 mod temporary;
+mod tree;
 mod windows;
 
 impl Global for KillRing {}
@@ -83,6 +84,8 @@ pub struct AppShell {
     panes: crate::panes::Panes<u64>,
     body_panes: HashMap<u64, windows::BodyPane>,
     next_pane: u64,
+    tree_window: tree::TreeWindow,
+    tree_work: Option<tree::TreeWork>,
     body_keymap: Keymap,
     mode_keymaps: HashMap<crate::mode::ModeId, Keymap>,
     commands: CommandRegistry,
@@ -119,6 +122,8 @@ pub struct AppShell {
     repository_refresh_gate: Option<futures_channel::oneshot::Receiver<()>>,
     #[cfg(test)]
     workflow_return_gate: Option<futures_channel::oneshot::Receiver<()>>,
+    #[cfg(test)]
+    tree_read_gate: Option<futures_channel::oneshot::Receiver<()>>,
     startup_directory: PathBuf,
     minibuffer: Option<MinibufferMount>,
     session: Option<ReadSession>,
@@ -190,6 +195,8 @@ impl AppShell {
             panes: crate::panes::Panes::new(0),
             body_panes: HashMap::from([(0, pane)]),
             next_pane: 1,
+            tree_window: tree::TreeWindow::default(),
+            tree_work: None,
             body_keymap: configuration.body_keymap,
             mode_keymaps: configuration.mode_keymaps,
             commands: configuration.commands,
@@ -226,6 +233,8 @@ impl AppShell {
             repository_refresh_gate: None,
             #[cfg(test)]
             workflow_return_gate: None,
+            #[cfg(test)]
+            tree_read_gate: None,
             startup_directory: std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
             minibuffer: None,
             session: None,
@@ -261,6 +270,7 @@ impl AppShell {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
+        self.tree_input_activity(window, cx);
         if let Some(mount) = &mut self.minibuffer {
             mount.pending_candidate_action = None;
         }
@@ -361,6 +371,36 @@ impl AppShell {
                 self.begin_read(ReadKind::Command, origin, "", window, cx);
             }
             Command::MagitStatus => self.open_status(origin, window, cx),
+            Command::Treemacs => self.toggle_tree(origin, window, cx),
+            Command::TreemacsSelectWindow => self.select_tree_window(origin, window, cx),
+            Command::TreemacsFindFile => self.find_tree_file(origin, window, cx),
+            Command::TreemacsToggle
+            | Command::TreemacsRefresh
+            | Command::TreemacsReturn
+            | Command::TreemacsReturnStay
+            | Command::TreemacsReturnClose
+            | Command::TreemacsCollapse
+            | Command::TreemacsCollapseParent
+            | Command::TreemacsParent
+            | Command::TreemacsNext
+            | Command::TreemacsPrevious
+            | Command::TreemacsNextNeighbour
+            | Command::TreemacsPreviousNeighbour
+            | Command::TreemacsQuit
+            | Command::TreemacsKill
+            | Command::TreemacsHidden
+            | Command::TreemacsFollow
+            | Command::TreemacsWidth
+            | Command::TreemacsNarrow
+            | Command::TreemacsWiden
+            | Command::TreemacsFit
+            | Command::TreemacsVisit
+            | Command::TreemacsVisitHorizontal
+            | Command::TreemacsVisitVertical
+            | Command::TreemacsVisitRecent
+            | Command::TreemacsVisitClose => {
+                self.tree_command(command, origin, window, cx);
+            }
             #[cfg(unix)]
             Command::MagitCommitCreate => self.prepare_commit(origin, window, cx),
             #[cfg(unix)]
@@ -558,7 +598,7 @@ impl AppShell {
 
 impl Render for AppShell {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let body = self.render_panes(self.panes.root(), cx);
+        let body = self.render_body(window, cx);
         let message = self.echo_message(window, cx);
         let echo_area = frame::echo_area(&message, window.viewport_size().height * 0.25, cx);
         let minibuffer = self

@@ -21,6 +21,64 @@ fn tree(hunk: &str) -> (Rope, Sections) {
 }
 
 #[test]
+fn buffer_end_without_a_trailing_empty_line_belongs_to_the_last_section() {
+    let (text, sections) = tree("hunk");
+    assert_eq!(sections.current(ByteOffset(text.len())), 0);
+    let text = Rope::from(text.to_string().trim_end_matches('\n'));
+    let mut nodes = sections.nodes().to_vec();
+    let end = ByteOffset(text.len());
+    for node in &mut nodes {
+        node.range.end = node.range.end.min(end);
+        node.body = node.body.min(end);
+    }
+    let mut sections = Sections::new(&text, nodes).unwrap();
+    assert_eq!(sections.current(end), 3);
+    sections.toggle(1).unwrap();
+    assert_eq!(sections.collapse_point(ByteOffset(19)), ByteOffset(5));
+    assert_eq!(sections.collapse_point(end), end);
+}
+
+#[test]
+fn folded_content_end_maps_to_its_heading_without_hiding_a_trailing_empty_line() {
+    for ending in ["", "\n"] {
+        let text = Rope::from(format!("root\nfile\nbody{ending}").as_str());
+        let end = ByteOffset(text.len());
+        let mut sections = Sections::new(
+            &text,
+            vec![
+                Section {
+                    key: "root".into(),
+                    parent: None,
+                    range: ByteOffset(0)..end,
+                    body: ByteOffset(5),
+                    collapsed: false,
+                    hunk: false,
+                },
+                Section {
+                    key: "file".into(),
+                    parent: Some(0),
+                    range: ByteOffset(5)..end,
+                    body: ByteOffset(10),
+                    collapsed: true,
+                    hunk: false,
+                },
+            ],
+        )
+        .unwrap();
+        let expected = if ending.is_empty() {
+            ByteOffset(5)
+        } else {
+            end
+        };
+        assert_eq!(sections.collapse_point(end), expected);
+        assert_eq!(sections.motion_point(end, true), expected);
+        assert_eq!(sections.motion_point(ByteOffset(11), true), expected);
+        sections.toggle(1).unwrap();
+        assert_eq!(sections.collapse_point(end), end);
+    }
+}
+
+#[test]
 fn parent_folding_preserves_child_state_and_visible_navigation() {
     let (_, mut sections) = tree("hunk");
     sections.toggle(2).unwrap();

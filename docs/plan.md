@@ -2,7 +2,7 @@
 
 本文是当前工作和跨会话待办的唯一入口；维护与归档规则见 [文档说明](README.md#维护规则)。范围与当前方向见 [需求](requirements.md#当前方向v1-后)，行为见 [保真度契约](emacs-fidelity.md)。里程碑按可验收行为划分，不按工期估算。
 
-## 当前状态：基础功能收尾，方向调整为代码查看
+## 当前状态：F6 已完成，后续方向待确认
 
 R0–F5、日常编辑增强及 F5 后插入项均已完成，交付摘要见 [R0–F1 归档](archive/completed-through-f1.md)、[F2 归档](archive/f2-status.md)、[F3 归档](archive/f3-window-commit.md)、[F4 归档](archive/f4-status-hunks.md)、[F5 归档](archive/f5-history-commit.md) 与 [F5 后插入项归档](archive/post-f5-insertions.md)。固定源码 / 环境、结果和未测边界见[冻结记录索引](records/README.md)。
 
@@ -20,23 +20,11 @@ R0–F5、日常编辑增强及 F5 后插入项均已完成，交付摘要见 [R
 
 `kill-current-buffer`（`C-x C-k`，含 minibuffer 内退出会话）与 Magit `S-TAB` 全局 section 可见性也已交付。这些改动不改变已交付 F1–F5 的契约。
 
-## 当前阶段：F6 文件夹 tree viewer（已批准，照搬 treemacs）
+## F6 文件夹 tree viewer（已完成）
 
-用户已确认：上游 treemacs 的实测行为全部照搬，不引入上游没有的限制、确认或快照语义；R0–F5 与已交付的日常编辑增强不回退。行为契约见 [保真度：阶段 F6](emacs-fidelity.md#阶段-f6文件夹-tree-viewer)，上游实测证据见 [F6 观察记录](../tests/emacs/RESULTS.md#f6treemacs-文件夹树参照)，入口见 [对照入口](../tests/emacs/README.md#f6treemacs-文件夹树参照)，上游参照与静读纠错见 [treemacs 参照](work/treemacs-reference.md)。
+项目根、独立文本树 / 左侧 side window、完整首版导航与访问已完成，交付摘要和未测边界见 [F6 归档](archive/f6-tree-viewer.md)。本地回归与集中审查修复已完成，获准的单窗口宿主功能观察及独立路径 / 字节核对通过，固定身份和证据见 [F6 宿主记录](records/f6-tree-host-01.md)。这不表示精确 0.2 秒宿主时序、原生性能、IME 或 GPU 已测；窗口尺寸未提供。
 
-目标：用文本 UI + Emacs 操作逻辑提供文件夹树，作为代码查看的导航入口。
-
-边界：单项目根、目录 / 文件树、懒加载、展开折叠、键盘导航、打开文件、刷新、dotfiles 开关、宽度调整、当前文件定位与 follow；形态是独立文本 buffer + 专用左侧 side window。首版不提供的上游能力（排序选择器、git 注解与 `t i`、filewatch、图标、peek、文件管理、workspaces、持久化、远程等）已在保真度契约登记，不视为待补 bug。
-
-验收条件：本地 ERT 覆盖根识别、树投影、折叠 / 刷新、访问目标与键位解析；`C-x 1` / `C-x 0` / `C-x o`、侧窗位置与宽度、三态 toggle、follow 的时序与焦点属于真实窗口行为，按[验收流程](acceptance.md#宿主验证的适用条件)单独确认最小宿主范围后再测；不新增性能门限，目录读取必须有界。
-
-实施拆成三块，按序进行：
-
-1. **F6a 项目根与当前项目（前置）**：`.git`（目录或文件）向上探测，无 VCS 回退为文件所在目录；只提供根查询与失效判定，不做 projectile 兼容、多根或 marker 配置。
-2. **F6b side window 与树 buffer**：panes 支持受保护的固定侧栏 leaf（`delete-other-windows` 保留、树中执行报错、`delete-window` 可关）；新增 tree mode 与只读投影，目录懒加载、目录在前文件在后、单链目录合并、折叠状态归 buffer、刷新保留可匹配的折叠与 point。
-3. **F6c 导航与访问**：`TAB` / `RET` / `l` / `h` / `H` / `n` / `p` / `M-n` / `M-p` / `u` / `q` / `Q` / `g` / `r` / `t h` / `t f` / `w` / `<` / `>` / `=` / `o` 前缀、三态 toggle、`C-u` / `C-u C-u` 访问前缀、当前文件定位与 follow。
-
-首版之后的候选：排序选择器 `s`、git 状态注解与 `t i`、filewatch 自动刷新、图标 / fringe、peek、文件增删改 / 移动、workspaces / 多根 / 项目切换、持久化与远程；这些不构成首版验收条件，按实际使用再排期。
+阶段收尾后停下汇报，不自动进入下一阶段。下一候选为下述基础 project，具体实施范围仍需用户确认。
 
 ## 后续方向（顺序与依赖，尚未排期）
 

@@ -108,6 +108,7 @@ impl AppShell {
             .buffer()
             .path()
             .and_then(|path| path.parent().map(ToOwned::to_owned))
+            .or_else(|| view.read(cx).buffer().tree_root())
             .unwrap_or_else(|| self.startup_directory.clone())
     }
 
@@ -115,6 +116,15 @@ impl AppShell {
     /// then its own directory, then the startup directory.
     pub(super) fn file_read_directory(&self, view: &Entity<BufferView>, cx: &App) -> PathBuf {
         let buffer = view.read(cx).buffer();
+        if buffer.tree_root().is_some()
+            && let Ok(node) = buffer.tree_node()
+        {
+            return if node.directory {
+                node.target
+            } else {
+                node.target.parent().unwrap().to_path_buf()
+            };
+        }
         if let Some(repository) = buffer.repository() {
             return repository.root;
         }
@@ -173,6 +183,14 @@ impl AppShell {
         if index >= self.buffers.len() || self.minibuffer.is_some() {
             return false;
         }
+        if self.panes.side() == Some(self.panes.selected())
+            && self.active_buffer_id() != self.buffers[index].id()
+        {
+            self.cancel_file_open();
+            let target = self.active_view().clone();
+            self.show_message(&target, "Window is dedicated to *Treemacs*", cx);
+            return false;
+        }
         self.echo = None;
         self.cancel_file_open();
         let old = self.active_view().clone();
@@ -184,7 +202,7 @@ impl AppShell {
             .unwrap()
             .show_buffer(id);
         self.buffers.touch(id);
-        self.update_selected_views(cx);
+        self.update_selected_views(window, cx);
         view.update(cx, |view, cx| {
             view.invalidate_split_geometry();
             view.restore_input(window, cx);
@@ -215,6 +233,7 @@ impl AppShell {
             self.closing = None;
         }
         self.reset_message_log(id);
+        self.discard_tree_window(id, window, cx);
         #[cfg(unix)]
         self.discard_commit_selection(id, window, cx);
         self.buffers.remove(id);
@@ -246,14 +265,18 @@ impl AppShell {
                 view.resume_accepting_input(cx);
             });
         }
-        for pane in self.body_panes.values_mut() {
+        for pane in self
+            .body_panes
+            .values_mut()
+            .chain(self.tree_window.hidden.iter_mut())
+        {
             pane.previous.retain(|previous| *previous != id);
             pane.quit_restore.retain(|restore| restore.buffer != id);
             if let Some(mount) = pane.editors.remove(&id) {
                 mount.view.update(cx, |view, cx| view.suspend_input(cx));
             }
         }
-        self.update_selected_views(cx);
+        self.update_selected_views(window, cx);
         let active = self.active_view().clone();
         if self.minibuffer.is_none() {
             active.update(cx, |view, cx| view.restore_input(window, cx));

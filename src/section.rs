@@ -117,7 +117,10 @@ impl Sections {
             .nodes
             .partition_point(|node| node.range.start <= point)
             .saturating_sub(1);
-        while !self.nodes[index].range.contains(&point) {
+        let at_buffer_end = self.at_content_end(point);
+        while !self.nodes[index].range.contains(&point)
+            && !(at_buffer_end && self.nodes[index].range.end == point)
+        {
             let Some(parent) = self.nodes[index].parent else {
                 return 0;
             };
@@ -226,8 +229,10 @@ impl Sections {
     }
 
     pub fn motion_point(&self, point: ByteOffset, forward: bool) -> ByteOffset {
-        self.hidden_at(point).map_or(point, |(range, _)| {
-            if forward {
+        self.hidden_at(point).map_or(point, |(range, heading)| {
+            if forward && self.at_content_end(range.end) {
+                *heading
+            } else if forward {
                 range.end
             } else {
                 ByteOffset(range.start.0.saturating_sub(1))
@@ -235,7 +240,17 @@ impl Sections {
         })
     }
 
+    fn at_content_end(&self, point: ByteOffset) -> bool {
+        point == self.nodes[0].range.end
+            && self.lines.last().is_some_and(|line| line.start < line.end)
+    }
+
     fn hidden_at(&self, point: ByteOffset) -> Option<&(Range<ByteOffset>, ByteOffset)> {
+        let point = if self.at_content_end(point) {
+            ByteOffset(point.0.saturating_sub(1))
+        } else {
+            point
+        };
         let index = self.hidden.partition_point(|(range, _)| range.end <= point);
         self.hidden
             .get(index)

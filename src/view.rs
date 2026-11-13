@@ -44,6 +44,7 @@ pub(crate) use initial::InitialViewport;
 const PREVIEW_BYTES: usize = 8192;
 const SYNC_SHAPE_BYTES: usize = 8192;
 const PADDING: Pixels = px(8.);
+pub(crate) const MIN_PANE_WIDTH: Pixels = px(160.);
 
 fn text_bounds(bounds: Bounds<Pixels>) -> Bounds<Pixels> {
     let mut bounds = bounds.inset(PADDING);
@@ -571,7 +572,7 @@ impl BufferView {
             .filter(|_| self.split_geometry_ready)
             .ok_or("Window layout not ready for splitting; try again")?;
         let enough = match axis {
-            crate::panes::Axis::Horizontal => bounds.size.width >= px(320.),
+            crate::panes::Axis::Horizontal => bounds.size.width >= MIN_PANE_WIDTH * 2.,
             crate::panes::Axis::Vertical => {
                 bounds.size.height >= self.settings.line_height * 6. + px(48.)
             }
@@ -598,6 +599,11 @@ impl BufferView {
         self.suspended_hscroll_point = Some(self.buffer().point_marker());
         self.reveal_caret = false;
         cx.notify();
+    }
+
+    pub(crate) fn column_width(&self, columns: usize, cx: &App) -> Pixels {
+        let mut metrics = FontMeasure::new(cx.text_system().clone(), self.settings.clone());
+        metrics.width(" ") * columns as f32 + PADDING * 2.
     }
 
     pub fn line_height(&self) -> Pixels {

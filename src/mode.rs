@@ -5,6 +5,7 @@ pub struct ModeId(&'static str);
 
 impl ModeId {
     pub const FUNDAMENTAL: Self = Self("fundamental");
+    pub const TREEMACS: Self = Self("treemacs");
     pub const MAGIT_DIFF: Self = Self("magit-diff");
     pub const MAGIT_STATUS: Self = Self("magit-status");
     pub const GIT_COMMIT: Self = Self("git-commit");
@@ -37,6 +38,7 @@ impl Default for ModeId {
 
 pub const MODES: &[ModeId] = &[
     ModeId::FUNDAMENTAL,
+    ModeId::TREEMACS,
     ModeId::MAGIT_DIFF,
     ModeId::MAGIT_STATUS,
     ModeId::GIT_COMMIT,

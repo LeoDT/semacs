@@ -46,7 +46,7 @@ fn setup(
                     origin: origin.clone(),
                     view: target.clone(),
                     viewport: None,
-                    location: None,
+                    options: Default::default(),
                 });
                 cx.notify();
             });

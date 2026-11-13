@@ -28,6 +28,7 @@ pub mod persisted;
 mod platform;
 #[cfg(feature = "native-profiler")]
 pub mod preparation_trace;
+pub mod project;
 mod saves;
 pub mod scripting;
 pub mod section;
@@ -38,4 +39,5 @@ mod syntax;
 mod test_support;
 pub mod text;
 pub mod theme;
+pub mod tree;
 pub mod view;

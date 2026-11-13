@@ -86,6 +86,7 @@ impl AppShell {
     pub(super) fn all_views(&self) -> Vec<Entity<BufferView>> {
         self.body_panes
             .values()
+            .chain(self.tree_window.hidden.iter())
             .flat_map(|pane| pane.editors.values().map(|mount| mount.view.clone()))
             .collect()
     }
@@ -100,7 +101,11 @@ impl AppShell {
     }
 
     pub(super) fn refresh_buffer(&mut self, id: BufferId, cx: &mut Context<Self>) {
-        for pane in self.body_panes.values() {
+        for pane in self
+            .body_panes
+            .values()
+            .chain(self.tree_window.hidden.iter())
+        {
             if let Some(mount) = pane.editors.get(&id) {
                 mount
                     .view
@@ -110,7 +115,7 @@ impl AppShell {
         cx.notify();
     }
 
-    pub(super) fn update_selected_views(&mut self, cx: &mut Context<Self>) {
+    pub(super) fn update_selected_views(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         for (id, pane) in &self.body_panes {
             for (buffer, mount) in &pane.editors {
                 mount.view.update(cx, |view, cx| {
@@ -118,6 +123,7 @@ impl AppShell {
                 });
             }
         }
+        self.schedule_tree_follow(window, cx);
     }
 
     pub(super) fn select_pane(&mut self, pane: u64, window: &mut Window, cx: &mut Context<Self>) {
@@ -135,7 +141,7 @@ impl AppShell {
         self.echo = None;
         self.cancel_file_open();
         self.buffers.touch(self.active_buffer_id());
-        self.update_selected_views(cx);
+        self.update_selected_views(window, cx);
         let active = self.active_view().clone();
         active.update(cx, |view, cx| view.restore_input(window, cx));
         cx.notify();
@@ -158,7 +164,7 @@ impl AppShell {
                     Axis::Horizontal
                 };
                 let source = self.active_view().clone();
-                if let Err(message) = source.read(cx).check_split(axis) {
+                if let Err(message) = self.check_split(axis, cx) {
                     self.show_message(&source, message, cx);
                     return;
                 }
@@ -166,7 +172,7 @@ impl AppShell {
                 let (buffer, scroll) = source.read(cx).split_state();
                 let view = Self::create_view(buffer, window, cx);
                 view.update(cx, |view, cx| view.initialize_scroll(scroll, cx));
-                self.split_selected(view, axis, cx);
+                self.split_selected(view, axis, window, cx);
             }
             Command::OtherWindow => {
                 let mut traversal = self.panes.clone();
@@ -175,7 +181,8 @@ impl AppShell {
             }
             Command::DeleteWindow => {
                 let old_id = *self.panes.selected();
-                if self.panes.leaves().len() == 1 {
+                let was_side = self.panes.side() == Some(&old_id);
+                if !self.panes.can_close_selected() {
                     let target = self.active_view().clone();
                     self.show_message(&target, "Cannot delete the only window", cx);
                     return;
@@ -184,14 +191,25 @@ impl AppShell {
                 let old = self.active_view().clone();
                 old.update(cx, |view, cx| view.suspend_input(cx));
                 self.panes.close_selected();
-                self.body_panes.remove(&old_id);
-                self.update_selected_views(cx);
+                let removed = self.body_panes.remove(&old_id);
+                if was_side {
+                    self.tree_window.hidden = removed;
+                }
+                for view in self.all_views() {
+                    view.update(cx, |view, _| view.invalidate_split_geometry());
+                }
+                self.update_selected_views(window, cx);
                 let active = self.active_view().clone();
                 self.buffers.touch(self.active_buffer_id());
                 active.update(cx, |view, cx| view.restore_input(window, cx));
                 cx.notify();
             }
             Command::DeleteOtherWindows => {
+                if self.panes.side() == Some(self.panes.selected()) {
+                    let target = self.active_view().clone();
+                    self.show_message(&target, "Cannot make side window the only window", cx);
+                    return;
+                }
                 self.cancel_file_open();
                 let selected = *self.panes.selected();
                 for (id, pane) in &self.body_panes {
@@ -202,18 +220,28 @@ impl AppShell {
                     }
                 }
                 self.panes.retain_selected();
-                self.body_panes.retain(|id, _| *id == selected);
-                self.update_selected_views(cx);
+                let side = self.panes.side().copied();
+                self.body_panes
+                    .retain(|id, _| *id == selected || Some(*id) == side);
+                self.update_selected_views(window, cx);
                 cx.notify();
             }
             _ => unreachable!(),
         }
     }
 
+    pub(super) fn check_split(&self, axis: Axis, cx: &App) -> Result<(), &'static str> {
+        if self.panes.side() == Some(self.panes.selected()) {
+            return Err("Cannot split side window or parent of side window");
+        }
+        self.active_view().read(cx).check_split(axis)
+    }
+
     pub(super) fn split_selected(
         &mut self,
         view: Entity<BufferView>,
         axis: Axis,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> u64 {
         let buffer = view.read(cx).buffer().snapshot_id().buffer;
@@ -229,8 +257,8 @@ impl AppShell {
         self.active_view()
             .clone()
             .update(cx, |view, _| view.invalidate_split_geometry());
-        self.panes.split(pane, axis);
-        self.update_selected_views(cx);
+        assert!(self.panes.split(pane, axis));
+        self.update_selected_views(window, cx);
         cx.notify();
         pane
     }

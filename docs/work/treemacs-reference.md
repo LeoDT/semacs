@@ -16,6 +16,7 @@
 - 专用 side window，默认左侧、`treemacs-width` 35（选项是正文宽度，tty 里窗口总宽 = 正文 + 1）。窗口参数：`window-side` = left、`window-slot` = 0（创建时 -1，由 `window-configuration-change-hook` 归一）、`no-delete-other-windows` = t；树 buffer 里 `window-size-fixed` = width。
 - 保护只针对 `delete-other-windows`：**在树里执行 `C-x 1` 会报错 `Cannot make side window the only window`**，树永远不能成为唯一窗口；而 `delete-window` / `C-x 0` 可以正常关掉它（静读文档说的“不易关闭”只对 `C-x 1` 成立）。
 - `C-x o` 可以在普通窗口与树之间来回切换，side window 不被跳过。
+- F6b 实施时补充静态核对（不是新增实测）：同一 treemacs 版本的 `treemacs-core-utils.el` / `treemacs--popup-window` 设置 `dedicated = t`；Emacs 31.1 `window.el` / `split-window` 在默认参数下拒绝拆分 side window。这些是上游窗口语义，不是 semacs 自行增加的保护。
 - `treemacs` 三态：可见→隐藏（bury，buffer 存活）、已存在→显示并选中、不存在→创建（工作区为空时询问首个项目根）。
 - 消失后重新显示会重新设置 `no-delete-other-windows`（靠 `window-configuration-change-hook`，只有真实 redisplay 才生效）。
 - `q` = `treemacs-quit`（bury），`Q` = `treemacs-kill-buffer`（kill），`treemacs-select-window` 已在树中时按 `move-back` 回到上一个窗口。
@@ -27,7 +28,7 @@
 - 目录在前、文件在后，各自按 ASCII 区分大小写排序（默认 alphabetic-asc）；`s` 弹出 12 项排序方法的 completing-read（不是循环），`C-u` / `C-u C-u` 只是临时重排当前目录 / 整个视图。
 - `treemacs-collapse-dirs` 默认 3（python3 可用时）：只含一个子目录且不含文件的链条合并成一行，到含文件的目录为止。
 - `TAB`：root / 目录开合，文件展开 tag 段（无 tag 时回显 `No tags found for …`）；`RET`：root / 目录开合，文件走默认访问动作，tag 跳转；`h` / `l` 是 COLLAPSE / RET 的别名。
-- 目录读取与刷新保留可匹配的折叠状态与 point；`g` / `r` 刷新、`s` 排序、`<` / `>` / `=` / `w` 调整宽度（`=` 会把最长可见行宽度写回选项）。
+- 目录读取与刷新保留可匹配的折叠状态与 point；`g` / `r` 刷新、`s` 排序、`<` / `>` / `=` / `w` 调整宽度（`=` 会把最长可见行宽度写回选项）。F6c 静态补充：`treemacs-fit-window-width` 遍历整个树 buffer，不限于窗口视口；`treemacs--button-close` 会删除折叠节点的子行，因此 semacs 对应的是全部未被 section 折叠的行，而不是已加载但被折叠的子节点。此处不是新增实测。
 - `n` / `p` = `treemacs-next-line` / `previous-line`（按 button 走行，受 wrap-around 影响）；`M-n` / `M-p` = `treemacs-next-neighbour` / `previous-neighbour`（同层）；**`C-n` / `C-p` 仍是 `next-line` / `previous-line`**。
 - 默认键位共 91 条（含 `o` / `t` / `y` / `C-c C-p` / `C-c C-w` 前缀），清单见 [f6-bindings.tsv](../../tests/emacs/f6-bindings.tsv)。
 

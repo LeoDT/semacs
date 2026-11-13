@@ -36,6 +36,9 @@ pub enum ReadKind {
     },
     /// `C-x C-f`: read a path and visit it from the origin.
     FindFile,
+    TreeRoot,
+    TreeFile,
+    TreeWidth,
     /// `C-x C-w`: read a path and write the buffer there.
     WriteFile,
     /// `C-x b`: read an existing buffer name and activate it.
@@ -130,6 +133,8 @@ impl ReadKind {
                 | Self::HistoryFileVersion { .. }
                 | Self::Theme
                 | Self::FindFile
+                | Self::TreeRoot
+                | Self::TreeFile
                 | Self::WriteFile
                 | Self::SwitchToBuffer { .. }
                 | Self::KillBuffer { .. }
@@ -185,6 +190,9 @@ impl ReadKind {
             #[cfg(unix)]
             ReadKind::CommitTargetMerges { .. } => "Proceed despite merge in rebase range? [c] continue, [s] select other, [a] abort: ".into(),
             ReadKind::FindFile => "Find file: ".to_owned(),
+            ReadKind::TreeRoot => "Project root: ".to_owned(),
+            ReadKind::TreeFile => "File to find: ".to_owned(),
+            ReadKind::TreeWidth => "New width: ".to_owned(),
             ReadKind::WriteFile => "Write file: ".to_owned(),
             ReadKind::SwitchToBuffer { default } => match default {
                 Some(name) => format!("Switch to buffer (default {name}): "),
