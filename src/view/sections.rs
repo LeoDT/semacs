@@ -11,7 +11,7 @@ impl BufferView {
     ) {
         self.target.show_point(point);
         self.target.clear_pending();
-        self.style_scroll_anchor = None;
+        self.scroll_anchor = None;
         self.pending_scroll = None;
         self.reveal_caret = true;
         self.invalidate_input_registration();
@@ -76,7 +76,7 @@ impl BufferView {
     ) {
         self.pending_scroll = None;
         if let (Some((anchor, remainder)), Some(sections)) = (anchor, self.buffer().sections()) {
-            self.style_scroll_anchor =
+            self.scroll_anchor =
                 Some((sections.resolve(&self.buffer().text(), &anchor), remainder));
             self.reveal_caret = false;
             cx.notify();

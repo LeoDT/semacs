@@ -737,6 +737,23 @@ impl EditTarget {
         Ok(())
     }
 
+    pub(crate) fn scroll_point(
+        &mut self,
+        point: ByteOffset,
+        selected: bool,
+    ) -> Result<(), RouteError> {
+        if self.input.is_composing() {
+            return Err(InputError::CompositionActive.into());
+        }
+        let before = self.buffer.point();
+        self.buffer.set_point(point)?;
+        if selected && self.buffer.point() != before {
+            self.buffer.deactivate_pointer_mark();
+        }
+        self.clear_pending();
+        Ok(())
+    }
+
     /// Starts a mouse selection: mark and point at the pressed offset and the
     /// region is active until the gesture ends. The press is the only part of a
     /// drag that starts a new history group.
@@ -748,7 +765,7 @@ impl EditTarget {
         self.input.guard_command(&self.buffer, token)?;
         self.buffer.set_point(point)?;
         let point = self.buffer.point();
-        self.buffer.set_mark(point)?;
+        self.buffer.set_pointer_mark(point)?;
         self.buffer.break_history_group();
         self.keys.clear();
         self.interrupt_command_chain();

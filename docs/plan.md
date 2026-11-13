@@ -15,10 +15,10 @@ R0–F5、日常编辑增强及 F5 后插入项均已完成，交付摘要见 [R
 用户已确认以下小增强要在 tree viewer 之前完成；具体行为、默认键与验收在实施前确定。静态参照、现状与待决项见 [tree viewer 前的小增强参照](work/pre-tree-enhancements.md)。
 
 1. **point 离开视口时的滚动**（已交付）：point 行不再完整可见时按 Emacs redisplay 默认居中，`M->` 按 `end-of-buffer` 的 `(recenter -3)` 定位；diff / Magit `n` / `p` 跳到放不下的 hunk 时把 hunk heading 置顶（`magit-hunk-set-window-start`）。
-2. **鼠标滚轮与 point**：按 Emacs `mwheel-scroll` / `scroll-up` / `scroll-down` 的实际语义实现，不按“滚轮等于 point 移动一行”的观察简化；当前 semacs 只滚视图不改 point。精确屏幕表现实施前做一次对照观察，不另造语义。
+2. **鼠标滚轮与 point**（已交付）：按 Emacs `mwheel-scroll` / `scroll-up` / `scroll-down` 实现窗口滚动、point 边界行首调整及选区处理，支持普通垂直与 Shift 水平滚动，横向偏移非零时临时截断、归零恢复原换行规则；GPUI 量、整行累计和收件时间加速适配已确认。行为与平台差异见[保真度](emacs-fidelity.md#鼠标滚轮)；以源码与自动测试为主，不要求人工数格或逐像素一致。
 3. **find-file 候选排序与信息**：按用户 Emacs 的 Vertico + Marginalia 实际行为——新增持久化 file-name history，排序为历史 → 长度 → 字母序，fuzzy 只做过滤；注解照抄 Marginalia；mtime 不参与排序，不补 `./` / `../`。
 
-`kill-current-buffer`（`C-x C-k`，含 minibuffer 内退出会话）、Magit `S-TAB` 全局 section 可见性、point 离开视口的滚动与 hunk heading 置顶已交付，契约见[保真度](emacs-fidelity.md#已登记的-f2-motion-差异)与[独立 diff 查看](emacs-fidelity.md#独立-diff-查看)。其余是 tree viewer 的前置项，不改变已交付 F1–F5 的契约；实施时再更新对应的[保真度契约](emacs-fidelity.md)与验收入口。
+`kill-current-buffer`（`C-x C-k`，含 minibuffer 内退出会话）、Magit `S-TAB` 全局 section 可见性、point 离开视口的滚动、hunk heading 置顶及鼠标滚轮与 point 已交付，契约见[保真度](emacs-fidelity.md#已登记的-f2-motion-差异)、[独立 diff 查看](emacs-fidelity.md#独立-diff-查看)与[鼠标滚轮](emacs-fidelity.md#鼠标滚轮)。下一项是 find-file 候选排序与信息；它仍是 tree viewer 的前置项，不改变已交付 F1–F5 的契约；实施时再更新对应的[保真度契约](emacs-fidelity.md)与验收入口。
 
 ## 下一步方向（方向已确认，首版待细化）
 

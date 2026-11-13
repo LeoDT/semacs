@@ -28,6 +28,7 @@ fn settings(cx: &TestAppContext, columns: f32) -> LayoutSettings {
         font_size: px(16.),
         line_height: px(24.),
         wrap_width: px(100.),
+        soft_wrap: true,
         tab_size: 8,
         typography: Default::default(),
         visible_lines: None,
@@ -78,6 +79,65 @@ fn assert_exact(index: &WrapIndex) {
         index.row_count() - 1
     );
     assert!(index.row_for_offset(ByteOffset(text.len() + 1)).is_none());
+}
+
+#[gpui::test]
+fn truncation_uses_logical_rows_without_scanning_or_measuring_the_text(cx: &mut TestAppContext) {
+    for text in ["", "abc", "中🙂e\u{301}\t\n\nend", "abc\n"] {
+        let buffer = buffer(text);
+        let mut settings = settings(cx, 1.);
+        settings.soft_wrap = false;
+        let index = finish(&buffer, settings, cx);
+        assert_exact(&index);
+        assert_eq!(
+            index.row_count(),
+            buffer.text().max_point().row as usize + 1
+        );
+        assert_eq!(index.scanned_bytes(), 0);
+    }
+    let buffer = buffer(&"中🙂a\t".repeat(150_000));
+    let mut settings = settings(cx, 1.);
+    settings.soft_wrap = false;
+    let mut metrics = FontMeasure::new(cx.text_system().clone(), settings.clone());
+    let snapshot = InputSession::new(&buffer)
+        .display_snapshot(&buffer)
+        .unwrap();
+    let index = WrapJob::new(snapshot, settings, None, None).preview(&mut metrics, 1, 1);
+    assert!(index.is_complete());
+    assert_eq!(index.row_count(), 1);
+    assert_eq!(index.row(0).unwrap().row.content_len, buffer.text().len());
+    assert_eq!(index.scanned_bytes(), 0);
+    assert_exact(&index);
+}
+
+#[gpui::test]
+fn wrapping_mode_changes_cannot_reuse_incompatible_rows(cx: &mut TestAppContext) {
+    let buffer = buffer("abcdefghij\n0123456789");
+    let snapshot = InputSession::new(&buffer)
+        .display_snapshot(&buffer)
+        .unwrap();
+    let soft = settings(cx, 4.);
+    let wrapped = finish(&buffer, soft.clone(), cx);
+    assert_eq!(wrapped.row_count(), 6);
+    let mut truncated = soft.clone();
+    truncated.soft_wrap = false;
+    let mut metrics = FontMeasure::new(cx.text_system().clone(), truncated.clone());
+    let logical = WrapJob::new(snapshot.clone(), truncated, Some(&wrapped), None)
+        .finish(&mut metrics, &AtomicBool::new(false))
+        .unwrap();
+    assert_eq!(logical.row_count(), 2);
+    let mut metrics = FontMeasure::new(cx.text_system().clone(), soft.clone());
+    let restored = WrapJob::new(snapshot, soft, Some(&logical), None)
+        .finish(&mut metrics, &AtomicBool::new(false))
+        .unwrap();
+    assert_exact(&restored);
+    assert_eq!(restored.row_count(), wrapped.row_count());
+    for row in 0..wrapped.row_count() {
+        assert_eq!(
+            restored.row(row).unwrap().row,
+            wrapped.row(row).unwrap().row
+        );
+    }
 }
 
 #[gpui::test]

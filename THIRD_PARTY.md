@@ -82,6 +82,13 @@
   index application. semacs retains its own parsed patch/section model and
   uses Git's context matching, with the same independent-hunk line-start
   adjustment and apply options; no Lisp implementation is bundled.
+- Emacs 31.1 `mwheel.el`, `mouse.el`, `subr.el`, `src/window.c`,
+  `src/keyboard.c`, `src/pgtkterm.c`, and `src/xdisp.c` were read for wheel event amounts,
+  progressive speed, window scrolling, temporary truncation during horizontal
+  scrolling, point adjustment and temporary region
+  behavior. semacs uses its own GPUI input adapter and visible-row index;
+  source references and platform differences are in
+  `docs/work/pre-tree-enhancements.md` and `docs/emacs-fidelity.md`.
 - semacs implements its own pane-local display history, restoration and
   commit-message recovery model. No Emacs Lisp implementation was copied or
   translated, and these packages are not runtime dependencies.

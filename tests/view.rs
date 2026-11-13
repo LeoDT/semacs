@@ -157,7 +157,7 @@ fn scrolling_reuses_content_identity_but_replaces_viewport_geometry(cx: &mut Tes
     });
     visual.update(|_, cx| {
         editor.update(cx, |view, cx| {
-            view.scroll_by(point(px(14.), px(144.)), cx);
+            view.scroll_by(point(px(0.), px(144.)), cx);
             assert!(view.viewport_layout().is_none());
         })
     });
@@ -166,7 +166,7 @@ fn scrolling_reuses_content_identity_but_replaces_viewport_geometry(cx: &mut Tes
         let view = editor.read(cx);
         let layout = view.viewport_layout().unwrap();
         assert_eq!(*layout.key(), before);
-        assert_eq!(layout.scroll(), point(px(14.), px(240.)));
+        assert_eq!(layout.scroll(), point(px(0.), px(240.)));
         let hit = layout
             .hit_test(point(
                 layout.bounds().left(),

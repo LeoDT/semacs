@@ -10,6 +10,7 @@
 - 用户 Emacs 配置：`C-x C-k` 绑定 `kill-current-buffer`。
 - 仅静态阅读源码与 docstring；未做真实 GUI 鼠标滚轮 / 重绘观察。涉及屏幕实际表现的结论保留为待验证。
 - 例外：#1 的 point 离开视口滚动另用 `tests/emacs/drive.py` 的 `m4-recenter-motion` 在真实 pty command loop 核对；仍不覆盖 GUI 像素布局、变高行或用户桌面。
+- #3 另核对上游 `emacs-31.1` tag 的 [`src/window.c`](https://github.com/emacs-mirror/emacs/blob/emacs-31.1/src/window.c)、[`src/keyboard.c`](https://github.com/emacs-mirror/emacs/blob/emacs-31.1/src/keyboard.c)、[`src/pgtkterm.c`](https://github.com/emacs-mirror/emacs/blob/emacs-31.1/src/pgtkterm.c) 与 [`src/xdisp.c`](https://github.com/emacs-mirror/emacs/blob/emacs-31.1/src/xdisp.c) 的 `force_start` redisplay；这是静态语义参照，不是新增的运行观察。
 
 ## 1. point 离开视口时的滚动（已实施）
 
@@ -45,20 +46,33 @@
 
 **实施结果**：普通 `TAB` 只切换当前 section；`S-TAB` 只做全局 cycle，折叠状态、point 与多 view 沿用现有 section 模型。
 
-## 3. 鼠标滚轮与 point
+## 3. 鼠标滚轮与 point（已实施）
+
+有效行为与已批准的平台差异见[保真度](../emacs-fidelity.md#鼠标滚轮)；本节保留源码参照与观察边界，不维护另一份实施规格。
 
 **现象 / 目标**：semacs 的鼠标滚动只改视图、不改 point。实际逻辑按 Emacs `mwheel-scroll` / `scroll-up` / `scroll-down` 的语义，不按“滚轮等于 point 移动一行”的观察简化。
 
 **静态依据**：
 
-- Emacs `mwheel-scroll` 不直接绑定 `next-line`；它按 `mouse-wheel-scroll-amount` 调用 `scroll-up` / `scroll-down`。Emacs 31.1 默认 amount 为 1 行，`mouse-wheel-progressive-speed` 为 t。
-- `scroll-up` / `scroll-down` 都带 `scroll-command` 属性；默认 `scroll-preserve-screen-position` 为 nil，表示 point 不保持屏幕位置，但在滚动余量 / 窗口边界处会被调整。
-- 因此“滚轮 = 光标移动一行”是不准确的简化：实际是滚动窗口，point 在边界条件下调整。精确屏幕上表现仍需要真实 GUI 观察。
-- semacs 当前滚轮只调用 `scroll_by`，point 不变，光标可能离开可视区。
+- `mwheel.el::mwheel-scroll` 按 `mouse-wheel-scroll-amount` 调用 `scroll-up` / `scroll-down`，不调用 `next-line`。默认基础量为 1 行、`mouse-wheel-progressive-speed` 为 t；实际量为基础量 × `event-click-count` × `event-line-count`，不能把一个平台事件视为固定一行。
+- `keyboard.c::make_lispy_event` 在方向相同、两轴指针位移各不超过 3px、间隔小于 500ms 时递增连击计数；各次量为 1、2、3……，累计为 1、3、6……。反向、超时、超出位置阈值或鼠标按钮事件打断序列。这些是 Emacs 默认值，不是新增 semacs 配置项。
+- `pgtkterm.c::scroll_event` 默认累计连续轴输入，达到行 / 字符阈值才产生 wheel 事件，余量保留；不是每次触摸板更新都滚一行。行数还会参与上述加速。
+- `window.c::window_scroll_pixel_based`（GUI）与 `window_scroll_line_based`（终端）先滚窗口：point 仍在允许区域就保持原位置；向后浏览挤出上边界时移到新首行行首，向前浏览挤出下边界时移到最后完整可见行行首。默认 `scroll-preserve-screen-position` 为 nil，边界推动**不保持原列**，也不是 point 始终随滚轮移动。point 已完全不在窗口时，会先以 point 为中心恢复起始窗口，再施加滚动。
+- 默认 `auto-window-vscroll=t`：point 行被裁切时有先于步长的处理。向后浏览遇到底部裁切、没有既有部分行偏移且不在首显示行时，先把 point 的逻辑行首设为起点并返回；软换行也按逻辑行首，强制起点的 redisplay 另保证 point 可见。单行窗口 / 部分行偏移先处理裁切量；顶部裁切的反向滚动先撤销偏移。该分支不能被“大步长夹紧”或常规边界行首调整代替。
+- `xdisp.c::init_iterator` 仅在 `hscroll == 0` 且原 buffer / window 规则允许时启用软换行；非零水平偏移临时截断，不修改 buffer 的 `truncate-lines`。`window.c::set_window_hscroll` 只设 view 偏移并暂停自动横滚，不移动 point；`xdisp.c` 在 point 显式改变后恢复自动横滚。window-start 沿用文本 marker 并按新布局重排，没有横滚前续行快照的恢复机制。
+- `mwheel-scroll` 在首尾捕获滚动错误并尽量滚到边缘，不发响铃；不抢走鼠标所在窗口之外的原选中窗口焦点。它带 `scroll-command` 属性，连续滚动位置保持逻辑只在 `scroll-preserve-screen-position` 非 nil 时启用；不由 `scroll-step` 决定。
+- region 需区分来源：鼠标选择使用临时 `(only . …)` transient mark，滚动所选窗口且推动 point 时 `mwheel-scroll` 取消该临时 region；普通键盘激活的 region 并不在此无条件取消。既有“region 取消”的人工观察不能扩展为所有 region 都取消。
+- semacs 原滚轮只调用 `scroll_by`，point 不变，光标可能离开可视区；本阶段已替换为上述窗口滚动 / point 调整路径。
 
 **用户 GUI 观察（Emacs 31.1，真实桌面，窗口固定）**：单格 1 行、point 被推至窗口首 / 末行、首尾贴边及 region 取消均与上文一致；快速连滚能感到加速，但读不出每格行数；触摸板难以精确停在单行，但不是像素级滚动；`Shift+滚轮` 水平滚动一列。
 
-**实施原则**：按 Emacs `mwheel-scroll` / `scroll-up` / `scroll-down` 的 scroll-command 语义实现，不改成 `next-line`。默认 amount 为 1 行、progressive speed 为 t 可作为起点；边界处 point 落点及水平滚动继续按 Emacs 行为核对。精确屏幕表现实施前在真实 Emacs GUI 与 semacs 桌面上做一次对照观察，不把观察现象直接写成新契约。
+**验证边界（已确认）**：既有用户 GUI 观察保留；规则优先从源码确定，用确定性自动测试核对，不以人工数格、pty 或新增桌面对照作为必经步骤。不同硬件 / 平台同一手势的精确行数与逐像素一致性不作为目标；若输入适配需要偏离上游规则，仍先确认，不把该边界当作任意简化加速 / point 行为的授权。
+
+**平台适配（已确认并实施）**：
+
+- 当前依赖为 crates.io `gpui-kit 0.8.1` / `gpui-fast 0.1.12`。`ScrollEvent` 有 `Lines` / `Pixels`、位置、修饰键与手势 phase，但没有原始事件时间和连击计数；Wayland 离散格通常给 `Lines`，连续输入给 `Pixels`，X11 另有固定行数倍率，不能可靠恢复原始物理格数。Linux 后端已把 Shift 垂直输入转为水平轴，应用不能再重复换轴。
+- 用户已批准使用 GPUI 量、整行累计、收件时间计数和普通垂直 / Shift 水平范围；具体契约统一见[保真度](../emacs-fidelity.md#鼠标滚轮)。原始时间戳 / 后端合并前事件无法逐次等价，不扩展整个 `mwheel.el`。
+- 未新增 pty 或桌面观察；确定语义由自动测试覆盖，不把 headless 结果外推为真实设备或原生呈现通过。
 
 ## 4. find-file 候选的排序与信息
 

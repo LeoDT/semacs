@@ -155,6 +155,17 @@
 - 组合期间按下沿用既有拒绝提示；有读入会话时正文不开始选区。
 - 已批准差异：上游普通单击在松开时用 `pop-mark` 恢复点击前的 mark，本实现按已批准范围让 mark 停在点击位置；上游 `mouse-scroll-subr` 按窗口字符行比较越界距离，本实现按像素距离换算行。双击选词、三击选行、Shift 调整 region、右键 `mouse-save-then-kill` / `mouse-drag-copy-region` 与拖动移动文本均未实现，见[实施计划](plan.md)未排期事项。
 
+### 鼠标滚轮
+
+- 滚动鼠标所在 view，不切换正文焦点；未选中 view 的 point / scroll 独立调整，不带动选中 view。普通文本、软换行显示行及折叠 section 的可见行共用窗口滚动语义，不把滚轮转换成 `next-line` / `previous-line`。
+- 垂直滚动先移动窗口：point 行完整可见时保留原位置；向后浏览把 point 推出上边界时放到新首行行首，向前浏览把 point 推出下边界时放到最后完整可见行行首，不保持原列。point 已完全离开视口时先恢复以 point 为中心的起始窗口，再施加滚动。按 Emacs 默认 `scroll-preserve-screen-position=nil`、`scroll-margin=0`，不提供这些变量的配置。
+- point 行被裁切时先按默认 `auto-window-vscroll` 处理，不再叠加本次步长：向后浏览遇到行底部被裁切时，通常先把该逻辑行行首置顶；单行窗口或已有部分行偏移时先补滚裁切量，向前浏览遇到顶部裁切时先撤销该偏移。逻辑行含软换行时仍按逻辑行首定位；强制起点使 point 完全不可见时，后续 redisplay 把 point 放回窗口中部。
+- 首尾遵循 `mwheel-scroll` 对 `scroll-up` / `scroll-down` 的失败处理：到头仅回显边界消息，不响铃；向下浏览的大步长触及 EOB 时，重试近整屏滚动直到无法继续，不改成把任意大步长夹到最后一行。常规整行步进可把末尾非空行滚到窗口首行，但不把 EOB 空行当作新的首行。
+- Shift 水平滚动以字符列为单位，不推动 point，不套用垂直连滚加速。按 Emacs redisplay：普通 buffer 的水平偏移大于 0 时临时按逻辑行截断显示，归零恢复软换行；不改变 buffer 设置，不影响同 buffer 的其他 view，原本截断的 diff / section buffer 在第 0 列也不换行。切换时按当前文本位置和新布局定位；point 必要时按默认 redisplay 保持垂直可见，不保存或恢复横滚前的旧续行快照。手动横滚暂停自动水平跟随，直到 point 显式改变（共享编辑引起的 marker 位移不算）；恢复跟随使偏移归零时也恢复软换行。保留平台已提供的水平轴；Linux GPUI 已把 Shift 垂直输入换轴，不重复转换。不新增 Meta 翻页或 Ctrl 字号缩放等滚轮修饰动作。
+- 只有滚动命令在选中 view 中确实推动 point 时，才取消鼠标建立的临时 region；后续强制起点的 redisplay 调整不追补该取消。键盘激活的 region 保留，滚动未选中 view 不因此取消共享 region。滚轮不设置 mark、不编辑文本、不添加 undo 项或修改 kill ring；有效滚动打断当前命令链与输入历史组。
+- 已批准的平台适配：采用 GPUI 的 `Lines` / `Pixels` 量，不恢复物理格数；像素量按行高 / 字符宽度换算，累计不足整行 / 整列的余量。垂直量乘连续事件计数：同方向、指针两轴位移各不超过 3px、收件间隔小于 500ms 时计数递增，否则从 1 开始；view 内鼠标按下打断连滚。GPUI 不提供原始时间戳与连击计数，因此使用应用收件时间，不承诺与 Emacs 后端合并前事件、设备加速或同一手势的精确行数 / 像素逐次一致。
+- 所需显示行尚未索引或布局不兼容时提示布局未就绪，不猜测行位置；连续滚动不要求每次先完成重绘。组合期间沿用编辑命令的拒绝提示；有读入会话时正文不处理滚轮。上述行为以源码与自动测试核对，既有人工观察不作为精确行数证明。
+
 ### 文件读入的默认目录与路径答案
 
 - `C-x C-f`、`C-x C-w` 与无路径 buffer 的 `C-x C-s` 共用默认目录：origin buffer 关联的仓库根（status / diff / history / process 等生成 buffer）→ 所访问文件的父目录 → 启动目录。只有文件读入使用该解析；commit、脚本等既有默认目录不变。
@@ -315,7 +326,7 @@
 - `TAB` / `C-i` 切换当前 section 正文，保留 heading；root 不能隐藏。父节点折叠不改写子节点自身状态；隐藏正文中的各 view point 移至折叠 heading。正文仍保留在只读 buffer 中，普通 region / 复制沿用文本语义，不提供 Magit 结构化选择语义。
 - `S-TAB` / `<backtab>` 执行 `magit-section-cycle-global`：仍有正文隐藏时全部展开；全部正文可见时只折叠顶级 section，子孙自身状态保留、heading 仍在。折叠使 point 落入隐藏正文时移到该 section heading；多 view 共享折叠，各自 point / scroll 维持既有规则。
 - `n` 到下一个可见 section heading；`p` 在正文先回当前 section 起点，在起点再到前一个可见 heading；`^` 到父节点。用这三个 section 移动命令跳到 hunk 时按 Magit `magit-hunk-set-window-start`：hunk 末端（hunk 之后那一行的行首，Magit 的 section end）不完全可见时把 hunk heading 放到窗口顶部；Magit 的折叠 overlay 止于 section end 之前，所以折叠只隐藏正文、不改变末端行是否可见，其他 section 没有该规则，`j`、RET 与鼠标跳转也不套用，都按上面的 point 滚动规则处理。`j` 在 diffstat 文件项与对应文件间跳转，必要时打开目标祖先。SPC / DEL / S-SPC 及原通用翻页键按可见行翻页，普通文本移动跳过隐藏正文。
-- status / diff 使用独立的分组标题、分支、hash、文件头、hunk 头、上下文、增删行和 diffstat 命名样式，见[主题 API](scripting.md#主题与命名样式)。当前 section 按各 view 的 point 提供独立于 region 的背景反馈及对应 diff 高亮样式；角色背景铺满逻辑行，字体变化参与 view 的布局身份。使用自有可配置配色，不引入 Delta、隐藏增删标记或词级高亮；折叠 heading 带指示。长行不软换行，M-右 / M-左（`scroll-left` / `scroll-right`）水平查看，point 移动到屏幕外列时跟随。普通编辑 buffer 的软换行不变。
+- status / diff 使用独立的分组标题、分支、hash、文件头、hunk 头、上下文、增删行和 diffstat 命名样式，见[主题 API](scripting.md#主题与命名样式)。当前 section 按各 view 的 point 提供独立于 region 的背景反馈及对应 diff 高亮样式；角色背景铺满逻辑行，字体变化参与 view 的布局身份。使用自有可配置配色，不引入 Delta、隐藏增删标记或词级高亮；折叠 heading 带指示。长行不软换行，M-右 / M-左（`scroll-left` / `scroll-right`）水平查看，point 移动到屏幕外列时跟随。普通编辑 buffer 在水平偏移为 0 时软换行，横滚期间的临时截断见[鼠标滚轮](#鼠标滚轮)。
 - `g` 重新读取相同比较。按 section 类型 / 路径 / 父链及 hunk heading 身份尽量保留折叠、各 view point 与顶部 section 相对行列；节点消失时回退到最近仍存在的祖先 heading，不能保证 hunk 内容变化后仍匹配。只读刷新没有文本 undo，也不标记 modified。
 - `RET` / `C-m` 在删除行访问旧侧，在新增 / 上下文行访问新侧并定位；heading 使用对应侧起始行。HEAD / index 使用本次 diff 的完整 blob 身份打开只读快照，不重解释为当前 index 或 worktree；unstaged 新侧复用普通文件 buffer，保留其未保存文本，行列超界时夹紧。不提供 C-RET 的跨版本行号映射。
 - Git 在后台以参数数组执行，关闭外部 diff / textconv，不运行 Git 写命令。每窗口最多一个 Git 读取，无请求队列；单次子进程 15 秒，stdout 16 MiB、stderr 64 KiB，diff 最多 4096 个文件 / 100000 行 patch，超限明确失败。禁止按需自动抓取缺失 blob；固定 worktree / git-dir，刷新不能意外回落到父仓库。刷新失败保留旧内容；结果校验目标及请求身份，不按完成时焦点重新定向。打开 / 版本访问期间焦点目标变化或进入读入会话时不抢回界面。

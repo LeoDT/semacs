@@ -267,12 +267,12 @@ fn font_change_preserves_scrolled_text_anchor_and_point(cx: &mut TestAppContext)
             view.geometry.as_ref().unwrap().rows[0].source.index,
             row.index
         );
-        assert!(view.style_scroll_anchor.is_none());
+        assert!(view.scroll_anchor.is_none());
     });
 }
 
 #[gpui_kit::test]
-fn explicit_navigation_cancels_a_background_style_scroll_anchor(cx: &mut TestAppContext) {
+fn explicit_navigation_cancels_a_background_scroll_anchor(cx: &mut TestAppContext) {
     for command in [
         crate::command::Command::BeginningOfBuffer,
         crate::command::Command::Recenter,
@@ -288,10 +288,10 @@ fn explicit_navigation_cancels_a_background_style_scroll_anchor(cx: &mut TestApp
         set_keyword_style(&mut visual, true);
         visual.update(|window, cx| {
             window.draw(cx).clear(cx);
-            assert!(view.read(cx).style_scroll_anchor.is_some());
+            assert!(view.read(cx).scroll_anchor.is_some());
             assert!(!view.read(cx).layout_ready());
             view.update(cx, |view, cx| view.execute_command(command, window, cx));
-            assert!(view.read(cx).style_scroll_anchor.is_none());
+            assert!(view.read(cx).scroll_anchor.is_none());
             window.draw(cx).clear(cx);
         });
         redraw(&mut visual);

@@ -48,6 +48,7 @@ impl BufferView {
         let size = text_bounds(bounds).size;
         let mut settings = self.settings.clone();
         settings.wrap_width = size.width;
+        settings.soft_wrap = self.soft_wrap_at(self.scroll.x);
         settings.typography = self.typography(cx);
         InitialViewport {
             settings,
@@ -117,6 +118,7 @@ impl BufferView {
     ) -> bool {
         let mut settings = self.settings.clone();
         settings.wrap_width = viewport.size.width;
+        settings.soft_wrap = self.soft_wrap_at(self.scroll.x);
         settings.typography = self.typography(cx);
         if prepared.viewport != *viewport
             || viewport.settings != settings

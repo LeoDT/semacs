@@ -104,7 +104,7 @@ async fn first_prepaint_reuses_background_rows_and_completes_the_remaining_index
 async fn stale_text_session_font_width_and_height_results_are_not_installed(
     cx: &mut TestAppContext,
 ) {
-    for change in ["text", "session", "font", "width", "height"] {
+    for change in ["text", "session", "font", "width", "height", "hscroll"] {
         let (window, view, bounds) = setup(cx, "abc中🙂\tlast");
         let (mut viewport, work) = request(cx, window, &view, bounds);
         let prepared = work.ready().await.unwrap();
@@ -122,6 +122,7 @@ async fn stale_text_session_font_width_and_height_results_are_not_installed(
                     viewport.settings.wrap_width = viewport.size.width;
                 }
                 "height" => viewport.size.height += px(24.),
+                "hscroll" => view.initialize_scroll(point(px(10.), px(0.)), cx),
                 _ => unreachable!(),
             }
             assert!(
@@ -133,6 +134,26 @@ async fn stale_text_session_font_width_and_height_results_are_not_installed(
             assert!(view.cache.is_empty());
         });
     }
+}
+
+#[gpui::test]
+async fn initial_preparation_respects_the_views_horizontal_wrap_mode(cx: &mut TestAppContext) {
+    let text = format!("{}\nlast", "abcdefghij".repeat(3000));
+    let (window, view, bounds) = setup(cx, &text);
+    view.update(cx, |view, cx| {
+        view.initialize_scroll(point(px(20.), px(0.)), cx)
+    });
+    let (viewport, work) = request(cx, window, &view, bounds);
+    assert!(!viewport.settings.soft_wrap);
+    let prepared = work.ready().await.unwrap();
+    assert!(prepared.index.is_complete());
+    assert_eq!(prepared.index.row_count(), 2);
+    assert_eq!(prepared.index.scanned_bytes(), 0);
+    view.update(cx, |view, cx| {
+        assert!(view.install_initial(prepared, &viewport, cx));
+        assert!(!view.settings.soft_wrap);
+        assert_eq!(view.scroll.x, px(20.));
+    });
 }
 
 #[gpui::test]

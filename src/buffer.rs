@@ -141,6 +141,14 @@ impl Document {
     }
 }
 
+pub(crate) struct PointMarker(Rc<TrackedPoint>);
+
+impl PointMarker {
+    pub(crate) fn position(&self) -> ByteOffset {
+        ByteOffset(self.0.get())
+    }
+}
+
 pub struct Buffer {
     document: Rc<RefCell<Document>>,
     point: Rc<TrackedPoint>,
@@ -228,14 +236,22 @@ impl Buffer {
         }
     }
 
-    pub fn new_view(&self) -> Buffer {
+    fn track_point(&self) -> Rc<TrackedPoint> {
         let point = Rc::new(TrackedPoint::new(self.point().0));
         let mut doc = self.document.borrow_mut();
         doc.points.retain(|point| point.strong_count() > 0);
         doc.points.push(Rc::downgrade(&point));
+        point
+    }
+
+    pub(crate) fn point_marker(&self) -> PointMarker {
+        PointMarker(self.track_point())
+    }
+
+    pub fn new_view(&self) -> Buffer {
         Buffer {
             document: self.document.clone(),
-            point,
+            point: self.track_point(),
             view_id: next_view_id(),
         }
     }
@@ -319,6 +335,7 @@ impl Buffer {
         self.validate_range(&range)
             .expect("valid message log range");
         let active = self.mark_active();
+        let pointer_mark = self.document.borrow().mark.is_pointer();
         self.apply_validated_edit(Edit {
             snapshot: self.snapshot_id(),
             range,
@@ -329,7 +346,11 @@ impl Buffer {
         doc.modified = false;
         doc.history = history::History::default();
         let mark = doc.mark.position();
-        doc.mark.set(mark, active);
+        if let Some(mark) = mark.filter(|_| pointer_mark) {
+            doc.mark.set_pointer(mark);
+        } else {
+            doc.mark.set(mark, active);
+        }
     }
 
     pub fn minibuffer(prompt: &str, initial: &str) -> Self {
@@ -440,6 +461,20 @@ impl Buffer {
         doc.mark.set(Some(point), true);
         doc.touch();
         Ok(())
+    }
+    pub(crate) fn set_pointer_mark(&mut self, point: ByteOffset) -> Result<(), EditError> {
+        if !self.text().is_char_boundary(point.0) {
+            return Err(EditError::InvalidRange);
+        }
+        let mut doc = self.document.borrow_mut();
+        doc.mark.set_pointer(point);
+        doc.touch();
+        Ok(())
+    }
+    pub(crate) fn deactivate_pointer_mark(&mut self) {
+        if self.document.borrow().mark.is_pointer() {
+            self.deactivate_mark();
+        }
     }
     pub fn deactivate_mark(&mut self) {
         let mut doc = self.document.borrow_mut();
@@ -762,6 +797,29 @@ mod shared_tests {
         drop(second);
         replace(&mut first, 1..4, "");
         assert_eq!(first.document.borrow().points.len(), 1);
+    }
+
+    #[test]
+    fn point_markers_follow_shared_edits_but_not_explicit_point_motion() {
+        let mut first = Buffer::new(
+            None,
+            DecodedFile {
+                text: "abcdef".into(),
+                format: FileFormat::default(),
+            },
+        );
+        let mut second = first.new_view();
+        second.set_point(ByteOffset(4)).unwrap();
+        let marker = second.point_marker();
+        replace(&mut first, 0..0, "中");
+        assert_eq!(marker.position(), second.point());
+        assert_eq!(marker.position(), ByteOffset(7));
+        second.set_point(ByteOffset(5)).unwrap();
+        assert_eq!(marker.position(), ByteOffset(7));
+        let typed = second.point_marker();
+        replace(&mut second, 5..5, "x");
+        assert_eq!(typed.position(), ByteOffset(5));
+        assert_eq!(second.point(), ByteOffset(6));
     }
 
     #[test]

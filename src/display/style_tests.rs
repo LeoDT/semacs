@@ -12,6 +12,7 @@ fn settings() -> LayoutSettings {
         font_size: px(16.),
         line_height: px(24.),
         wrap_width: px(90.),
+        soft_wrap: true,
         tab_size: 8,
         typography: Typography::default(),
         visible_lines: None,

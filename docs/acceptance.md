@@ -65,6 +65,8 @@ RUNS=3 target/release/examples/perf_m1 .pi/tmp/NEW-sample.txt
 | `RUNS=3 target/release/examples/perf_syntax` | Rust / 长 raw string（8 MiB）及 TSX / HTML / Markdown（256 KiB）独立语法基线，可用 `SHAPES=rust,long-string` 等筛选；`syntax_and_layout_ready_ms` 包含解析 / 查询 / 子语言，不能套用旧纯布局 ready 门限 |
 | [perf_load](../examples/perf_load.rs) / [perf_baseline.sh](../scripts/perf_baseline.sh) | 文件层基线；参数、样本和断言以工具为准 |
 
+鼠标滚轮的确定性语义回归可运行 `cargo test --lib view::wheel`，横滚与换行联动运行 `cargo test --lib view::hscroll_tests`；覆盖归一化 / 连滚、point 边界与部分行处理、软换行 / 折叠投影、共享 buffer 多 view 和输入生命周期。行为与输入适配边界见[保真度](emacs-fidelity.md#鼠标滚轮)，上游规则优先从[源码参照](work/pre-tree-enhancements.md#3-鼠标滚轮与-point已实施)核对，不要求人工数格或新增 pty / 桌面对照作为每次回归的前置。
+
 headless 仅作 CPU / 功能回归，不代表原生字体、平台 IME、GPU 或实际呈现；软件诊断与宿主硬件验收分开。
 
 ## 宿主 fish 入口

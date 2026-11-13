@@ -30,6 +30,7 @@ pub struct LayoutSettings {
     pub font_size: Pixels,
     pub line_height: Pixels,
     pub wrap_width: Pixels,
+    pub soft_wrap: bool,
     pub tab_size: u32,
     pub typography: Typography,
     pub visible_lines: Option<Arc<[Range<ByteOffset>]>>,
@@ -42,6 +43,7 @@ impl LayoutSettings {
             && self.font_size == other.font_size
             && self.line_height == other.line_height
             && self.wrap_width == other.wrap_width
+            && self.soft_wrap == other.soft_wrap
             && self.tab_size == other.tab_size
             && self.visible_lines == other.visible_lines
     }
@@ -113,13 +115,19 @@ impl<'a> SeekTarget<'a, RowSummary, RowSummary> for ByRow {
 }
 
 #[derive(Clone)]
+enum IndexedRows {
+    Wrapped(SumTree<WrapRow>),
+    Logical,
+    Projected(Arc<[IndexedRow]>),
+}
+
+#[derive(Clone)]
 pub struct WrapIndex {
     key: LayoutKey,
     text: Rope,
-    rows: SumTree<WrapRow>,
+    rows: IndexedRows,
     complete: bool,
     scanned_bytes: usize,
-    projected: Option<Arc<[IndexedRow]>>,
 }
 
 #[derive(Clone, Debug)]
@@ -140,7 +148,13 @@ impl WrapIndex {
         self.complete
     }
     pub(crate) fn is_projected(&self) -> bool {
-        self.projected.is_some()
+        matches!(self.rows, IndexedRows::Projected(_))
+    }
+    fn wrapped_rows(&self) -> Option<&SumTree<WrapRow>> {
+        match &self.rows {
+            IndexedRows::Wrapped(rows) => Some(rows),
+            _ => None,
+        }
     }
     /// Attaches a new layout key to unchanged rows.
     pub(crate) fn rekey(mut self, key: LayoutKey) -> Self {
@@ -149,24 +163,49 @@ impl WrapIndex {
         self
     }
     pub fn row_count(&self) -> usize {
-        self.projected
-            .as_ref()
-            .map_or(self.rows.summary().rows, |rows| rows.len())
+        match &self.rows {
+            IndexedRows::Wrapped(rows) => rows.summary().rows,
+            IndexedRows::Logical => self.text.max_point().row as usize + 1,
+            IndexedRows::Projected(rows) => rows.len(),
+        }
     }
     pub fn indexed_bytes(&self) -> usize {
-        self.projected
-            .as_ref()
-            .map_or(self.rows.summary().bytes, |_| self.text.len())
+        match &self.rows {
+            IndexedRows::Wrapped(rows) => rows.summary().bytes,
+            _ => self.text.len(),
+        }
     }
     pub fn scanned_bytes(&self) -> usize {
         self.scanned_bytes
     }
 
     pub fn row(&self, index: usize) -> Option<IndexedRow> {
-        if let Some(rows) = &self.projected {
-            return rows.get(index).cloned();
-        }
-        let mut cursor = self.rows.cursor::<RowSummary>(());
+        let rows = match &self.rows {
+            IndexedRows::Projected(rows) => return rows.get(index).cloned(),
+            IndexedRows::Logical => {
+                if index >= self.row_count() {
+                    return None;
+                }
+                let start = self.text.point_to_offset(Point::new(index as u32, 0));
+                let (end, content_end) = if index + 1 < self.row_count() {
+                    let end = self.text.point_to_offset(Point::new(index as u32 + 1, 0));
+                    (end, end - 1)
+                } else {
+                    (self.text.len(), self.text.len())
+                };
+                return Some(IndexedRow {
+                    index,
+                    start: ByteOffset(start),
+                    row: WrapRow {
+                        byte_len: end - start,
+                        content_len: content_end - start,
+                        tab_phase: px(0.),
+                    },
+                });
+            }
+            IndexedRows::Wrapped(rows) => rows,
+        };
+        let mut cursor = rows.cursor::<RowSummary>(());
         cursor.seek(&ByRow(index), Bias::Right);
         Some(IndexedRow {
             index,
@@ -176,7 +215,7 @@ impl WrapIndex {
     }
 
     pub fn row_for_offset(&self, offset: ByteOffset) -> Option<IndexedRow> {
-        if let Some(rows) = &self.projected {
+        if let IndexedRows::Projected(rows) = &self.rows {
             let index = rows
                 .partition_point(|row| row.start <= offset)
                 .checked_sub(1)?;
@@ -185,7 +224,14 @@ impl WrapIndex {
                 || (offset.0 == self.text.len() && offset.0 == row.start.0 + row.row.byte_len))
                 .then(|| row.clone());
         }
-        if offset.0 > self.indexed_bytes() || self.rows.is_empty() {
+        if matches!(self.rows, IndexedRows::Logical) {
+            if offset.0 > self.text.len() {
+                return None;
+            }
+            return self.row(self.text.offset_to_point(offset.0).row as usize);
+        }
+        let rows = self.wrapped_rows().unwrap();
+        if offset.0 > self.indexed_bytes() || rows.is_empty() {
             return None;
         }
         if offset.0 == self.indexed_bytes() {
@@ -194,7 +240,7 @@ impl WrapIndex {
             }
             return self.row(self.row_count() - 1);
         }
-        let mut cursor = self.rows.cursor::<RowSummary>(());
+        let mut cursor = rows.cursor::<RowSummary>(());
         cursor.seek(&ByByte(offset.0), Bias::Right);
         Some(IndexedRow {
             index: cursor.start().rows,
@@ -204,13 +250,21 @@ impl WrapIndex {
     }
 
     pub fn visible_rows(&self, range: Range<usize>) -> Vec<IndexedRow> {
-        if let Some(rows) = &self.projected {
-            return rows
-                .get(range.start.min(rows.len())..range.end.min(rows.len()))
-                .unwrap_or_default()
-                .to_vec();
-        }
-        let mut cursor = self.rows.cursor::<RowSummary>(());
+        let rows = match &self.rows {
+            IndexedRows::Projected(rows) => {
+                return rows
+                    .get(range.start.min(rows.len())..range.end.min(rows.len()))
+                    .unwrap_or_default()
+                    .to_vec();
+            }
+            IndexedRows::Logical => {
+                return (range.start..range.end.min(self.row_count()))
+                    .filter_map(|row| self.row(row))
+                    .collect();
+            }
+            IndexedRows::Wrapped(rows) => rows,
+        };
+        let mut cursor = rows.cursor::<RowSummary>(());
         cursor.seek(&ByRow(range.start), Bias::Right);
         let mut rows = Vec::new();
         while let Some(row) = cursor.item() {
@@ -263,7 +317,7 @@ impl WrapJob {
         };
         if let (Some(previous), Some(change)) = (previous, change)
             && previous.complete
-            && previous.projected.is_none()
+            && previous.wrapped_rows().is_some()
             && previous
                 .key
                 .settings
@@ -315,7 +369,7 @@ impl WrapJob {
             "reuse needs the same display"
         );
         assert!(
-            previous.complete && previous.projected.is_none(),
+            previous.complete && previous.wrapped_rows().is_some(),
             "reuse needs a complete materialized index"
         );
         let mut job = Self {
@@ -331,7 +385,7 @@ impl WrapJob {
             reuse: None,
         };
         if dirty.is_empty() {
-            job.suffix = previous.rows.clone();
+            job.suffix = previous.wrapped_rows().unwrap().clone();
             return job;
         }
         debug_assert!(dirty.end <= previous.text.len());
@@ -360,7 +414,7 @@ impl WrapJob {
             .expect("reflow row start");
         debug_assert_eq!(row.start.0, start);
         job.phase = row.row.tab_phase;
-        let mut cursor = previous.rows.cursor::<RowSummary>(());
+        let mut cursor = previous.wrapped_rows().unwrap().cursor::<RowSummary>(());
         job.prefix = cursor.slice(&ByRow(row.index), Bias::Right);
         if end < previous.text.len() {
             cursor.seek_forward(&ByByte(end), Bias::Right);
@@ -434,10 +488,18 @@ impl WrapJob {
             return Some(WrapIndex {
                 key: self.key.clone(),
                 text: text.clone(),
-                rows: SumTree::new(()),
+                rows: IndexedRows::Projected(rows.into()),
                 complete: true,
                 scanned_bytes: 0,
-                projected: Some(rows.into()),
+            });
+        }
+        if !self.key.settings.soft_wrap {
+            return Some(WrapIndex {
+                key: self.key.clone(),
+                text: text.clone(),
+                rows: IndexedRows::Logical,
+                complete: true,
+                scanned_bytes: 0,
             });
         }
         let mut scanner =
@@ -462,7 +524,8 @@ impl WrapJob {
                             && old_row.start.0 == old_offset
                             && old_row.row.tab_phase == scanner.row_phase
                         {
-                            let mut cursor = previous.rows.cursor::<RowSummary>(());
+                            let mut cursor =
+                                previous.wrapped_rows().unwrap().cursor::<RowSummary>(());
                             cursor.seek(&ByRow(old_row.index), Bias::Right);
                             converged_suffix = Some(cursor.suffix());
                             break;
@@ -486,10 +549,9 @@ impl WrapJob {
         Some(WrapIndex {
             key: self.key.clone(),
             text: text.clone(),
-            rows: result,
+            rows: IndexedRows::Wrapped(result),
             complete,
             scanned_bytes,
-            projected: None,
         })
     }
 }

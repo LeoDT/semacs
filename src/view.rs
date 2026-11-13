@@ -12,7 +12,7 @@ use gpui_kit::*;
 use unicode_segmentation::UnicodeSegmentation;
 
 use crate::appearance::FontSettings;
-use crate::buffer::{Buffer, BufferSnapshot};
+use crate::buffer::{Buffer, BufferSnapshot, PointMarker};
 use crate::command::{Command, Scope};
 use crate::command_registry::CommandId;
 use crate::display::{
@@ -37,6 +37,7 @@ mod initial;
 mod motion;
 mod pointer;
 mod sections;
+mod wheel;
 
 pub(crate) use initial::InitialViewport;
 
@@ -412,9 +413,11 @@ pub struct BufferView {
     view_bounds: Option<Bounds<Pixels>>,
     content_bounds: Option<Bounds<Pixels>>,
     retained_paint_layout: Option<ViewportLayout>,
-    style_scroll_anchor: Option<(ByteOffset, Pixels)>,
+    scroll_anchor: Option<(ByteOffset, Pixels)>,
     scroll: Point<Pixels>,
+    suspended_hscroll_point: Option<PointMarker>,
     pointer_drag: Option<pointer::PointerDrag>,
+    wheel: wheel::WheelState,
     reflow_base: Option<WrapIndex>,
     pending_change: Option<DisplayChange>,
     registration: u64,
@@ -463,6 +466,7 @@ impl BufferView {
                 font_size: fonts.size(),
                 line_height: fonts.line_height(),
                 wrap_width: px(1.),
+                soft_wrap: true,
                 tab_size: TAB_WIDTH,
                 typography: Default::default(),
                 visible_lines: None,
@@ -479,9 +483,11 @@ impl BufferView {
             view_bounds: None,
             content_bounds: None,
             retained_paint_layout: None,
-            style_scroll_anchor: None,
+            scroll_anchor: None,
             scroll: Point::default(),
+            suspended_hscroll_point: None,
             pointer_drag: None,
+            wheel: wheel::WheelState::default(),
             reflow_base: None,
             pending_change: None,
             registration: 0,
@@ -586,8 +592,10 @@ impl BufferView {
     }
 
     pub(crate) fn initialize_scroll(&mut self, scroll: Point<Pixels>, cx: &mut Context<Self>) {
-        self.style_scroll_anchor = None;
-        self.scroll = scroll;
+        self.scroll_anchor = None;
+        self.scroll.y = scroll.y;
+        self.set_horizontal_scroll(scroll.x);
+        self.suspended_hscroll_point = Some(self.buffer().point_marker());
         self.reveal_caret = false;
         cx.notify();
     }
@@ -688,7 +696,7 @@ impl BufferView {
     }
 
     fn queue_change(&mut self, change: DisplayChange, cx: &mut Context<Self>) {
-        self.style_scroll_anchor = None;
+        self.scroll_anchor = None;
         self.pending_scroll = None;
         if self.reflow_base.is_none() {
             self.reflow_base = self
@@ -882,7 +890,8 @@ impl BufferView {
         line_height: Pixels,
         cx: &mut Context<Self>,
     ) {
-        self.style_scroll_anchor = None;
+        self.wheel.reset();
+        self.scroll_anchor = None;
         self.retain_paint_layout();
         self.settings.font = font;
         self.settings.font_size = font_size;
@@ -895,12 +904,37 @@ impl BufferView {
         cx.notify();
     }
 
+    fn soft_wrap_at(&self, x: Pixels) -> bool {
+        x == px(0.) && self.buffer().sections().is_none()
+    }
+
+    fn set_horizontal_scroll(&mut self, x: Pixels) -> bool {
+        let x = x.max(px(0.));
+        let soft_wrap = self.soft_wrap_at(x);
+        let changed = self.settings.soft_wrap != soft_wrap;
+        if changed {
+            self.anchor_scroll();
+            self.settings.soft_wrap = soft_wrap;
+            self.retain_paint_layout();
+            self.shape_work = None;
+            self.shape_range = None;
+            self.invalidate_input_registration();
+        }
+        self.scroll.x = x;
+        changed
+    }
+
     pub fn scroll_by(&mut self, delta: Point<Pixels>, cx: &mut Context<Self>) {
-        self.style_scroll_anchor = None;
+        if delta.x == px(0.) || delta.y != px(0.) {
+            self.scroll_anchor = None;
+        }
         self.reveal_caret = false;
         self.pending_scroll = None;
-        self.scroll.x = (self.scroll.x + delta.x).max(px(0.));
         self.scroll.y = (self.scroll.y + delta.y).max(px(0.));
+        if delta.x != px(0.) {
+            self.suspended_hscroll_point = Some(self.buffer().point_marker());
+            self.reveal_caret = self.set_horizontal_scroll(self.scroll.x + delta.x);
+        }
         self.geometry = None;
         self.shape_work = None;
         self.shape_range = None;
@@ -1009,6 +1043,7 @@ impl BufferView {
         let index = self.index.as_ref()?;
         if index.key().display != snapshot.id()
             || !index.is_complete()
+            || !index.key().settings.soft_wrap
             || index.is_projected()
             || !self.settings.same_non_typography(&index.key().settings)
         {
@@ -1069,8 +1104,8 @@ impl BufferView {
         });
     }
 
-    fn anchor_style_scroll(&mut self) {
-        if self.style_scroll_anchor.is_some() {
+    fn anchor_scroll(&mut self) {
+        if self.scroll_anchor.is_some() {
             return;
         }
         let display = self.display_snapshot().id();
@@ -1084,8 +1119,7 @@ impl BufferView {
         let line_height = index.key().settings.line_height;
         let first = (f32::from(self.scroll.y) / f32::from(line_height)).floor() as usize;
         if let Some(row) = index.row(first) {
-            self.style_scroll_anchor =
-                Some((row.start, self.scroll.y - line_height * first as f32));
+            self.scroll_anchor = Some((row.start, self.scroll.y - line_height * first as f32));
         }
     }
 
@@ -1148,6 +1182,7 @@ impl BufferView {
         #[cfg(feature = "native-profiler")]
         let _trace = crate::preparation_trace::Span::new("ensure-index", 0);
         self.settings.wrap_width = bounds.size.width.max(px(1.));
+        self.settings.soft_wrap = self.soft_wrap_at(self.scroll.x);
         self.settings.visible_lines = self
             .buffer()
             .sections()
@@ -1188,21 +1223,27 @@ impl BufferView {
                 }
                 self.emphasis_work = None;
                 if let Some(previous) = self.emphasis_precondition(&snapshot, &typography) {
-                    self.anchor_style_scroll();
+                    self.anchor_scroll();
                     self.spawn_emphasis_change(snapshot.id(), previous, typography, cx);
                     return;
                 }
             } else {
                 self.emphasis_work = None;
             }
-            self.anchor_style_scroll();
+            self.anchor_scroll();
         }
         self.settings.typography = typography;
         let key = LayoutKey {
             display: snapshot.id(),
             settings: self.settings.clone(),
         };
-        if self.index.as_ref().is_some_and(|index| *index.key() == key) {
+        if let Some(index) = self.index.as_ref().filter(|index| *index.key() == key) {
+            if !index.is_complete() && self.layout_work.is_none() {
+                self.finish_index(
+                    WrapJob::new(snapshot, self.settings.clone(), None, None),
+                    cx,
+                );
+            }
             return;
         }
         self.layout_work = None;
@@ -1264,6 +1305,7 @@ impl BufferView {
         let task = cx.spawn(async move |view, cx| {
             if let Some(result) = worker.await {
                 view.update(cx, |view, cx| {
+                    view.layout_work = None;
                     if view
                         .index
                         .as_ref()
@@ -1278,10 +1320,9 @@ impl BufferView {
                                 })
                                 .detach();
                         }
-                        view.layout_work = None;
                         view.clear_reflow(cx);
-                        cx.notify();
                     }
+                    cx.notify();
                 })
                 .ok();
             }
@@ -1308,11 +1349,11 @@ impl BufferView {
         self.ensure_index(bounds, cx);
         let index = self.index.as_ref().unwrap();
         if self.emphasis_work.is_none()
-            && let Some((offset, remainder)) = self.style_scroll_anchor
+            && let Some((offset, remainder)) = self.scroll_anchor
             && let Some(row) = index.row_for_offset(offset)
         {
             self.scroll.y = self.settings.line_height * row.index as f32 + remainder;
-            self.style_scroll_anchor = None;
+            self.scroll_anchor = None;
         }
         if let Some(pending) = self.pending_scroll.take() {
             match self.pending_scroll_target(&pending, index, bounds.size.height) {
@@ -1329,7 +1370,14 @@ impl BufferView {
                 None => {}
             }
         }
-        let reveal_horizontal = self.reveal_caret;
+        if self
+            .suspended_hscroll_point
+            .as_ref()
+            .is_some_and(|point| point.position() != self.buffer().point())
+        {
+            self.suspended_hscroll_point = None;
+        }
+        let reveal_horizontal = self.reveal_caret && self.suspended_hscroll_point.is_none();
         if self.reveal_caret
             && let Some(row) = index.row_for_offset(self.caret())
         {
@@ -1339,7 +1387,7 @@ impl BufferView {
                 // scrolling the minimum needed to show it.
                 self.scroll.y = self.centered_scroll(row.index, bounds.size.height);
             }
-            self.reveal_caret = self.settings.visible_lines.is_some();
+            self.reveal_caret = !self.settings.soft_wrap && reveal_horizontal;
         }
         if index.is_complete() {
             let last_row = self.settings.line_height * index.row_count().saturating_sub(1) as f32;
@@ -1431,7 +1479,7 @@ impl BufferView {
                 });
             }
         }
-        if self.settings.visible_lines.is_some() && reveal_horizontal {
+        if !self.settings.soft_wrap && reveal_horizontal {
             let caret = self.buffer().point();
             if let Some(row) = rows.iter().find_map(|row| {
                 self.cache
@@ -1439,12 +1487,17 @@ impl BufferView {
                     .filter(|row| row.x_for_offset(caret).is_some())
             }) {
                 let x = row.x_for_offset(caret).unwrap();
-                self.scroll.x = self
+                let x = self
                     .scroll
                     .x
                     .min(x)
                     .max((x + row.space_width - bounds.size.width).max(px(0.)));
                 self.reveal_caret = false;
+                if self.set_horizontal_scroll(x) {
+                    self.reveal_caret = true;
+                    self.prepare(view_bounds, window, cx);
+                    return;
+                }
             }
         }
         let below_text = rows
@@ -1488,7 +1541,7 @@ impl BufferView {
             window.notify_text_selection_changed(&self.focus);
         }
         if outcome.reveal_point || outcome.viewport.is_some() {
-            self.style_scroll_anchor = None;
+            self.scroll_anchor = None;
         }
         self.pending_scroll = None;
         match outcome.viewport {
@@ -1660,7 +1713,7 @@ impl BufferView {
 
     pub(crate) fn show_end(&mut self, cx: &mut Context<Self>) {
         let end = ByteOffset(self.buffer().text().len());
-        self.style_scroll_anchor = None;
+        self.scroll_anchor = None;
         self.target.show_point(end);
         self.reveal_caret = true;
         cx.notify();
@@ -1753,18 +1806,12 @@ impl BufferView {
             self.invalidate_input_registration();
         }
         if self.target.buffer().point() != before_point {
-            self.style_scroll_anchor = None;
+            self.scroll_anchor = None;
             self.pending_scroll = None;
             self.reveal_caret = true;
             window.notify_text_selection_changed(&self.focus);
         }
         self.set_message(error.to_string(), cx);
-    }
-
-    fn scroll_wheel(&mut self, event: &ScrollEvent, _: &mut Window, cx: &mut Context<Self>) {
-        let delta = event.delta.pixel_delta(self.settings.line_height);
-        self.scroll_by(point(-delta.x, -delta.y), cx);
-        cx.stop_propagation();
     }
 }
 
@@ -1783,6 +1830,7 @@ impl Render for BufferView {
             .track_focus(&self.focus)
             .bg(cx.theme().background)
             .text_color(cx.theme().foreground)
+            .on_any_mouse_down(cx.listener(|view, _: &MouseDownEvent, _, _| view.wheel.reset()))
             .on_mouse_down(MouseButton::Left, cx.listener(Self::mouse_down))
             .on_mouse_move(cx.listener(Self::mouse_moved))
             .on_mouse_up(MouseButton::Left, cx.listener(Self::mouse_released))
@@ -2043,6 +2091,8 @@ mod candidate_tests;
 mod feedback_tests;
 #[cfg(test)]
 mod history_tests;
+#[cfg(test)]
+mod hscroll_tests;
 #[cfg(test)]
 pub(crate) mod input_tests;
 #[cfg(test)]

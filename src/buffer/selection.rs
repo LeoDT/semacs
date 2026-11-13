@@ -44,10 +44,18 @@ impl TrackedPoint {
     }
 }
 
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
+enum Activation {
+    #[default]
+    Inactive,
+    Command,
+    Pointer,
+}
+
 #[derive(Default)]
 pub(super) struct TrackedMark {
     position: Option<ByteOffset>,
-    active: bool,
+    activation: Activation,
     revision: u64,
 }
 
@@ -57,7 +65,11 @@ impl TrackedMark {
     }
 
     pub(super) fn is_active(&self) -> bool {
-        self.active
+        self.activation != Activation::Inactive
+    }
+
+    pub(super) fn is_pointer(&self) -> bool {
+        self.activation == Activation::Pointer
     }
 
     pub(super) fn revision(&self) -> u64 {
@@ -65,13 +77,28 @@ impl TrackedMark {
     }
 
     pub(super) fn set(&mut self, position: Option<ByteOffset>, active: bool) {
-        if (self.position, self.active) != (position, active) {
+        self.activate(
+            position,
+            if active {
+                Activation::Command
+            } else {
+                Activation::Inactive
+            },
+        );
+    }
+
+    pub(super) fn set_pointer(&mut self, position: ByteOffset) {
+        self.activate(Some(position), Activation::Pointer);
+    }
+
+    fn activate(&mut self, position: Option<ByteOffset>, activation: Activation) {
+        if (self.position, self.activation) != (position, activation) {
             self.revision = self
                 .revision
                 .checked_add(1)
                 .expect("mark revision exhausted");
             self.position = position;
-            self.active = active;
+            self.activation = activation;
         }
     }
 

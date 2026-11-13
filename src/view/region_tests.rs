@@ -75,7 +75,7 @@ fn reverse_regions_normalize_and_soft_wrap_geometry_is_clipped_to_the_viewport(
         assert!(view.region_bounds().len() <= view.viewport_layout().unwrap().visible_row_count());
     });
     editor.update(&mut visual, |view, cx| {
-        view.scroll_by(point(px(5.), px(12.)), cx)
+        view.scroll_by(point(px(0.), px(12.)), cx)
     });
     redraw(&mut visual);
     visual.read(|cx| {
