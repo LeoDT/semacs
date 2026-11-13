@@ -189,18 +189,24 @@ pub fn absolute(path: &Path) -> io::Result<PathBuf> {
     expand(path, &std::env::current_dir()?)
 }
 
-/// A directory as it starts a file read: `$HOME` replaced by `~` at a component
-/// boundary and always ending with a separator.
-pub fn directory_input(directory: &Path) -> String {
+/// `$HOME` at a whole-component prefix replaced by `~`, the spelling
+/// `file-name-history` entries and the minibuffer use.
+pub fn abbreviate(path: &Path) -> String {
     let home = std::env::var_os("HOME").map(PathBuf::from);
-    let mut text = match home
+    match home
         .as_deref()
-        .and_then(|home| directory.strip_prefix(home).ok())
+        .and_then(|home| path.strip_prefix(home).ok())
     {
         Some(rest) if rest.as_os_str().is_empty() => "~".to_owned(),
         Some(rest) => Path::new("~").join(rest).to_string_lossy().into_owned(),
-        None => directory.to_string_lossy().into_owned(),
-    };
+        None => path.to_string_lossy().into_owned(),
+    }
+}
+
+/// A directory as it starts a file read: [`abbreviate`]d and always ending with
+/// a separator.
+pub fn directory_input(directory: &Path) -> String {
+    let mut text = abbreviate(directory);
     if !text.ends_with(MAIN_SEPARATOR) {
         text.push(MAIN_SEPARATOR);
     }
@@ -303,6 +309,7 @@ fn file_stamp(metadata: &fs::Metadata) -> FileStamp {
 pub struct PathCandidates {
     pub candidates: Vec<crate::completion::Candidate>,
     pub query: String,
+    pub typed_directory: String,
     pub directory_input: bool,
     pub raw_directory: bool,
 }
@@ -314,15 +321,27 @@ pub fn path_candidates(
     default_directory: &Path,
     cancelled: &std::sync::atomic::AtomicBool,
 ) -> PathCandidates {
+    let now = SystemTime::now();
     if input == "~" && std::env::var_os("HOME").is_some() {
+        let annotation = expand(Path::new(input), default_directory)
+            .ok()
+            .and_then(|home| fs::symlink_metadata(home).ok())
+            .map_or_else(String::new, |metadata| {
+                crate::file_annotation::file(
+                    &metadata,
+                    now,
+                    &mut crate::file_annotation::OwnerNames::default(),
+                )
+            });
         return PathCandidates {
             candidates: vec![crate::completion::Candidate {
                 value: "~/".into(),
                 label: "~/".into(),
-                annotation: "directory".into(),
+                annotation,
                 directory: true,
             }],
             query: "~".into(),
+            typed_directory: String::new(),
             directory_input: false,
             raw_directory: true,
         };
@@ -334,6 +353,7 @@ pub fn path_candidates(
     let mut result = PathCandidates {
         candidates: Vec::new(),
         query,
+        typed_directory: typed_directory.to_owned(),
         directory_input: false,
         raw_directory: false,
     };
@@ -353,6 +373,7 @@ pub fn path_candidates(
         return result;
     };
     result.directory_input = input.is_empty() || input.ends_with(std::path::MAIN_SEPARATOR);
+    let mut names = crate::file_annotation::OwnerNames::default();
     for entry in entries.flatten() {
         if cancelled.load(std::sync::atomic::Ordering::Relaxed) {
             break;
@@ -360,20 +381,72 @@ pub fn path_candidates(
         let Ok(name) = entry.file_name().into_string() else {
             continue;
         };
-        let directory = entry.path().is_dir();
+        // `DirEntry::metadata` leaves symlinks unresolved like `file-attributes`,
+        // while the trailing separator still follows a link to a directory.
+        let metadata = entry.metadata().ok();
+        let directory = match &metadata {
+            Some(metadata) if metadata.file_type().is_symlink() => entry.path().is_dir(),
+            Some(metadata) => metadata.is_dir(),
+            None => false,
+        };
+        let annotation = metadata.as_ref().map_or_else(String::new, |metadata| {
+            crate::file_annotation::file(metadata, now, &mut names)
+        });
         let label = if directory { format!("{name}/") } else { name };
         result.candidates.push(crate::completion::Candidate {
             value: format!("{typed_directory}{label}"),
             label,
-            annotation: if directory {
-                "directory".into()
-            } else {
-                "file".into()
-            },
+            annotation,
             directory,
         });
     }
     result
+}
+
+/// Ranks file candidates like Vertico's `vertico-sort-history-length-alpha` over
+/// `file-name-history`: history first, then character length and name. Matching
+/// stays separate, so fuzzy filtering never changes this order.
+pub fn rank_candidates(
+    items: &mut [crate::completion::MatchedCandidate],
+    history: &[String],
+    prefix: &str,
+    current: Option<&str>,
+) {
+    // Vertico keys history entries by the segment after the typed directory, so
+    // a history entry of `dir/file` ranks the `dir/` candidate, and the file of
+    // the current buffer never counts.
+    let ranks = crate::completion::history_ranks(history, |entry| {
+        if current == Some(entry) {
+            return None;
+        }
+        let rest = if prefix.is_empty() {
+            Some(entry)
+        } else {
+            entry.strip_prefix(prefix)
+        }?;
+        Some(
+            rest.find(std::path::MAIN_SEPARATOR)
+                .map_or(rest, |end| &rest[..=end]),
+        )
+    });
+    items.sort_by(|a, b| {
+        let rank = |item: &crate::completion::MatchedCandidate| {
+            ranks
+                .get(item.candidate.label.as_str())
+                .copied()
+                .unwrap_or(i64::MAX)
+        };
+        rank(a)
+            .cmp(&rank(b))
+            .then_with(|| {
+                a.candidate
+                    .label
+                    .chars()
+                    .count()
+                    .cmp(&b.candidate.label.chars().count())
+            })
+            .then_with(|| a.candidate.label.cmp(&b.candidate.label))
+    });
 }
 
 pub fn read(path: &Path) -> Result<DecodedFile, ReadError> {
@@ -817,6 +890,99 @@ mod tests {
             nested.join("other.txt")
         );
         fs::remove_dir_all(dir).unwrap();
+    }
+
+    fn ranked(
+        labels: &[&str],
+        history: &[&str],
+        prefix: &str,
+        current: Option<&str>,
+    ) -> Vec<String> {
+        let mut items: Vec<_> = labels
+            .iter()
+            .map(|label| crate::completion::MatchedCandidate {
+                candidate: crate::completion::Candidate {
+                    value: format!("{prefix}{label}"),
+                    label: (*label).into(),
+                    annotation: String::new(),
+                    directory: label.ends_with('/'),
+                },
+                highlights: Vec::new(),
+            })
+            .collect();
+        let history: Vec<String> = history.iter().map(|entry| (*entry).to_owned()).collect();
+        rank_candidates(&mut items, &history, prefix, current);
+        items.into_iter().map(|item| item.candidate.label).collect()
+    }
+
+    /// Order reproduced with Vertico's `vertico-sort-history-length-alpha`.
+    #[test]
+    fn ranks_like_vertico_history_length_alpha() {
+        let history = [
+            "/home/u/src/proj/README.md",
+            "/home/u/src/proj/src/main.rs",
+            "/home/u/src/proj/src/lib.rs",
+            "/home/u/src/proj/Cargo.toml",
+            "/home/u/src/proj/src/main.rs",
+            "/home/u/src/other/x.rs",
+        ];
+        let labels = [
+            "README.md",
+            "src/",
+            "Cargo.toml",
+            "zzz.txt",
+            "aa.txt",
+            "a-very-long-file-name-that-exceeds-forty-eight-characters.rs",
+            "b",
+            "LICENSE",
+            "build.rs",
+            "src2/",
+        ];
+        assert_eq!(
+            ranked(&labels, &history, "/home/u/src/proj/", None),
+            [
+                "README.md",
+                "src/",
+                "Cargo.toml",
+                "b",
+                "src2/",
+                "aa.txt",
+                "LICENSE",
+                "zzz.txt",
+                "build.rs",
+                "a-very-long-file-name-that-exceeds-forty-eight-characters.rs",
+            ]
+        );
+    }
+
+    #[test]
+    fn history_only_matches_the_typed_directory_and_skips_the_current_file() {
+        let history = [
+            "~/src/proj/README.md",
+            "~/src/proj/deep/nested.rs",
+            "~/elsewhere/README.md",
+            "/abs/README.md",
+        ];
+        let labels = ["README.md", "deep/", "src/"];
+        assert_eq!(
+            ranked(&labels, &history, "~/src/proj/", None),
+            ["README.md", "deep/", "src/"]
+        );
+        assert_eq!(
+            ranked(&labels, &history, "", None),
+            ["src/", "deep/", "README.md"],
+            "without a typed directory the history segment is never a label"
+        );
+        assert_eq!(
+            ranked(
+                &labels,
+                &history,
+                "~/src/proj/",
+                Some("~/src/proj/README.md")
+            ),
+            ["deep/", "src/", "README.md"],
+            "the current file and unlisted names fall back to length then name"
+        );
     }
 
     #[test]

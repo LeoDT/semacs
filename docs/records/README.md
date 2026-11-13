@@ -6,6 +6,7 @@
 
 | 材料 | 用途与边界 |
 |---|---|
+| [find-file 候选排序与注解本地验证](find-file-candidates-local.md) | 固定上游版本下的注解 / 排序对照、app 与单元回归、owner 查询成本与用户目视确认；目视为概述，不表示 CJK / 窄窗口 / 原生性能已覆盖。 |
 | [Magit 全局 section cycle 行为观察](magit-section-cycle-global-observation.md) | 固定 Magit 版本下 `S-TAB` 的可见状态与折叠时 point 规则；batch 观察，不是 semacs 通过记录。 |
 | [F5 提交历史与提交整理本地验证](f5-history-commit-local.md) | 固定源码清单、真实 Git / editor 与日志 / combined 回归、一次集中审查及修复、独立 diff headless 基线；没有启动真实桌面或将其解释为原生性能通过。 |
 | [F4 status 内嵌 diff / 单 hunk 操作本地验证](f4-status-hunks-local.md) | 隔离 Git / App / JS 回归、D/F 冲突集中审查修复及 status / 独立 diff headless 专项；不表示新界面宿主或原生性能通过。 |

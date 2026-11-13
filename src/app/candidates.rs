@@ -6,7 +6,9 @@ use std::sync::{
 use gpui_kit::{Context, Task, Window};
 
 use super::AppShell;
-use crate::completion::{self, Candidate, CandidateAction, CandidateList, CandidateResolution};
+use crate::completion::{
+    self, AnnotationPlacement, Candidate, CandidateAction, CandidateList, CandidateResolution,
+};
 use crate::files;
 use crate::session::ReadKind;
 
@@ -56,6 +58,15 @@ impl AppShell {
         let input = mount.view.read(cx).contents(cx);
         if matches!(kind, ReadKind::FindFile | ReadKind::WriteFile) {
             let directory = self.file_read_directory(&origin, cx);
+            let history = cx
+                .global::<crate::file_history::FileHistory>()
+                .entries()
+                .to_vec();
+            let current = origin
+                .read(cx)
+                .buffer()
+                .path()
+                .map(|path| files::abbreviate(&path));
             self.session
                 .as_mut()
                 .unwrap()
@@ -71,10 +82,16 @@ impl AppShell {
                     .background_executor()
                     .spawn(async move {
                         let listing = files::path_candidates(&input, &directory, &worker_cancelled);
-                        let items = completion::filter(
+                        let mut items = completion::filter_unranked(
                             listing.candidates,
                             &listing.query,
                             &worker_cancelled,
+                        );
+                        files::rank_candidates(
+                            &mut items,
+                            &history,
+                            &listing.typed_directory,
+                            current.as_deref(),
                         );
                         (items, listing.directory_input, listing.raw_directory)
                     })
@@ -96,6 +113,7 @@ impl AppShell {
                         let input = shell.session_input(cx).unwrap_or_default();
                         let mut list = CandidateList::ready(items, &input, None, directory_input);
                         list.raw_directory = raw_directory;
+                        list.annotation = AnnotationPlacement::MarginaliaLeft;
                         shell.session.as_mut().unwrap().candidates = Some(list);
                         let mount = shell.minibuffer.as_mut().unwrap();
                         let action = mount.pending_candidate_action.take();

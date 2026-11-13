@@ -6,7 +6,7 @@ use std::sync::Arc;
 use gpui_kit as gpui;
 use gpui_kit::{App, Entity, Keystroke, TestAppContext, VisualTestContext, Window};
 use semacs::app::AppShell;
-use semacs::completion::CandidateList;
+use semacs::completion::{AnnotationPlacement, CandidateList};
 use semacs::text::ByteOffset;
 use support::*;
 
@@ -77,10 +77,10 @@ fn retained_file_candidates_are_not_used_by_pending_actions_or_empty_results(
 ) {
     let dir = TempDir::new("candidate-refresh-actions");
     let source = dir.path().join("source.txt");
-    let beta = dir.path().join("beta.txt");
+    let bo = dir.path().join("bo.txt");
     fs::write(&source, b"source").unwrap();
     fs::write(dir.path().join("alpha.txt"), b"alpha").unwrap();
-    fs::write(&beta, b"beta").unwrap();
+    fs::write(&bo, b"bo").unwrap();
     let (mut visual, shell, body) = open(buffer_at(&source, "source"), cx);
     for action in ["tab", "enter", "alt-enter"] {
         visual.simulate_keystrokes("ctrl-x ctrl-f");
@@ -102,13 +102,13 @@ fn retained_file_candidates_are_not_used_by_pending_actions_or_empty_results(
         });
         redraw(&mut visual);
         if action == "tab" {
-            assert_eq!(contents(&mut visual, &shell), "beta.txt");
+            assert_eq!(contents(&mut visual, &shell), "bo.txt");
             visual.simulate_keystrokes("ctrl-g");
         } else {
             visual.read(|cx| {
                 assert!(shell.read(cx).session().is_none());
                 let path = if action == "enter" {
-                    beta.clone()
+                    bo.clone()
                 } else {
                     dir.path().join("b")
                 };
@@ -144,6 +144,164 @@ fn retained_file_candidates_are_not_used_by_pending_actions_or_empty_results(
     assert!(list.items.is_empty());
     assert_eq!(contents(&mut visual, &shell), "z");
     visual.simulate_keystrokes("ctrl-g");
+}
+
+fn candidate_advance(visual: &mut VisualTestContext) -> gpui_kit::Pixels {
+    visual.update(|window, cx| {
+        let fonts = cx.global::<semacs::appearance::FontSettings>();
+        let font_id = window.text_system().resolve_font(&fonts.font());
+        window
+            .text_system()
+            .ch_advance(font_id, fonts.size())
+            .unwrap()
+    })
+}
+
+#[gpui::test]
+fn file_candidates_start_the_annotation_at_the_marginalia_column(cx: &mut TestAppContext) {
+    let dir = TempDir::new("candidate-annotation-column");
+    let source = dir.path().join("source.txt");
+    fs::write(&source, b"source").unwrap();
+    fs::write(dir.path().join("a.txt"), b"a").unwrap();
+    // Exactly twenty cells stays in the twenty cell step; the "+ 1" of an align
+    // marker would widen it to thirty.
+    fs::write(dir.path().join("01234567890123456789"), b"b").unwrap();
+    let (mut visual, _shell, _) = open(buffer_at(&source, "source"), cx);
+    let advance = candidate_advance(&mut visual);
+    visual.simulate_keystrokes("ctrl-x ctrl-f");
+    clear_input(&mut visual);
+    redraw(&mut visual);
+    let row = visual.debug_bounds("candidate-row-0").unwrap();
+    let label = visual.debug_bounds("candidate-label-0").unwrap();
+    let annotation = visual.debug_bounds("candidate-annotation-0").unwrap();
+    assert_eq!(label.left() - row.left(), gpui_kit::px(12.));
+    assert_eq!(label.size.width, advance * 20.);
+    assert_eq!(annotation.left(), label.right());
+    visual.simulate_keystrokes("ctrl-g");
+
+    // Other candidate kinds keep the annotation at the right edge.
+    visual.simulate_keystrokes("alt-x");
+    redraw(&mut visual);
+    let label = visual.debug_bounds("candidate-label-0").unwrap();
+    let annotation = visual.debug_bounds("candidate-annotation-0").unwrap();
+    assert_eq!(annotation.left() - label.right(), gpui_kit::px(12.));
+    visual.simulate_keystrokes("ctrl-g");
+}
+
+#[gpui::test]
+fn the_annotation_column_only_measures_the_visible_page(cx: &mut TestAppContext) {
+    let dir = TempDir::new("candidate-annotation-page");
+    let source = dir.path().join("source.txt");
+    fs::write(&source, b"source").unwrap();
+    for index in 0..20 {
+        fs::write(dir.path().join(format!("f{index:02}.txt")), b"x").unwrap();
+    }
+    fs::write(
+        dir.path()
+            .join("a-name-that-is-much-too-long-to-be-visible"),
+        b"x",
+    )
+    .unwrap();
+    let (mut visual, _shell, _) = open(buffer_at(&source, "source"), cx);
+    let advance = candidate_advance(&mut visual);
+    visual.simulate_keystrokes("ctrl-x ctrl-f");
+    clear_input(&mut visual);
+    redraw(&mut visual);
+    let label = visual.debug_bounds("candidate-label-0").unwrap();
+    assert_eq!(label.size.width, advance * 20.);
+    visual.simulate_keystrokes("ctrl-g");
+}
+
+#[gpui::test]
+fn accepted_file_inputs_rank_by_history_and_annotate_at_a_column(cx: &mut TestAppContext) {
+    let dir = TempDir::new("candidate-file-history");
+    let source = dir.path().join("source.txt");
+    fs::write(&source, b"source").unwrap();
+    for name in ["alpha.txt", "alpine.txt", "beta.txt", "zeta.txt"] {
+        fs::write(dir.path().join(name), b"x").unwrap();
+    }
+    let (mut visual, shell, _) = open(buffer_at(&source, "source"), cx);
+    visual.simulate_keystrokes("ctrl-x ctrl-f");
+    clear_input(&mut visual);
+    redraw(&mut visual);
+    // Without history, length then name puts `beta.txt` before `zeta.txt`.
+    assert_eq!(
+        candidates(&visual, &shell).items[0].candidate.value,
+        "beta.txt"
+    );
+
+    visual.simulate_input("zeta");
+    redraw(&mut visual);
+    visual.simulate_keystrokes("enter");
+    redraw(&mut visual);
+    visual.read(|cx| {
+        assert!(shell.read(cx).session().is_none());
+        assert_eq!(
+            shell
+                .read(cx)
+                .active_view()
+                .read(cx)
+                .buffer()
+                .display_name(),
+            "zeta.txt"
+        );
+    });
+
+    visual.simulate_keystrokes("ctrl-x ctrl-f");
+    clear_input(&mut visual);
+    redraw(&mut visual);
+    let list = candidates(&visual, &shell);
+    assert_eq!(list.items[0].candidate.value, "zeta.txt");
+    assert_eq!(list.annotation, AnnotationPlacement::MarginaliaLeft);
+    assert!(list.items[0].candidate.annotation.starts_with('-'));
+    visual.simulate_keystrokes("ctrl-g");
+}
+
+#[gpui::test]
+fn only_accepted_file_answers_enter_the_file_history(cx: &mut TestAppContext) {
+    let dir = TempDir::new("candidate-file-history-record");
+    let source = dir.path().join("source.txt");
+    fs::write(&source, b"source").unwrap();
+    fs::create_dir(dir.path().join("sub")).unwrap();
+    fs::write(dir.path().join("beta.txt"), b"beta").unwrap();
+    let (mut visual, shell, _) = open(buffer_at(&source, "source"), cx);
+    let history = |visual: &VisualTestContext| {
+        visual.read(|cx| {
+            cx.global::<semacs::file_history::FileHistory>()
+                .entries()
+                .to_vec()
+        })
+    };
+
+    // A directory answer keeps the session open instead of accepting a file.
+    visual.simulate_keystrokes("ctrl-x ctrl-f");
+    clear_input(&mut visual);
+    visual.simulate_input("sub");
+    redraw(&mut visual);
+    visual.simulate_keystrokes("enter");
+    redraw(&mut visual);
+    visual.read(|cx| assert!(shell.read(cx).session().is_some()));
+    assert!(history(&visual).is_empty());
+    visual.simulate_keystrokes("ctrl-g");
+    redraw(&mut visual);
+    assert!(history(&visual).is_empty(), "cancelling records nothing");
+
+    visual.simulate_keystrokes("ctrl-x ctrl-f");
+    clear_input(&mut visual);
+    visual.simulate_input("beta");
+    redraw(&mut visual);
+    visual.simulate_keystrokes("enter");
+    redraw(&mut visual);
+    assert_eq!(history(&visual), ["beta.txt"]);
+
+    visual.simulate_keystrokes("ctrl-x ctrl-w");
+    clear_input(&mut visual);
+    visual.simulate_input("out.txt");
+    redraw(&mut visual);
+    visual.simulate_keystrokes("enter");
+    redraw(&mut visual);
+    assert_eq!(history(&visual), ["out.txt", "beta.txt"]);
+    assert!(dir.path().join("out.txt").is_file());
 }
 
 #[gpui::test]
@@ -214,11 +372,9 @@ fn directory_ret_enters_and_complete_directory_preselects_input_without_opening_
     redraw(&mut visual);
     let list = candidates(&visual, &shell);
     assert!(list.selected.is_none());
-    assert!(
-        list.items
-            .iter()
-            .any(|item| item.candidate.value == "sub/" && item.candidate.annotation == "directory")
-    );
+    assert!(list.items.iter().any(|item| item.candidate.value == "sub/"
+        && item.candidate.directory
+        && item.candidate.annotation.starts_with('d')));
     visual.simulate_input("su");
     visual.simulate_keystrokes("enter");
     redraw(&mut visual);

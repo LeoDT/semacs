@@ -53,6 +53,17 @@ pub(crate) enum CandidateResolution {
     NoMatch,
 }
 
+/// Where a candidate row shows its annotation.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum AnnotationPlacement {
+    /// The label takes the remaining width; the annotation sits at the right.
+    #[default]
+    Right,
+    /// The annotation starts at a fixed character column, like Marginalia's
+    /// `left` alignment.
+    MarginaliaLeft,
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct CandidateList {
     pub items: Arc<Vec<MatchedCandidate>>,
@@ -60,6 +71,7 @@ pub struct CandidateList {
     pub loading: bool,
     pub directory_input: bool,
     pub raw_directory: bool,
+    pub annotation: AnnotationPlacement,
 }
 
 impl CandidateList {
@@ -92,6 +104,7 @@ impl CandidateList {
             loading: false,
             directory_input,
             raw_directory: directory_input,
+            annotation: AnnotationPlacement::default(),
         }
     }
 
@@ -163,6 +176,76 @@ pub fn filter(
     query: &str,
     cancelled: &AtomicBool,
 ) -> Vec<MatchedCandidate> {
+    let mut scored = matched(candidates, query, cancelled);
+    scored.sort_by(|a, b| {
+        (
+            Reverse(a.exact),
+            Reverse(a.score),
+            &a.item.candidate.label,
+            &a.item.candidate.value,
+        )
+            .cmp(&(
+                Reverse(b.exact),
+                Reverse(b.score),
+                &b.item.candidate.label,
+                &b.item.candidate.value,
+            ))
+    });
+    scored.into_iter().map(|scored| scored.item).collect()
+}
+
+/// Rank of each key in a Vertico-style history list, following
+/// `vertico-sort--history`: the newest entry outranks everything else and
+/// repeats shift earlier with an exponential decay. `key` returns the history
+/// key for an entry, or `None` to ignore that entry.
+pub(crate) fn history_ranks<'a>(
+    entries: &'a [String],
+    key: impl Fn(&'a str) -> Option<&'a str>,
+) -> std::collections::HashMap<&'a str, i64> {
+    const DUPLICATE: f64 = 10.0;
+    const DECAY: f64 = 10.0;
+    let mut ranks = std::collections::HashMap::new();
+    for (index, entry) in entries.iter().enumerate() {
+        let Some(key) = key(entry.as_str()) else {
+            continue;
+        };
+        match ranks.entry(key) {
+            std::collections::hash_map::Entry::Vacant(rank) => {
+                rank.insert(if index == 0 {
+                    i64::MIN / 2
+                } else {
+                    index as i64
+                });
+            }
+            std::collections::hash_map::Entry::Occupied(mut rank) => {
+                *rank.get_mut() -= (DUPLICATE * (-(index as f64) / (DUPLICATE * DECAY)).exp())
+                    .round_ties_even() as i64;
+            }
+        }
+    }
+    ranks
+}
+
+/// Matching only: candidates keep their enumeration order for callers that rank
+/// them with a different rule.
+pub fn filter_unranked(
+    candidates: Vec<Candidate>,
+    query: &str,
+    cancelled: &AtomicBool,
+) -> Vec<MatchedCandidate> {
+    matched(candidates, query, cancelled)
+        .into_iter()
+        .map(|scored| scored.item)
+        .collect()
+}
+
+struct Scored {
+    exact: bool,
+    score: u16,
+    item: MatchedCandidate,
+}
+
+fn matched(candidates: Vec<Candidate>, query: &str, cancelled: &AtomicBool) -> Vec<Scored> {
     let atom = Atom::new(
         query,
         CaseMatching::Smart,
@@ -193,30 +276,16 @@ pub fn filter(
             .filter(|(index, _)| indices.binary_search(&(*index as u32)).is_ok())
             .map(|(_, (start, text))| start..start + text.len())
             .collect();
-        matches.push((
-            candidate.label == query,
+        matches.push(Scored {
+            exact: candidate.label == query,
             score,
-            MatchedCandidate {
+            item: MatchedCandidate {
                 candidate,
                 highlights,
             },
-        ));
+        });
     }
-    matches.sort_by(|a, b| {
-        (
-            Reverse(a.0),
-            Reverse(a.1),
-            &a.2.candidate.label,
-            &a.2.candidate.value,
-        )
-            .cmp(&(
-                Reverse(b.0),
-                Reverse(b.1),
-                &b.2.candidate.label,
-                &b.2.candidate.value,
-            ))
-    });
-    matches.into_iter().map(|(_, _, item)| item).collect()
+    matches
 }
 
 #[cfg(test)]

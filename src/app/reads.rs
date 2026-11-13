@@ -138,6 +138,8 @@ impl AppShell {
             return;
         }
         if let Some(target) = self.end_session(id, window, cx) {
+            cx.global_mut::<crate::file_history::FileHistory>()
+                .record(&input);
             self.visit_file(path, &target, window, cx);
         }
     }
@@ -420,6 +422,8 @@ impl AppShell {
             }
         };
         if let Some(target) = self.end_session(id, window, cx) {
+            cx.global_mut::<crate::file_history::FileHistory>()
+                .record(&input);
             self.write_file(&target, path, window, cx);
         }
     }

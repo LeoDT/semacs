@@ -28,17 +28,26 @@ fn main() -> ExitCode {
         }
     };
 
-    let (history, _history_persistence) = semacs::command_history::state_path()
-        .and_then(semacs::command_history::Persistence::open)
+    let (history, _history_persistence) = semacs::persisted::state_path("command-history")
+        .and_then(semacs::command_history::open)
         .map(|(history, persistence)| (history, Some(persistence)))
         .unwrap_or_else(|error| {
             eprintln!("semacs: command history unavailable: {error}");
             (semacs::command_history::CommandHistory::default(), None)
         });
+    let (file_history, _file_history_persistence) =
+        semacs::persisted::state_path("file-name-history")
+            .and_then(semacs::file_history::open)
+            .map(|(history, persistence)| (history, Some(persistence)))
+            .unwrap_or_else(|error| {
+                eprintln!("semacs: file-name history unavailable: {error}");
+                (semacs::file_history::FileHistory::default(), None)
+            });
     let title = format!("{} - semacs", buffer.display_name());
     gpui_kit::application().run(move |cx| {
         semacs::app::init(cx);
         cx.set_global(history);
+        cx.set_global(file_history);
         let options = WindowOptions {
             titlebar: Some(TitlebarOptions {
                 title: Some(title.into()),

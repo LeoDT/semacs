@@ -20,12 +20,18 @@
   `extensions/vertico-directory.el` were read as behavior references for candidate
   insertion, acceptance, raw input and directory navigation. No Emacs Lisp
   implementation was copied or translated.
-- Command-history ranking in `src/command_history.rs` adapts the history rank
+- Command-history and file-name history ranking in `src/completion.rs`,
+  `src/command_history.rs` and `src/files.rs` adapts the history rank
   calculation from Vertico `vertico-sort.el`, package snapshot
   `20260830.123`, Copyright 2021–2026 Free Software Foundation, Inc., authored
   by Daniel Mendler, under GPL-3.0-or-later. The Rust implementation keeps its
   own bounded history and persistence; no Emacs Lisp runtime or package is
   bundled. Retain this attribution and `LICENSE-GPL` when distributing it.
+- Marginalia `20260821.1231` (`marginalia.el` file annotator and its field
+  helpers, GPL-3.0-or-later, authored by Daniel Mendler and Omar Antolín
+  Camarena) was read for the find-file annotation fields and column rule;
+  semacs reimplements the formatting in `src/file_annotation.rs` and reads
+  metadata through the standard library. No Emacs Lisp is bundled or loaded.
 - `nucleo-matcher` 0.3.1 is a registry dependency under MPL-2.0. Its manifest and
   license were reviewed; no source is vendored or patched. Include its license
   and covered-source availability in the dependency audit before distributing
@@ -88,7 +94,12 @@
   scrolling, point adjustment and temporary region
   behavior. semacs uses its own GPUI input adapter and visible-row index;
   source references and platform differences are in
-  `docs/work/pre-tree-enhancements.md` and `docs/emacs-fidelity.md`.
+  `docs/emacs-fidelity.md`.
+- Emacs 31.1 `subr.el` (`add-to-history`, `history-length` default),
+  `files.el` (`file-size-human-readable`) and C-locale `format-time-string`
+  were read for find-file candidate history and annotation fields; semacs
+  reimplements those rules in Rust. The Marginalia / Vertico references for the
+  same feature are listed under the completion section above.
 - semacs implements its own pane-local display history, restoration and
   commit-message recovery model. No Emacs Lisp implementation was copied or
   translated, and these packages are not runtime dependencies.

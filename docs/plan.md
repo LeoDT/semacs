@@ -10,28 +10,28 @@ R0–F5、日常编辑增强及 F5 后插入项均已完成，交付摘要见 [R
 
 用户已确认方向调整：从继续复刻 Emacs / Magit 基础功能，转为“使用 Emacs 操作逻辑的代码查看工具”。基础编辑保留；后续编辑能力以自动 / 智能缩进为主；主要精力放在 diff、文件夹 tree viewer，并加入基础 project 功能。已交付的 Git 写入不回退，但不自动扩展为完整 Magit / Git 客户端。长期边界见 [D29](decisions.md#d29-代码查看优先)。
 
-## 先于 tree viewer 的小增强（已确认，待细化）
+## tree viewer 之前的小增强（已交付）
 
-用户已确认以下小增强要在 tree viewer 之前完成；具体行为、默认键与验收在实施前确定。静态参照、现状与待决项见 [tree viewer 前的小增强参照](work/pre-tree-enhancements.md)。
+用户此前确认的三项小增强均已完成，行为分别见[F2 motion 差异](emacs-fidelity.md#已登记的-f2-motion-差异)、[独立 diff 查看](emacs-fidelity.md#独立-diff-查看)、[鼠标滚轮](emacs-fidelity.md#鼠标滚轮)与[候选式读入](emacs-fidelity.md#候选式读入阶段-b)；上游静态参照的版本保留在对应契约条目内。
 
-1. **point 离开视口时的滚动**（已交付）：point 行不再完整可见时按 Emacs redisplay 默认居中，`M->` 按 `end-of-buffer` 的 `(recenter -3)` 定位；diff / Magit `n` / `p` 跳到放不下的 hunk 时把 hunk heading 置顶（`magit-hunk-set-window-start`）。
-2. **鼠标滚轮与 point**（已交付）：按 Emacs `mwheel-scroll` / `scroll-up` / `scroll-down` 实现窗口滚动、point 边界行首调整及选区处理，支持普通垂直与 Shift 水平滚动，横向偏移非零时临时截断、归零恢复原换行规则；GPUI 量、整行累计和收件时间加速适配已确认。行为与平台差异见[保真度](emacs-fidelity.md#鼠标滚轮)；以源码与自动测试为主，不要求人工数格或逐像素一致。
-3. **find-file 候选排序与信息**：按用户 Emacs 的 Vertico + Marginalia 实际行为——新增持久化 file-name history，排序为历史 → 长度 → 字母序，fuzzy 只做过滤；注解照抄 Marginalia；mtime 不参与排序，不补 `./` / `../`。
+1. point 离开视口时按 Emacs redisplay 居中，`M->` 按 `end-of-buffer` 的 `(recenter -3)` 定位，Magit `n` / `p` 跳到放不下的 hunk 时把 hunk heading 置顶。
+2. 鼠标滚轮按 `mwheel-scroll` / `scroll-up` / `scroll-down` 调整窗口与 point，含 Shift 水平滚动、临时截断与归零恢复；GPUI 量、整行累计和收件时间加速适配已确认。
+3. find-file 候选按 Vertico 的 history → length → alpha 排序（fuzzy 只做过滤），注解照 Marginalia `left` 格式，新增持久化 file-name history；mtime 不参与排序，不补 `./` / `../`。
 
-`kill-current-buffer`（`C-x C-k`，含 minibuffer 内退出会话）、Magit `S-TAB` 全局 section 可见性、point 离开视口的滚动、hunk heading 置顶及鼠标滚轮与 point 已交付，契约见[保真度](emacs-fidelity.md#已登记的-f2-motion-差异)、[独立 diff 查看](emacs-fidelity.md#独立-diff-查看)与[鼠标滚轮](emacs-fidelity.md#鼠标滚轮)。下一项是 find-file 候选排序与信息；它仍是 tree viewer 的前置项，不改变已交付 F1–F5 的契约；实施时再更新对应的[保真度契约](emacs-fidelity.md)与验收入口。
+`kill-current-buffer`（`C-x C-k`，含 minibuffer 内退出会话）与 Magit `S-TAB` 全局 section 可见性也已交付。这些改动不改变已交付 F1–F5 的契约。
 
 ## 下一步方向（方向已确认，首版待细化）
 
 用户已确认：tree viewer 使用文本 UI 和 Emacs 操作逻辑，参考 treemacs；project 先做基础能力；diff 以查看为主，补 range / revision；indent 只记录、不排期。以下具体首版建议仍需确认，不是已批准实施阶段；交互细节与验收边界确认后才进入实施。
 
-### 1. 文件夹 tree viewer（小增强之后的主要方向）
+### 1. 文件夹 tree viewer（下一步主要方向）
 
 - 形态（已确认）：独立文本 buffer + 专用左侧 side window；side window 独立于普通 split，不新建 GUI 树控件。建议固定宽度、`C-x 1` 不关闭、`q` bury、显式 toggle；具体交互待细化。复用现有 section 树、可视行、多 view、mode 局部键位与临时 window 语义；直接复用 section 还是建立专用 filetree 模型，在细化时确认。
 - 建议首版：单项目根、目录 / 文件树、懒加载、展开折叠、键盘导航、打开文件、刷新、dotfiles 开关、当前文件定位。
 - 建议首版不做：文件增删改 / 移动、workspaces、图标、tags / imenu、filewatch、peek、完整 git 注解、持久化、远程 / Tramp。
 - side window 细节（宽度、位置、`C-x 1` / `C-x 0` / `C-x o`、toggle 命令与焦点返回）按 treemacs 参照在实施前确定，不现在锁定。
 - 待定：键位是否照搬 treemacs（`n` / `p`、`M-n` / `M-p` 在 tree mode 内生效；需确认默认值与用户配置边界）、根来源、dotfiles / gitignore 策略、follow / 当前文件高亮是否进入首版。
-- 依赖：项目根识别可作为 tree viewer 的前置；项目切换与项目内文件查找可在 tree 之后。
+- 依赖：项目根识别可作为 tree viewer 的前置；项目切换与项目内文件查找可在 tree 之后。tree viewer 之前的小增强已交付。
 - 上游参照见 [treemacs 参照](work/treemacs-reference.md)；其中建议不是契约。
 
 ### 2. 基础 project

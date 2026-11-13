@@ -62,6 +62,7 @@ pub fn init(cx: &mut App) {
     gpui_kit::init(cx);
     crate::theme::ThemeSettings::default().install(cx);
     cx.default_global::<crate::command_history::CommandHistory>();
+    cx.default_global::<crate::file_history::FileHistory>();
 }
 
 struct MinibufferMount {

@@ -95,6 +95,8 @@ fn main() {
         key(&mut visual, "ctrl-g");
         key(&mut visual, "ctrl-x");
         key(&mut visual, "ctrl-f");
+        key(&mut visual, "ctrl-a");
+        key(&mut visual, "ctrl-k");
         visual.simulate_input(&format!("{}/entry", directory.display()));
         settle(&mut visual, &shell);
         measure(&mut visual, &shell, "file-filter", run, "-");

@@ -12,6 +12,8 @@ pub mod diff;
 pub mod display;
 pub mod editing;
 mod exit;
+pub mod file_annotation;
+pub mod file_history;
 pub mod files;
 pub mod frame;
 mod git;
@@ -22,6 +24,7 @@ mod messages;
 pub mod minibuffer;
 pub mod mode;
 pub(crate) mod panes;
+pub mod persisted;
 mod platform;
 #[cfg(feature = "native-profiler")]
 pub mod preparation_trace;
