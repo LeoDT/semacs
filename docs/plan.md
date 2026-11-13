@@ -20,19 +20,19 @@ R0–F5、日常编辑增强及 F5 后插入项均已完成，交付摘要见 [R
 
 `kill-current-buffer`（`C-x C-k`，含 minibuffer 内退出会话）与 Magit `S-TAB` 全局 section 可见性也已交付。这些改动不改变已交付 F1–F5 的契约。
 
-## 下一步方向（方向已确认，首版待细化）
+## 下一步方向（方向已确认，上游行为已实测，首版待确认）
 
-用户已确认：tree viewer 使用文本 UI 和 Emacs 操作逻辑，参考 treemacs；project 先做基础能力；diff 以查看为主，补 range / revision；indent 只记录、不排期。以下具体首版建议仍需确认，不是已批准实施阶段；交互细节与验收边界确认后才进入实施。
+用户已确认：tree viewer 使用文本 UI 和 Emacs 操作逻辑，参考 treemacs；project 先做基础能力；diff 以查看为主，补 range / revision；indent 只记录、不排期。
+
+上游行为已在固定 Emacs 31.1 + treemacs `20251226.1307` 下实测完毕（batch ERT 31 项、真实 command loop、键位导出），结果见 [F6 观察记录](../tests/emacs/RESULTS.md#f6treemacs-文件夹树参照)，入口见 [对照入口](../tests/emacs/README.md#f6treemacs-文件夹树参照)，静读阶段结论已按运行结果更新于 [treemacs 参照](work/treemacs-reference.md)。实测纠正了几处影响范围的静读假设：`C-x 1` 的保护只来自 `no-delete-other-windows` 且树里执行会报错、`delete-window` 仍可关闭、follow / filewatch / 注解在加载时就默认开启、单链目录默认合并。
 
 ### 1. 文件夹 tree viewer（下一步主要方向）
 
-- 形态（已确认）：独立文本 buffer + 专用左侧 side window；side window 独立于普通 split，不新建 GUI 树控件。建议固定宽度、`C-x 1` 不关闭、`q` bury、显式 toggle；具体交互待细化。复用现有 section 树、可视行、多 view、mode 局部键位与临时 window 语义；直接复用 section 还是建立专用 filetree 模型，在细化时确认。
+- 形态（已确认）：独立文本 buffer + 专用左侧 side window；side window 独立于普通 split，不新建 GUI 树控件。宽度、位置、toggle 三态、`q` bury、`C-x 1` / `C-x 0` / `C-x o` 的上游行为已实测，是否照搬待确认。复用现有 section 树、可视行、多 view、mode 局部键位与临时 window 语义；直接复用 section 还是建立专用 filetree 模型，在细化时确认。
 - 建议首版：单项目根、目录 / 文件树、懒加载、展开折叠、键盘导航、打开文件、刷新、dotfiles 开关、当前文件定位。
-- 建议首版不做：文件增删改 / 移动、workspaces、图标、tags / imenu、filewatch、peek、完整 git 注解、持久化、远程 / Tramp。
-- side window 细节（宽度、位置、`C-x 1` / `C-x 0` / `C-x o`、toggle 命令与焦点返回）按 treemacs 参照在实施前确定，不现在锁定。
-- 待定：键位是否照搬 treemacs（`n` / `p`、`M-n` / `M-p` 在 tree mode 内生效；需确认默认值与用户配置边界）、根来源、dotfiles / gitignore 策略、follow / 当前文件高亮是否进入首版。
+- 建议首版不做：文件增删改 / 移动、workspaces、图标、tags / imenu、filewatch、peek、完整 git 注解、持久化、远程 / Tramp。上游默认开启 follow / filewatch / git 注解，首版不做其中任一项时按已确认差异登记，不能写成“与上游一致”。
+- 待确认（上游已有答案，属于产品取舍，见参照文档“待确认问题”）：侧窗保护语义、`n` / `p` / `M-n` / `M-p` 键位与 `C-n` / `C-p` 边界、根来源（project.el 优先 + 当前目录兜底 vs 只认 `.git`）、dotfiles / gitignored 默认显示、follow 与当前文件高亮是否进首版、打开目标与前缀参数是否照搬。
 - 依赖：项目根识别可作为 tree viewer 的前置；项目切换与项目内文件查找可在 tree 之后。tree viewer 之前的小增强已交付。
-- 上游参照见 [treemacs 参照](work/treemacs-reference.md)；其中建议不是契约。
 
 ### 2. 基础 project
 

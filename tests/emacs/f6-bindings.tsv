@@ -1,0 +1,95 @@
+# emacs-version: 31.1
+# treemacs-version: v3.2 (installed 2026.08.31) @ Emacs 31.1
+# driving: emacs -Q --batch, treemacs-mode-map walk (not a command loop)
+#
+!	treemacs-run-shell-command-for-current-node
+<	treemacs-decrease-width
+<C-i>	treemacs-TAB-action
+<backtab>	treemacs-collapse-all-projects
+<double-mouse-1>	treemacs-doubleclick-action
+<down-mouse-1>	treemacs-leftclick-action
+<drag-mouse-1>	treemacs-dragleftclick-action
+<mouse-3>	treemacs-rightclick-menu
+<next>	treemacs-next-page-other-window
+<prior>	treemacs-previous-page-other-window
+<return>	treemacs-RET-action
+<tab>	treemacs-TAB-action
+=	treemacs-fit-window-width
+>	treemacs-increase-width
+?	treemacs-common-helpful-hydra
+C	treemacs-cleanup-litter
+C-?	treemacs-advanced-helpful-hydra
+C-c C-p a	treemacs-add-project-to-workspace
+C-c C-p c a	treemacs-collapse-all-projects
+C-c C-p c c	treemacs-collapse-project
+C-c C-p c o	treemacs-collapse-other-projects
+C-c C-p d	treemacs-remove-project-from-workspace
+C-c C-p r	treemacs-rename-project
+C-c C-w a	treemacs-create-workspace
+C-c C-w d	treemacs-remove-workspace
+C-c C-w e	treemacs-edit-workspaces
+C-c C-w f	treemacs-set-fallback-workspace
+C-c C-w n	treemacs-next-workspace
+C-c C-w r	treemacs-rename-workspace
+C-c C-w s	treemacs-switch-workspace
+C-j	treemacs-next-project
+C-k	treemacs-previous-project
+H	treemacs-collapse-parent-node
+M-!	treemacs-run-shell-command-in-project-root
+M-<down>	treemacs-move-project-down
+M-<up>	treemacs-move-project-up
+M-H	treemacs-root-up
+M-L	treemacs-root-down
+M-N	treemacs-next-line-other-window
+M-P	treemacs-previous-line-other-window
+M-h	treemacs-COLLAPSE-action
+M-l	treemacs-RET-action
+M-m	treemacs-bulk-file-actions
+M-n	treemacs-next-neighbour
+M-p	treemacs-previous-neighbour
+P	treemacs-peek-mode
+Q	treemacs-kill-buffer
+R	treemacs-rename-file
+RET	treemacs-RET-action
+TAB	treemacs-TAB-action
+W	treemacs-extra-wide-toggle
+b	treemacs-add-bookmark
+c d	treemacs-create-dir
+c f	treemacs-create-file
+d	treemacs-delete-file
+g	treemacs-refresh
+h	treemacs-COLLAPSE-action
+l	treemacs-RET-action
+m	treemacs-move-file
+n	treemacs-next-line
+o a a	treemacs-visit-node-ace
+o a h	treemacs-visit-node-ace-horizontal-split
+o a v	treemacs-visit-node-ace-vertical-split
+o c	treemacs-visit-node-close-treemacs
+o h	treemacs-visit-node-horizontal-split
+o o	treemacs-visit-node-no-split
+o r	treemacs-visit-node-in-most-recently-used-window
+o v	treemacs-visit-node-vertical-split
+o x	treemacs-visit-node-in-external-application
+p	treemacs-previous-line
+q	treemacs-quit
+r	treemacs-refresh
+s	treemacs-resort
+t a	treemacs-filewatch-mode
+t c	treemacs-indicate-top-scroll-mode
+t d	treemacs-git-commit-diff-mode
+t f	treemacs-follow-mode
+t g	treemacs-git-mode
+t h	treemacs-toggle-show-dotfiles
+t i	treemacs-hide-gitignored-files-mode
+t n	treemacs-indent-guide-mode
+t v	treemacs-fringe-indicator-mode
+t w	treemacs-toggle-fixed-width
+u	treemacs-goto-parent-node
+w	treemacs-set-width
+y a	treemacs-copy-absolute-path-at-point
+y f	treemacs-copy-file
+y n	treemacs-copy-filename-at-point
+y p	treemacs-copy-project-path-at-point
+y r	treemacs-copy-relative-path-at-point
+y v	treemacs-paste-dir-at-point-to-minibuffer

@@ -1,72 +1,81 @@
 # Treemacs 参照：文本树与文件浏览
 
-> 本文是方向确认后的上游参照调查，**不是 semacs 行为契约或实施规格**。首版范围、键位、布局与取舍仍待确认；当前计划见 [实施计划](../plan.md)。
+> 本文是方向确认后的上游参照调查，**不是 semacs 行为契约或实施规格**。首版范围、键位、布局与取舍仍待确认；当前计划见 [实施计划](../plan.md)，逐项运行结果与证据边界见 [F6 观察记录](../../tests/emacs/RESULTS.md#f6treemacs-文件夹树参照)。
 
 ## 来源与证据边界
 
 - 本地安装：`/home/leodt/.emacs.d/elpa/treemacs-20251226.1307`，包版本 `20251226.1307`，上游 commit `2ab5a3c89fa01bbbd99de9b8986908b2bc5a7b49`（`https://github.com/Alexander-Miller/treemacs`）。
-- 用户日常配置仅作参考，不是验收环境：`treemacs-indentation` 为 1、`treemacs-move-files-by-mouse-dragging` 为 nil、`treemacs-filewatch-mode` 为 1、`treemacs-git-mode` 为 `simple`、`C-c t` 绑定 `treemacs-select-window`。
-- 静态阅读 `treemacs.el`、`treemacs-mode.el`、`treemacs-interface.el`、`treemacs-rendering.el`、`treemacs-customization.el`、`treemacs-follow-mode.el` 等源码；未运行 Treemacs、未做真实 command loop / GUI / IME 观察。源码结论不是运行观察，也不是 semacs 通过证据。
+- 用户日常配置仅作参考，不是参照环境：`treemacs-indentation` 为 1、`treemacs-move-files-by-mouse-dragging` 为 nil、`treemacs-filewatch-mode` 为 1、`treemacs-git-mode` 为 `simple`、`C-c t` 绑定 `treemacs-select-window`。
+- 参照环境为 `emacs -Q` + 上述固定 checkout：batch ERT（`tests/emacs/f6-treemacs.el`，31 项）+ 真实 command loop（`tests/emacs/f6-drive.py`，40x100 tty）+ 键位导出（`tests/emacs/f6-bindings.tsv`）。
+- 本文最初的结论来自源码静读；首次运行后凡与运行结果冲突处都已按运行结果改写，并标出静读错误。仍未运行的部分（GUI 呈现、鼠标、workspaces、peek、文件管理、远程）明确保留为未观察。
 
-## 上游行为（静态）
+## 上游行为（实测）
 
 ### 窗口与入口
 
-- 默认使用专用 side window，位于左侧，宽度 35；`treemacs-display-in-side-window` 为 t。side window 不会像普通 split 那样被 `delete-other-windows` 等操作轻易关闭。
-- `treemacs` 在可见 / 已存在 / 不存在之间切换：可见时关闭窗口，已存在时显示并选择，不存在时初始化；工作区为空时询问首个项目根。
-- `treemacs-select-window` 选择树窗口；已在树中时的行为由 `treemacs-select-when-already-in-treemacs` 决定（默认 `move-back`，即回到最近使用的窗口）。
-- `treemacs-find-file` 显示并聚焦当前文件；当前 buffer 没有文件时要求输入路径。`treemacs-quit` bury 树 buffer，`treemacs-kill-buffer` 真正 kill。
+- 专用 side window，默认左侧、`treemacs-width` 35（选项是正文宽度，tty 里窗口总宽 = 正文 + 1）。窗口参数：`window-side` = left、`window-slot` = 0（创建时 -1，由 `window-configuration-change-hook` 归一）、`no-delete-other-windows` = t；树 buffer 里 `window-size-fixed` = width。
+- 保护只针对 `delete-other-windows`：**在树里执行 `C-x 1` 会报错 `Cannot make side window the only window`**，树永远不能成为唯一窗口；而 `delete-window` / `C-x 0` 可以正常关掉它（静读文档说的“不易关闭”只对 `C-x 1` 成立）。
+- `C-x o` 可以在普通窗口与树之间来回切换，side window 不被跳过。
+- `treemacs` 三态：可见→隐藏（bury，buffer 存活）、已存在→显示并选中、不存在→创建（工作区为空时询问首个项目根）。
+- 消失后重新显示会重新设置 `no-delete-other-windows`（靠 `window-configuration-change-hook`，只有真实 redisplay 才生效）。
+- `q` = `treemacs-quit`（bury），`Q` = `treemacs-kill-buffer`（kill），`treemacs-select-window` 已在树中时按 `move-back` 回到上一个窗口。
+- `treemacs-find-file` 定位并展开当前文件的节点；树可见或隐藏都不抢焦点。当前 buffer 无文件时带前缀参数改为读入路径。
 
 ### 树与节点
 
-- 树是普通文本 buffer，节点由文本与 text property / button 构成；展开时插入子节点文本，折叠时删除可见子节点文本，节点身份与状态由独立 DOM 维护。不是 GUI 控件树。
-- 节点类型包括 root / project、目录、文件、tag；目录和文件分开排序。目录可递归展开，文件可展开 tag 列表（依赖 imenu 等扩展）。
-- 默认 `TAB` 对 root / 目录 / 文件执行 toggle；`RET` 对目录 toggle，对文件按 `treemacs-visit-node-default` 访问，对 tag 跳转。文件节点的 TAB 在无 tags 时通常没有可见效果。
-- 可选能力包括图标、git 状态注解、filewatch、follow-mode、peek-mode、workspaces、持久化、文件管理、远程 / Tramp。它们不是核心文本树的必要条件。
-- 目录读取、git 状态与折叠目录扁平化都可能异步执行；展开 / 刷新需要处理过期结果与不可读目录。
+- 普通文本 buffer + button / text property，不是 GUI 控件树；根行是项目目录名，目录行前缀折叠时 `+ `、展开时 `- `，文件行前缀一个空格，每层缩进 `treemacs-indentation`（默认 2 个空格）。
+- 目录在前、文件在后，各自按 ASCII 区分大小写排序（默认 alphabetic-asc）；`s` 弹出 12 项排序方法的 completing-read（不是循环），`C-u` / `C-u C-u` 只是临时重排当前目录 / 整个视图。
+- `treemacs-collapse-dirs` 默认 3（python3 可用时）：只含一个子目录且不含文件的链条合并成一行，到含文件的目录为止。
+- `TAB`：root / 目录开合，文件展开 tag 段（无 tag 时回显 `No tags found for …`）；`RET`：root / 目录开合，文件走默认访问动作，tag 跳转；`h` / `l` 是 COLLAPSE / RET 的别名。
+- 目录读取与刷新保留可匹配的折叠状态与 point；`g` / `r` 刷新、`s` 排序、`<` / `>` / `=` / `w` 调整宽度（`=` 会把最长可见行宽度写回选项）。
+- `n` / `p` = `treemacs-next-line` / `previous-line`（按 button 走行，受 wrap-around 影响）；`M-n` / `M-p` = `treemacs-next-neighbour` / `previous-neighbour`（同层）；**`C-n` / `C-p` 仍是 `next-line` / `previous-line`**。
+- 默认键位共 91 条（含 `o` / `t` / `y` / `C-c C-p` / `C-c C-w` 前缀），清单见 [f6-bindings.tsv](../../tests/emacs/f6-bindings.tsv)。
 
-### 默认键位（与首版相关的子集）
+### 默认显示策略
 
-| 键 | 参照命令 / 行为 |
-|---|---|
-| `TAB` / `C-i` | `treemacs-TAB-action`：展开 / 折叠当前节点 |
-| `RET` | `treemacs-RET-action`：目录 toggle，文件访问 |
-| `n` / `p` | 下一个 / 上一个可见树行 |
-| `M-n` / `M-p` | 下一个 / 上一个同层节点 |
-| `u` | 到父节点 |
-| `q` / `Q` | bury / kill 树 buffer |
-| `r` / `g` | 刷新 |
-| `t h` | 切换 dotfiles |
-| `t i` | 切换隐藏 gitignored 文件 |
-| `w` / `<` / `>` | 设置 / 减小 / 增大宽度 |
-| `o` 前缀 | 在垂直 / 水平 split、其他窗口或外部程序访问节点 |
-| `P` | peek-mode：临时预览 |
-| `cf` / `cd` / `R` / `d` / `m` | 创建文件 / 目录、重命名、删除、移动 |
-| `y` 前缀 | 复制绝对 / 相对 / 项目路径、文件名或文件 |
-| `C-c C-p` / `C-c C-w` | 项目 / workspace 操作前缀 |
-| `C-j` / `C-k` | 下一个 / 上一个项目 |
+- dotfiles **默认显示**（`treemacs-show-hidden-files` = t），`t h` 切换；`.git` / `.jj` 目录始终隐藏。
+- gitignored 文件**默认显示**，`t i`（`treemacs-hide-gitignored-files-mode`，默认关闭）在某种 `treemacs-git-mode` 下才会隐藏它们。
+- 加载时自动开启：`treemacs-follow-mode`、`treemacs-filewatch-mode`、`treemacs-fringe-indicator-mode`；有 git + python3 时 `treemacs-git-mode` = `deferred`。静读文档把这些当成纯可选能力，实际是默认开启。
+- follow 生效方式：在树旁边打开文件后，空闲 `treemacs-file-follow-delay`（0.2 s）内树展开对应目录并把 point 移到该文件，焦点不动。
 
-### 生命周期与状态
+### 项目根
 
-- 折叠状态、节点身份与项目 / workspace 状态属于树 buffer / 会话；刷新尽量保留已有折叠与位置。
-- filewatch 与 follow-mode 是可选模式；follow-mode 随当前 buffer 定位并展开树节点，不要求所有用户开启。
-- git 状态注解依赖异步 Git 读数；不可读目录、仓库变化、迟到结果都有失败或回退路径。
+- `treemacs--find-user-project-functions` = (builtin, 当前目录)：先 projectile（若安装）/ project.el，取到就用；否则**回退为当前 buffer 自己的目录**，不向上搜索标记文件。
+- `.git` 目录和 `.git` 文件（worktree）都能被识别为仓库根；无 VCS 时根就是打开文件所在目录。因此“手动目录”不是额外入口，而是兜底行为。
+
+### 访问目标
+
+- 默认动作 `treemacs-default-visit-action` = `treemacs-visit-node-no-split`：在树旁边的窗口打开（已打开则复用），选中它，树保留且不新增 split。
+- `C-u RET` 打开后焦点回到树；`C-u C-u RET` 打开后删除树窗口（转入 exists 状态）。
+- `o` 前缀提供 no-split / 水平 split / 垂直 split / 最近使用窗口 / ace-window / 外部程序 / 访问后关闭树。
+
+## 静读错误清单（已按运行结果更正）
+
+1. “side window 不会被 `delete-other-windows` 轻易关闭” → 只对 `C-x 1` 成立；`delete-window` 能关，树里 `C-x 1` 直接报错。
+2. “follow / filewatch / git 注解是可选能力” → 加载即默认开启（git 注解为 deferred）。
+3. 未提及 `treemacs-collapse-dirs`（默认 3，单链目录合并）。
+4. 未明确 dotfiles 默认显示、`.git` / `.jj` 恒隐藏、gitignored 默认显示。
+5. “`s` 刷新排序” → `s` 是排序方法选择器，刷新是 `g` / `r`。
+6. 未记录 `M-n` / `M-p` 与 `n` / `p` 的语义差别，以及 `C-n` / `C-p` 未被改绑。
+7. 未记录 `RET` 的默认目标是“树旁边的窗口”以及两个前缀参数的差别。
+8. 根识别不是 semacs 式的“只认 `.git`”，而是 project.el 优先、当前目录兜底。
 
 ## semacs 方向（side window 已确认，其余待细化）
 
-- 形态：独立文本 buffer，放在专用左侧 side window；side window 独立于普通 split。按 treemacs 语义建议固定宽度、`C-x 1` 不关闭、`q` bury、显式 toggle，具体交互待确认。复用现有 section 树、可见行映射、mode 局部键位、focus / 临时 window 语义，不另建 GUI 树控件或平行 DiffWidget 式组件。
-- 根：先支持当前项目根的单根树；根来源沿用 project 根识别。首版不做 workspaces、多根、远程。
+- 形态：独立文本 buffer，放在专用左侧 side window；side window 独立于普通 split，不另建 GUI 树控件。复用现有 section 树、可见行映射、mode 局部键位、focus / 临时 window 语义。
+- 根：先支持当前项目根的单根树；具体根来源在首版确认时定（上游是 project.el 优先 + 当前目录兜底）。
 - 节点：root / 目录 / 文件；目录懒加载，目录在前、文件在后；折叠状态归 buffer，point / scroll 归 view；刷新保留可匹配的折叠与位置。
-- 首版键位建议：`TAB` toggle、`RET` 目录 toggle / 文件访问、`n` / `p` 可见行、`u` 父节点、`M-n` / `M-p` 同层、`q` bury、`g` 刷新、`t h` dotfiles、`w` / `<` / `>` 宽度；`treemacs-find-file` 式当前文件定位。`M-n` / `M-p` 当前不是正文默认绑定，但可能与未来 paragraph 绑定或用户配置重叠，需在实施前确认默认值与覆盖规则。
-- 首版不做：文件增删改 / 移动、workspaces、图标、tags / imenu、filewatch、peek、完整 git 注解、持久化、远程 / Tramp。它们是可以后续按实际需要添加的能力，不是永久非目标。
+- 首版不做：文件增删改 / 移动、workspaces、图标、tags / imenu、filewatch、peek、完整 git 注解、持久化、远程 / Tramp。上游默认开启的 follow / filewatch / 注解若首版不做，需要登记为已批准差异，而不是默认“跟随上游”。
 - 失败与边界：不可读目录、符号链接、项目根失效、刷新时节点消失、异步目录读取迟到、树 buffer 被另存或 kill；沿用现有目标 / 版本隔离与只读生成 buffer 规则。
-- 性能：不在首版承诺新增预算；目录读取必须有界、可取消，避免递归扫描整棵树阻塞前台。需要测量时另行确认入口与门限。
+- 性能：不在首版承诺新增预算；目录读取必须有界、可取消，避免递归扫描整棵树阻塞前台。
 
 ## 待确认问题
 
-- side window 的宽度、默认位置、`C-x 1` / `C-x 0` / `C-x o` 行为、toggle 命令与焦点返回；是否完全照搬 treemacs 的 no-delete-other-windows 语义。
-- 默认键位是否严格照搬上表，还是保留 `C-n` / `C-p` 作为普通文本移动，只新增 `n` / `p` / `M-n` / `M-p`？
-- 根识别只认 `.git`，还是同时接受手动目录 / marker 文件？
-- dotfiles 与 gitignore 的默认显示策略；首版是否需要隐藏 gitignored 文件。
-- 当前文件高亮 / follow 是否进入首版，还是只保留显式 `treemacs-find-file` 定位？
-- 文件访问目标：同窗口、最近使用窗口，还是固定的“其他 split”？首版是否需要 `o` 前缀。
+上游行为本身已经有答案；剩下的是产品取舍，需用户确认后才进入实施：
+
+- 是否完全照搬侧窗语义：`no-delete-other-windows`（`C-x 1` 不关树、树里 `C-x 1` 报错）、`delete-window` 可关、`q` bury / 显式 toggle。
+- 键位是否照搬 `n` / `p` / `M-n` / `M-p`（`C-n` / `C-p` 保持普通移动），以及 `M-n` / `M-p` 与将来 paragraph 绑定的关系。
+- 根识别：照搬 project.el 优先 + 当前目录兜底，还是首版只做 `.git` 根并在无仓库时提示。
+- dotfiles / gitignored 的默认显示策略（上游：都显示，`t h` / `t i` 切换）。
+- follow 与当前文件高亮是否进入首版（上游默认开启 follow）。
+- 打开目标：是否照搬 no-split 与 `C-u` / `C-u C-u` 前缀语义，首版是否要 `o` 前缀。

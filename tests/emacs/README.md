@@ -41,6 +41,28 @@ emacs -Q --batch -l tests/emacs/m1-indent.el -l tests/emacs/m1-editing.el -l tes
 
 读入注记及清除策略另按本机 31.1 的 `minibuffer.el` 中 `minibuffer-message`、`set-minibuffer-message`、`clear-minibuffer-message` 和 `minibuffer-message--message` 核对：显式提示默认两秒，普通 message 默认等下一输入，均以 overlay 保持原输入不变。这是源码参照，不证明活跃 minibuffer 的真实 command loop、GUI 像素布局或 IME 表现。
 
+## F6：treemacs 文件夹树参照
+
+固定 treemacs `20251226.1307`（commit `2ab5a3c8…`）与其 elpa 依赖，加载 `treemacs-autoloads.el`（否则 tag 相关路径会报未定义，与真实安装不符）：
+
+```sh
+E=$HOME/.emacs.d/elpa
+emacs -Q --batch \
+  -L "$E/treemacs-20251226.1307" -L "$E/dash-20260221.1346" -L "$E/s-20260522.135" \
+  -L "$E/f-20241003.1131" -L "$E/ace-window-20220911.358" -L "$E/avy-20241101.1357" \
+  -L "$E/pfuture-20220913.1401" -L "$E/hydra-20250316.1254" -L "$E/lv-20200507.1518" \
+  -L "$E/ht-20230703.558" -L "$E/cfrs-20250729.1422" \
+  -l tests/emacs/f6-treemacs.el -f ert-run-tests-batch-and-exit
+python3 tests/emacs/f6-drive.py tree-lifecycle tree-follow
+emacs -Q --batch -L ... -l tests/emacs/export-treemacs-keys.el > tests/emacs/f6-bindings.tsv
+```
+
+`f6-treemacs.el` 的 31 项 ERT 覆盖默认值、加载即开启的模式、项目根识别、树文本（排序 / dotfiles / `.git` / 单链目录折叠 / 缩进）、宽度命令、侧窗参数、`C-x 1` / `delete-window` / `other-window`、三态 toggle、`q` / `Q`、`RET` 与前缀参数、`treemacs-find-file`、`treemacs-select-window` 及键位解析。
+
+batch 不运行 redisplay，`window-configuration-change-hook` 与空闲定时器不生效，因此侧窗参数恢复与 follow 由 `f6-drive.py` 在真实 `emacs -Q -nw` command loop 中观察；`C-c d` 是驱动注入的 dump 键，不属于上游。`f6-bindings.tsv` 是 `treemacs-mode-map` 的原始导出（91 条），M- 前缀与终端翻译以 ERT 的 `key-binding` 结果为准。
+
+本组入口只记录上游行为，不证明 semacs 的 tree viewer 通过；结果见 [RESULTS.md](RESULTS.md#f6treemacs-文件夹树参照)，待确认范围见 [当前计划](../../docs/plan.md)。
+
 ## F5：Magit 提交与历史参照
 
 `f5-magit.el` 使用固定 Magit checkout 的真实函数及隔离 Git fixture；只显式加载列出的依赖，不加载日常 init，不执行 `package-initialize`。以本轮环境为例：

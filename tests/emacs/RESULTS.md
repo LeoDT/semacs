@@ -244,3 +244,96 @@ python3 tests/emacs/drive.py m4-recenter-motion
 - Emacs 31.1 默认 `scroll-conservatively` = 0、`scroll-step` = 0、`scroll-margin` = 0：point 离开窗口时 redisplay 走 `recenter` 分支（`centering_position = window_box_height / 2`），而不是最小滚动。
 
 观察边界：只有 tty 的固定行高与 21 行正文；终端行高整除窗口，dump 里的 window-start 都是行首，因此不覆盖部分可见行、变高行、`scroll-margin` 非 0 或 GUI 像素布局。该用例只有一条 `C-l` 且结果与自动居中相同，不能区分两者的取整差异，也不重新覆盖 `C-l` 的 top / bottom 循环。Magit hunk 移动的 window-start 规则不在本用例内，只做了源码核对。本记录不证明 semacs 通过。
+
+## F6：treemacs 文件夹树参照
+
+环境固定：GNU Emacs 31.1；treemacs `20251226.1307`（上游 commit `2ab5a3c89fa01bbbd99de9b8986908b2bc5a7b49`），elpa 依赖 dash `20260221.1346`、s `20260522.135`、f `20241003.1131`、ace-window `20220911.358`、avy `20241101.1357`、pfuture `20220913.1401`、hydra `20250316.1254`、lv `20200507.1518`、ht `20230703.558`、cfrs `20250729.1422`；`emacs -Q --batch` 与 `emacs -Q -nw`（40x100 pty）；fixture 在 `.pi/tmp/` 或系统临时目录；加载 `treemacs-autoloads.el`，与真实安装一致。批次观察：`2026-11-13` 本地。
+
+此前 [treemacs 参照](../../docs/work/treemacs-reference.md) 只做了源码静读；本轮首次运行 treemacs，下文以运行结果为准，并标出与静读不一致的地方。
+
+### 入口
+
+```sh
+E=$HOME/.emacs.d/elpa
+emacs -Q --batch \
+  -L "$E/treemacs-20251226.1307" -L "$E/dash-20260221.1346" -L "$E/s-20260522.135" \
+  -L "$E/f-20241003.1131" -L "$E/ace-window-20220911.358" -L "$E/avy-20241101.1357" \
+  -L "$E/pfuture-20220913.1401" -L "$E/hydra-20250316.1254" -L "$E/lv-20200507.1518" \
+  -L "$E/ht-20230703.558" -L "$E/cfrs-20250729.1422" \
+  -l tests/emacs/f6-treemacs.el -f ert-run-tests-batch-and-exit   # 31 项
+python3 tests/emacs/f6-drive.py tree-lifecycle tree-follow        # 真实 command loop
+emacs -Q --batch -L ... -l tests/emacs/export-treemacs-keys.el > tests/emacs/f6-bindings.tsv
+```
+
+### 默认值（加载即生效）
+
+| 项目 | 运行结果 |
+|---|---|
+| 位置 / 宽度 | `treemacs-position` = left、`treemacs-display-in-side-window` = t、`treemacs-width` = 35；选项是**正文宽度**，tty / batch 帧里 `window-total-width` = 正文 + 1 |
+| 侧窗参数 | `window-side` = left、`window-slot` = 0（创建时先 -1，由 `window-configuration-change-hook` 归一）、`no-delete-other-windows` = t（`treemacs-no-delete-other-windows`）、树 buffer 里 `window-size-fixed` = width |
+| 缩进 / 排序 | `treemacs-indentation` = 2、缩进串 `" "`、`treemacs-sorting` = alphabetic-asc |
+| dotfiles | **默认显示**（`treemacs-show-hidden-files` = t）；`.git` / `.jj` 目录始终隐藏（`treemacs-hide-dot-git-directory`、`-jj` 均 t） |
+| gitignored | **默认显示**；`treemacs-hide-gitignored-files-mode` 默认关闭，`t i` 打开后需要某种 `treemacs-git-mode` 才生效 |
+| 加载时自动开启 | `treemacs-follow-mode`、`treemacs-filewatch-mode`、`treemacs-fringe-indicator-mode` 全为 t；有 git + python3 时 `treemacs-git-mode` = t（变体 `deferred`），`treemacs-collapse-dirs` = 3 |
+| 访问 / 选择 | `treemacs-default-visit-action` = `treemacs-visit-node-no-split`；`treemacs-select-when-already-in-treemacs` = move-back；`treemacs-wrap-around` = t；`treemacs-follow-after-init` = nil、`treemacs-expand-after-init` = t |
+
+静读文档写“follow / filewatch / git 注解属于可选能力”，实际上游在**加载时**就把它们打开；不想用时必须显式关闭。
+
+### 项目根识别
+
+`treemacs--find-user-project-functions` = (`treemacs--current-builtin-project-function` `treemacs--current-directory-project-function`)，按顺序取第一个非 nil：
+
+| 当前目录 | 结果 |
+|---|---|
+| 仓库内任意子目录（`.git` 目录） | project.el 解析到仓库根 |
+| git worktree（`.git` 是文件） | project.el 解析到 worktree 根 |
+| 无 VCS 的目录 / 其子目录 | builtin 返回 nil，回退为**当前 buffer 自己的目录**，不向上找标记文件 |
+
+即上游不自己实现 `.git` 探测，而是复用 projectile / project.el（未装 projectile 时用 project.el）；“手动目录”不是额外入口，而是兜底行为本身。
+
+### 树的渲染
+
+- 根行是项目目录名；目录行前缀折叠时 `+ `、展开时 `- `；文件行前缀一个空格；每层缩进 2 个空格（`  + b-dir`、`     inner.txt`）。
+- 目录在前、文件在后，各自按 ASCII 区分大小写升序（`.gitignore` < `.hidden.txt` < `1.txt` < `B-upper.txt` < `aaa.txt`）。
+- `treemacs-collapse-dirs` = 3 时，只有一个子目录且不含文件的链条合并成一行（`chain/one/two`），到含文件的目录为止。
+- `s`（`treemacs-resort`）弹出 12 项排序方法的 completing-read，不是循环切换；`C-u` / `C-u C-u` 只是临时重排当前目录 / 整个视图。
+- `<` / `>` 按 1 列增减，`=` 把宽度收到最长可见行并把该值写回 `treemacs-width`，`w` 读入新宽度、带前缀参数则重新应用当前选项值。
+- `g` / `r` 刷新后 point 仍在同一节点、展开状态保留。
+- `TAB`：root / 目录开合，文件展开 tag 段（无 tag 时回显 `No tags found for …`，树不变）；`RET`：root / 目录开合，文件执行默认访问动作，tag 跳转；`h` / `l` 分别是 COLLAPSE / RET 动作的别名。
+- `n` / `p` 是 `treemacs-next-line` / `previous-line`（按 button 走行、受 wrap-around 影响）；`M-n` / `M-p` 是 `treemacs-next-neighbour` / `previous-neighbour`（同层节点）；`C-n` / `C-p` 仍是 `next-line` / `previous-line`。
+- 其余默认键位见 [f6-bindings.tsv](f6-bindings.tsv)（91 条，含 `o` / `t` / `y` / `C-c C-p` / `C-c C-w` 前缀）。
+
+### 窗口生命周期（真实 command loop）
+
+| 操作 | 结果 |
+|---|---|
+| 初始化 | 树窗口被选中；`  *Treemacs-Buffer*` 在左、side=left、slot=0、ndow=t、宽 35 |
+| `C-x o` | 普通窗口与树之间可来回切换（side window 不被跳过） |
+| 普通窗口里 `C-x 1` | 只删除其它普通窗口，树保留 |
+| 树窗口里 `C-x 1` | 报错 `Cannot make side window the only window`，布局不变：树永远不能成为唯一窗口 |
+| 树 buffer 上 `delete-window` | 直接关闭该窗口（`no-delete-other-windows` 只挡 `delete-other-windows`） |
+| `q` | bury：树窗口消失，buffer 仍存活，可见性变为 exists，其它窗口占满宽度 |
+| `treemacs` | 三态：可见→隐藏；已存在→显示并选中；不存在→创建 |
+| 消失后重新显示 | 依靠 `window-configuration-change-hook` 恢复 `no-delete-other-windows`；随后 `C-x 1` 依旧保留树。batch 里该 hook 不运行，参数与 slot 保留创建时的值 |
+| `Q` | kill 树 buffer，可见性 none |
+
+### 打开文件与定位
+
+| 操作 | 结果 |
+|---|---|
+| `RET`（默认 no-split） | 在树旁边的窗口打开（已打开则复用该窗口），并选中它；树保留，不额外 split |
+| `C-u RET` | 同上打开，但焦点回到树 |
+| `C-u C-u RET` | 同上打开后删除树窗口（可见性 exists） |
+| `RET` 在目录上 | 开合目录 |
+| `RET` + `o o` / `o h` / `o v` / `o r` | no-split / 水平 split / 垂直 split / 最近使用窗口 |
+| `treemacs-find-file` | 定位并展开当前文件的节点；树可见或隐藏都**不抢焦点**，文件窗口保持选中 |
+| `treemacs-select-window` | 树可见时选中它；已在树中时按 `move-back` 回到上一个窗口 |
+| follow（默认开启） | 在树旁边的窗口打开 `b-dir/inner.txt` 后，空闲 0.2 s 内树自动展开 `b-dir` 并把 point 移到 `inner.txt`，焦点不动 |
+| `t h` / `t i` | 实际切换 dotfiles（刷新后 `.gitignore`、`.hidden.txt` 消失 / 出现）；`t i` 在真实 git 仓库里隐藏 `ignored.log` |
+
+### 观察边界
+
+- 只有 tty（40x100）与 batch；不覆盖 GUI 图标、hydra 提示、鼠标拖拽、`display-buffer` 在真实桌面上的像素宽度，也不覆盖 workspaces / 持久化 / peek / 文件管理与远程路径。
+- 图像、tag（imenu）、git 注解颜色只确认了开关状态与 gitignored 过滤结果，未逐项核对颜色与目录级状态。
+- 排序只核对了 alphabetic-asc / desc 与 size-desc 的可见顺序，没有覆盖全部 12 种方法与临时重排。
+- 本记录是外部参照，不是 semacs tree viewer 的通过记录。
