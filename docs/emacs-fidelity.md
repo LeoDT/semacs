@@ -446,3 +446,55 @@ F2 仅提供 status 与单文件整文件级 index 操作，不包含 hunk / 批
 - 以上均启动真实 Git 并复用 F3 的 editor、消息 ring、保存 / finish / cancel、hooks / 签名、输出 / 提示、中断及退出生命周期。`--no-edit` 由 Git 自己处理（包括 hook 中的 `GIT_EDITOR=:`），不等于 semacs 跳过 hooks。完成编辑不等于提交成功；失败保留诊断，不自动重放 / 回滚，不冻结消息编辑开始时的 HEAD / index。
 - 终态刷新仍存活的原发起日志 / diff 及 status；其他可变投影保留 stale 快照，固定 OID revision 不因新提交失去其历史身份。请求代次与仓库终态隔离迟到结果；关闭、另存、reload 或选择取消不让旧请求在新目标上启动提交。没有新增通用 Job、JS 任意 Git / 进程 API 或持久化恢复。
 - 读取沿用既有单次 15 秒、stdout 16 MiB / stderr 64 KiB 限额；patch 至多 4096 个文件 / 100000 行，历史正文投影至多 16 MiB，超限整次失败且不截断为完整结果。真实提交仍无固定时限。无新增原生性能预算或真实环境测试授权。
+
+## 阶段 F6：文件夹 tree viewer
+
+本节新增并批准 tree viewer 的行为契约，不改写 F1–F5 的历史范围。用户已确认（2026-11-13）：以固定版本 treemacs 的实测行为为准全部照搬，不因“更保险”另加限制或确认。运行证据见 [F6 观察记录](../tests/emacs/RESULTS.md#f6treemacs-文件夹树参照)，上游默认键位清单见 [f6-bindings.tsv](../tests/emacs/f6-bindings.tsv)；本节只固定首版实际提供的命令，未提供的上游命令在末尾单独登记。
+
+### 形态与 side window
+
+- 独立文本 buffer，放在专用左侧 side window，独立于普通 split；宽度固定为 35 列的正文宽度（`window-size-fixed` = width），需要时可改。不新建 GUI 树控件，复用现有 section 树、可视行、mode 局部键位与临时 window 语义。
+- 窗口参数语义照搬上游：side = left、slot 0、`no-delete-other-windows`。该参数只挡 `delete-other-windows`：在普通 view 里执行 `C-x 1` 保留树、只关闭其它普通 view；**在树里执行 `C-x 1` 报错**（“side window 不能成为唯一窗口”），布局不变；`C-x 0` 关闭树窗口但保留 buffer。
+- `C-x o` 在树与普通 view 之间双向切换；side window 不被跳过。
+- toggle 三态：可见→隐藏（bury，buffer 存活）；已存在→显示并选中；不存在→创建（无根时询问根）。
+- 隐藏后重新显示恢复 `no-delete-other-windows`，随后 `C-x 1` 仍保留树。`q` bury、`Q` kill buffer；`treemacs-select-window` 等价命令在树已选中时回到上一个 view（`move-back`）。
+
+### 树的渲染与状态
+
+- 根行显示项目目录名；目录行前缀折叠 `+ `、展开 `- `；文件行前缀一个空格；每层缩进 2 个空格。
+- 目录在前、文件在后，各自按 ASCII 区分大小写升序。
+- 单链目录合并（上游 `treemacs-collapse-dirs` = 3）：某目录只有唯一子目录且自身不含文件时合并为 `a/b/c` 一行，止于含文件的目录。
+- 折叠状态归 buffer，point / scroll 归 view；`g` / `r` 刷新后 point 回到同一节点、展开状态保留；节点消失时按上游回退规则就近或上移到存活节点。
+- dotfiles 默认显示，`t h` 切换；`.git` / `.jj` 目录始终隐藏；gitignored 文件默认显示。
+
+### 根识别
+
+- 沿用 project.el 语义：从当前 buffer 的文件所在目录向上找最近的 `.git`（目录或文件都算，后者覆盖 worktree），命中即为根；没有 VCS 时根就是该文件所在目录（无文件 buffer 用工作目录）。不新增 marker 文件或额外配置入口。
+
+### 键位（首版提供）
+
+| 键 | 行为 |
+|---|---|
+| `TAB` | 开合当前节点；文件展开 tag 段（无 tag 时提示且不变） |
+| `RET` / `l` | 目录开合；文件按访问目标打开 |
+| `h` / `H` | 已展开则收起当前节点，已折叠则到父节点；`H` 到父节点并收起它 |
+| `n` / `p` | 上 / 下一个可见行（受 wrap-around 影响） |
+| `M-n` / `M-p` | 同层下一个 / 上一个节点 |
+| `C-n` / `C-p` | 保持普通移动（next-line / previous-line），不改绑 |
+| `u` | 到父节点 |
+| `q` / `Q` | bury / kill 树 buffer |
+| `g` / `r` | 刷新 |
+| `t h` / `t f` | 切换 dotfiles / 切换 follow |
+| `w` / `<` / `>` / `=` | 设置 / 减小 / 增大宽度，`=` 收窄到最长可见行并写回选项 |
+| `o o` / `o h` / `o v` / `o r` / `o c` | 树旁边的 view / 水平 split / 垂直 split / 最近使用 view / 打开后关闭树 |
+
+### 访问目标
+
+- 默认动作在树旁边的 view 打开文件（已打开则复用该 view），并选中它；树保留且不新增 split。`C-u RET` 打开后焦点回到树；`C-u C-u RET` 打开后关闭树窗口（转入已存在状态）。
+- 目录上的 `RET` 只开合，不打开文件管理器；semacs 没有 dired，上游默认配置下目录 RET 同样是开合。
+- `treemacs-find-file` 等价命令定位并展开当前 buffer 的节点；树可见或隐藏都不抢焦点。
+- follow 默认开启：在树旁边的 view 打开文件后，空闲 0.2 秒内展开对应目录并把树 point 移到该文件，焦点不动。
+
+### 首版不提供的上游能力
+
+以下上游命令 / 能力在首版不实现，对应键位不绑定；它们是已确认的首版范围缺口，不是对上游行为的改写，也不额外添加上游没有的限制：排序选择 `s`、gitignored 隐藏 `t i` 与 git 状态注解（依赖仓库读取）、filewatch 与 `t a`、图标 / fringe / 序号等视觉开关（`t v` / `t n` / `t c` / `t d` / `t w` / `W`）、peek（`P`）、文件管理与 `d` / `R` / `m` / `c f` / `c d`、复制前缀 `y`、`b` 书签、`C` 清理、`!` / `M-!` 外部命令、`?` / `C-?` hydra、`M-m`、`o a *`（ace-window）与 `o x`（外部程序）、workspaces / 多根 / 项目前缀（`C-c C-w`、`C-c C-p`、`C-j` / `C-k`、`S-TAB`、`M-<up>` / `M-<down>`）、持久化与远程路径、鼠标动作。

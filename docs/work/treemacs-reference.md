@@ -63,19 +63,14 @@
 ## semacs 方向（side window 已确认，其余待细化）
 
 - 形态：独立文本 buffer，放在专用左侧 side window；side window 独立于普通 split，不另建 GUI 树控件。复用现有 section 树、可见行映射、mode 局部键位、focus / 临时 window 语义。
-- 根：先支持当前项目根的单根树；具体根来源在首版确认时定（上游是 project.el 优先 + 当前目录兜底）。
+- 根：先支持当前项目根的单根树；根来源按上游（project.el 优先 + 当前目录兜底）。
 - 节点：root / 目录 / 文件；目录懒加载，目录在前、文件在后；折叠状态归 buffer，point / scroll 归 view；刷新保留可匹配的折叠与位置。
-- 首版不做：文件增删改 / 移动、workspaces、图标、tags / imenu、filewatch、peek、完整 git 注解、持久化、远程 / Tramp。上游默认开启的 follow / filewatch / 注解若首版不做，需要登记为已批准差异，而不是默认“跟随上游”。
+- 首版不做：文件增删改 / 移动、workspaces、图标、tags / imenu、filewatch、peek、git 注解、持久化、远程 / Tramp。follow 上游默认开启，首版照搬（保留 `t f` 开关）；其余不做的能力已在保真度契约末尾登记。
 - 失败与边界：不可读目录、符号链接、项目根失效、刷新时节点消失、异步目录读取迟到、树 buffer 被另存或 kill；沿用现有目标 / 版本隔离与只读生成 buffer 规则。
 - 性能：不在首版承诺新增预算；目录读取必须有界、可取消，避免递归扫描整棵树阻塞前台。
 
-## 待确认问题
+## 已确认（2026-11-13）
 
-上游行为本身已经有答案；剩下的是产品取舍，需用户确认后才进入实施：
+用户确认：上游 treemacs 的实测行为**全部照搬**，上述待确认的产品取舍全部按上游取值——侧窗保护语义、键位（含 `n` / `p` / `M-n` / `M-p` 与保持不动的 `C-n` / `C-p`）、根识别（project.el 优先 + 当前目录兜底）、dotfiles / gitignored 默认显示、follow 默认开启与当前文件定位、访问目标与前缀参数。上游没有的额外限制、确认或快照检查不引入。
 
-- 是否完全照搬侧窗语义：`no-delete-other-windows`（`C-x 1` 不关树、树里 `C-x 1` 报错）、`delete-window` 可关、`q` bury / 显式 toggle。
-- 键位是否照搬 `n` / `p` / `M-n` / `M-p`（`C-n` / `C-p` 保持普通移动），以及 `M-n` / `M-p` 与将来 paragraph 绑定的关系。
-- 根识别：照搬 project.el 优先 + 当前目录兜底，还是首版只做 `.git` 根并在无仓库时提示。
-- dotfiles / gitignored 的默认显示策略（上游：都显示，`t h` / `t i` 切换）。
-- follow 与当前文件高亮是否进入首版（上游默认开启 follow）。
-- 打开目标：是否照搬 no-split 与 `C-u` / `C-u C-u` 前缀语义，首版是否要 `o` 前缀。
+有效契约见 [保真度：阶段 F6](../emacs-fidelity.md#阶段-f6文件夹-tree-viewer)；首版不提供的上游能力（排序选择器、git 注解与 `t i`、filewatch、图标、peek、文件管理、workspaces、持久化等）也在该节末尾登记，属于已确认的首版范围缺口，不是对上游行为的改写。实施顺序见 [实施计划](../plan.md)。

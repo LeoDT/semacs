@@ -280,6 +280,35 @@ single-child directory chains collapsed."
     (treemacs-TAB-action)
     (should (equal "  - b-dir" (f6/tree-line)))))
 
+(ert-deftest f6-collapse-action-on-open-node-collapses ()
+  "`h' collapses an open node like TAB."
+  (f6/with-fixture
+    (f6/goto-node "b-dir")
+    (treemacs-TAB-action)
+    (should (string-match-p "inner.txt" (f6/tree-text)))
+    (f6/goto-node "b-dir")
+    (treemacs-COLLAPSE-action)
+    (should-not (string-match-p "inner.txt" (f6/tree-text)))
+    (should (equal "  + b-dir" (f6/tree-line)))))
+
+(ert-deftest f6-collapse-action-on-closed-node-goes-to-parent ()
+  "`h' on a closed node moves to the parent instead of opening it."
+  (f6/with-fixture
+    (f6/goto-node "b-dir")
+    (treemacs-COLLAPSE-action)
+    (should (equal (treemacs--filename root) (f6/tree-line)))
+    (should-not (string-match-p "inner.txt" (f6/tree-text)))))
+
+(ert-deftest f6-collapse-parent-node ()
+  "`H' moves to the parent node and closes it."
+  (f6/with-fixture
+    (f6/goto-node "b-dir")
+    (treemacs-TAB-action)
+    (f6/goto-node "inner.txt")
+    (treemacs-collapse-parent-node nil)
+    (should (equal "  + b-dir" (f6/tree-line)))
+    (should-not (string-match-p "inner.txt" (f6/tree-text)))))
+
 (ert-deftest f6-tree-tab-on-file-without-tags ()
   "TAB on a file node expands its (empty) tag section and changes nothing."
   (f6/with-fixture

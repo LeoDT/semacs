@@ -57,7 +57,7 @@ python3 tests/emacs/f6-drive.py tree-lifecycle tree-follow
 emacs -Q --batch -L ... -l tests/emacs/export-treemacs-keys.el > tests/emacs/f6-bindings.tsv
 ```
 
-`f6-treemacs.el` 的 31 项 ERT 覆盖默认值、加载即开启的模式、项目根识别、树文本（排序 / dotfiles / `.git` / 单链目录折叠 / 缩进）、宽度命令、侧窗参数、`C-x 1` / `delete-window` / `other-window`、三态 toggle、`q` / `Q`、`RET` 与前缀参数、`treemacs-find-file`、`treemacs-select-window` 及键位解析。
+`f6-treemacs.el` 的 34 项 ERT 覆盖默认值、加载即开启的模式、项目根识别、树文本（排序 / dotfiles / `.git` / 单链目录折叠 / 缩进）、宽度命令、侧窗参数、`C-x 1` / `delete-window` / `other-window`、三态 toggle、`q` / `Q`、`RET` 与前缀参数、`treemacs-find-file`、`treemacs-select-window`、`h` / `H` 收起动作及键位解析。
 
 batch 不运行 redisplay，`window-configuration-change-hook` 与空闲定时器不生效，因此侧窗参数恢复与 follow 由 `f6-drive.py` 在真实 `emacs -Q -nw` command loop 中观察；`C-c d` 是驱动注入的 dump 键，不属于上游。`f6-bindings.tsv` 是 `treemacs-mode-map` 的原始导出（91 条），M- 前缀与终端翻译以 ERT 的 `key-binding` 结果为准。
 

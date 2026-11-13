@@ -260,7 +260,7 @@ emacs -Q --batch \
   -L "$E/f-20241003.1131" -L "$E/ace-window-20220911.358" -L "$E/avy-20241101.1357" \
   -L "$E/pfuture-20220913.1401" -L "$E/hydra-20250316.1254" -L "$E/lv-20200507.1518" \
   -L "$E/ht-20230703.558" -L "$E/cfrs-20250729.1422" \
-  -l tests/emacs/f6-treemacs.el -f ert-run-tests-batch-and-exit   # 31 项
+  -l tests/emacs/f6-treemacs.el -f ert-run-tests-batch-and-exit   # 34 项
 python3 tests/emacs/f6-drive.py tree-lifecycle tree-follow        # 真实 command loop
 emacs -Q --batch -L ... -l tests/emacs/export-treemacs-keys.el > tests/emacs/f6-bindings.tsv
 ```
@@ -299,7 +299,7 @@ emacs -Q --batch -L ... -l tests/emacs/export-treemacs-keys.el > tests/emacs/f6-
 - `s`（`treemacs-resort`）弹出 12 项排序方法的 completing-read，不是循环切换；`C-u` / `C-u C-u` 只是临时重排当前目录 / 整个视图。
 - `<` / `>` 按 1 列增减，`=` 把宽度收到最长可见行并把该值写回 `treemacs-width`，`w` 读入新宽度、带前缀参数则重新应用当前选项值。
 - `g` / `r` 刷新后 point 仍在同一节点、展开状态保留。
-- `TAB`：root / 目录开合，文件展开 tag 段（无 tag 时回显 `No tags found for …`，树不变）；`RET`：root / 目录开合，文件执行默认访问动作，tag 跳转；`h` / `l` 分别是 COLLAPSE / RET 动作的别名。
+- `TAB`：root / 目录开合，文件展开 tag 段（无 tag 时回显 `No tags found for …`，树不变）；`RET` / `l`：root / 目录开合，文件执行默认访问动作，tag 跳转；`h` 是右键式收起动作：节点已展开则收起，节点已折叠则跳到父节点而不是展开；`H` 跳到父节点并收起它。
 - `n` / `p` 是 `treemacs-next-line` / `previous-line`（按 button 走行、受 wrap-around 影响）；`M-n` / `M-p` 是 `treemacs-next-neighbour` / `previous-neighbour`（同层节点）；`C-n` / `C-p` 仍是 `next-line` / `previous-line`。
 - 其余默认键位见 [f6-bindings.tsv](f6-bindings.tsv)（91 条，含 `o` / `t` / `y` / `C-c C-p` / `C-c C-w` 前缀）。
 

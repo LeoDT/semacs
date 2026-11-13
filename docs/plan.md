@@ -20,33 +20,39 @@ R0–F5、日常编辑增强及 F5 后插入项均已完成，交付摘要见 [R
 
 `kill-current-buffer`（`C-x C-k`，含 minibuffer 内退出会话）与 Magit `S-TAB` 全局 section 可见性也已交付。这些改动不改变已交付 F1–F5 的契约。
 
-## 下一步方向（方向已确认，上游行为已实测，首版待确认）
+## 当前阶段：F6 文件夹 tree viewer（已批准，照搬 treemacs）
 
-用户已确认：tree viewer 使用文本 UI 和 Emacs 操作逻辑，参考 treemacs；project 先做基础能力；diff 以查看为主，补 range / revision；indent 只记录、不排期。
+用户已确认：上游 treemacs 的实测行为全部照搬，不引入上游没有的限制、确认或快照语义；R0–F5 与已交付的日常编辑增强不回退。行为契约见 [保真度：阶段 F6](emacs-fidelity.md#阶段-f6文件夹-tree-viewer)，上游实测证据见 [F6 观察记录](../tests/emacs/RESULTS.md#f6treemacs-文件夹树参照)，入口见 [对照入口](../tests/emacs/README.md#f6treemacs-文件夹树参照)，上游参照与静读纠错见 [treemacs 参照](work/treemacs-reference.md)。
 
-上游行为已在固定 Emacs 31.1 + treemacs `20251226.1307` 下实测完毕（batch ERT 31 项、真实 command loop、键位导出），结果见 [F6 观察记录](../tests/emacs/RESULTS.md#f6treemacs-文件夹树参照)，入口见 [对照入口](../tests/emacs/README.md#f6treemacs-文件夹树参照)，静读阶段结论已按运行结果更新于 [treemacs 参照](work/treemacs-reference.md)。实测纠正了几处影响范围的静读假设：`C-x 1` 的保护只来自 `no-delete-other-windows` 且树里执行会报错、`delete-window` 仍可关闭、follow / filewatch / 注解在加载时就默认开启、单链目录默认合并。
+目标：用文本 UI + Emacs 操作逻辑提供文件夹树，作为代码查看的导航入口。
 
-### 1. 文件夹 tree viewer（下一步主要方向）
+边界：单项目根、目录 / 文件树、懒加载、展开折叠、键盘导航、打开文件、刷新、dotfiles 开关、宽度调整、当前文件定位与 follow；形态是独立文本 buffer + 专用左侧 side window。首版不提供的上游能力（排序选择器、git 注解与 `t i`、filewatch、图标、peek、文件管理、workspaces、持久化、远程等）已在保真度契约登记，不视为待补 bug。
 
-- 形态（已确认）：独立文本 buffer + 专用左侧 side window；side window 独立于普通 split，不新建 GUI 树控件。宽度、位置、toggle 三态、`q` bury、`C-x 1` / `C-x 0` / `C-x o` 的上游行为已实测，是否照搬待确认。复用现有 section 树、可视行、多 view、mode 局部键位与临时 window 语义；直接复用 section 还是建立专用 filetree 模型，在细化时确认。
-- 建议首版：单项目根、目录 / 文件树、懒加载、展开折叠、键盘导航、打开文件、刷新、dotfiles 开关、当前文件定位。
-- 建议首版不做：文件增删改 / 移动、workspaces、图标、tags / imenu、filewatch、peek、完整 git 注解、持久化、远程 / Tramp。上游默认开启 follow / filewatch / git 注解，首版不做其中任一项时按已确认差异登记，不能写成“与上游一致”。
-- 待确认（上游已有答案，属于产品取舍，见参照文档“待确认问题”）：侧窗保护语义、`n` / `p` / `M-n` / `M-p` 键位与 `C-n` / `C-p` 边界、根来源（project.el 优先 + 当前目录兜底 vs 只认 `.git`）、dotfiles / gitignored 默认显示、follow 与当前文件高亮是否进首版、打开目标与前缀参数是否照搬。
-- 依赖：项目根识别可作为 tree viewer 的前置；项目切换与项目内文件查找可在 tree 之后。tree viewer 之前的小增强已交付。
+验收条件：本地 ERT 覆盖根识别、树投影、折叠 / 刷新、访问目标与键位解析；`C-x 1` / `C-x 0` / `C-x o`、侧窗位置与宽度、三态 toggle、follow 的时序与焦点属于真实窗口行为，按[验收流程](acceptance.md#宿主验证的适用条件)单独确认最小宿主范围后再测；不新增性能门限，目录读取必须有界。
 
-### 2. 基础 project
+实施拆成三块，按序进行：
 
-- 首版范围：项目根识别（先 `.git`，手动目录作为兜底）、项目切换、项目内文件查找。
+1. **F6a 项目根与当前项目（前置）**：`.git`（目录或文件）向上探测，无 VCS 回退为文件所在目录；只提供根查询与失效判定，不做 projectile 兼容、多根或 marker 配置。
+2. **F6b side window 与树 buffer**：panes 支持受保护的固定侧栏 leaf（`delete-other-windows` 保留、树中执行报错、`delete-window` 可关）；新增 tree mode 与只读投影，目录懒加载、目录在前文件在后、单链目录合并、折叠状态归 buffer、刷新保留可匹配的折叠与 point。
+3. **F6c 导航与访问**：`TAB` / `RET` / `l` / `h` / `H` / `n` / `p` / `M-n` / `M-p` / `u` / `q` / `Q` / `g` / `r` / `t h` / `t f` / `w` / `<` / `>` / `=` / `o` 前缀、三态 toggle、`C-u` / `C-u C-u` 访问前缀、当前文件定位与 follow。
+
+首版之后的候选：排序选择器 `s`、git 状态注解与 `t i`、filewatch 自动刷新、图标 / fringe、peek、文件增删改 / 移动、workspaces / 多根 / 项目切换、持久化与远程；这些不构成首版验收条件，按实际使用再排期。
+
+## 后续方向（顺序与依赖，尚未排期）
+
+### 1. 基础 project
+
+- 首版范围：项目根识别沿用 F6a、项目切换、项目内文件查找。
 - 项目内内容搜索是已确认的增强方向（搜索优先）；是否并入 project 首版待定，不默认扩大。
 - 不预设完整 `project.el` 兼容、多根 / workspace 或远程 / TRAMP 支持。
 
-### 3. diff range / revision
+### 2. diff range / revision
 
 - 在现有 status / diff / log / revision 查看器上增加任意 revision 与 range 的查看；命令名、输入格式与从 log 选择 range 的交互待定。
 - 比较身份固定到解析后的 OID / range，读取失败保留旧投影；不自动保存编辑 buffer。
 - 不扩展 Git 写工作流；已交付的 stage / commit / amend / reword 维持现有契约。
 
-### 4. 自动 / 智能缩进（仅记录）
+### 3. 自动 / 智能缩进（仅记录）
 
 - 需求保留；触发时机、语言范围、tree-sitter 规则与是否包含格式化均未定，不排期。
 - 复用 [D24](decisions.md#d24-缩进边界) 的缩进 / 编辑分离和唯一 Edit 入口；不引入 major-mode 插件框架。
@@ -69,7 +75,6 @@ R0–F5、日常编辑增强及 F5 后插入项均已完成，交付摘要见 [R
 
 ### tree 集成
 
-- **tree follow / 当前文件定位**：切换 buffer 时高亮并展开当前文件；参考 treemacs follow-mode。
 - **tree git 注解**：显示文件状态；复用现有 Git 读取与刷新边界。
 - **peek / 临时预览**：从 tree 短暂查看文件而不切换焦点；复用 F3 临时 window 语义。
 
