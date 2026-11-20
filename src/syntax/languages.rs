@@ -78,6 +78,8 @@ impl Definition {
 }
 
 use LanguageId::*;
+
+const JS_INSTANCE_HIGHLIGHTS: &str = "[(this) (super)] @variable.special";
 pub(super) static LANGUAGES: [Definition; 8] = [
     Definition::new(
         Rust,
@@ -99,6 +101,7 @@ pub(super) static LANGUAGES: [Definition; 8] = [
         &[
             tree_sitter_javascript::HIGHLIGHT_QUERY,
             tree_sitter_javascript::JSX_HIGHLIGHT_QUERY,
+            JS_INSTANCE_HIGHLIGHTS,
         ],
         "",
     ),
@@ -110,6 +113,7 @@ pub(super) static LANGUAGES: [Definition; 8] = [
         &[
             tree_sitter_javascript::HIGHLIGHT_QUERY,
             tree_sitter_typescript::HIGHLIGHTS_QUERY,
+            JS_INSTANCE_HIGHLIGHTS,
         ],
         "",
     ),
@@ -122,6 +126,7 @@ pub(super) static LANGUAGES: [Definition; 8] = [
             tree_sitter_javascript::HIGHLIGHT_QUERY,
             tree_sitter_typescript::HIGHLIGHTS_QUERY,
             tree_sitter_javascript::JSX_HIGHLIGHT_QUERY,
+            JS_INSTANCE_HIGHLIGHTS,
         ],
         "",
     ),

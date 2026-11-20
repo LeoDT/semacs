@@ -3,6 +3,11 @@
 (integer_literal) @number
 (float_literal) @number
 
+(self) @variable.special
+(use_list (self) @variable)
+(scoped_use_list (self) @variable)
+(scoped_identifier (self) @variable)
+
 [
   "+" "-" "/" "%" "=" "==" "!=" "<" "<=" ">" ">="
   "&&" "||" "!" "^" "|" "<<" ">>" "?"

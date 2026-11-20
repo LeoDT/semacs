@@ -111,6 +111,43 @@ fn failed_parse_discards_display_and_next_edit_recovers(cx: &mut TestAppContext)
 }
 
 #[gpui_kit::test]
+fn instance_keyword_emphasis_reaches_typography_without_styling_normal_variables(
+    cx: &mut TestAppContext,
+) {
+    use crate::theme::{StyleOverride, StyleRole, ThemeSettings};
+
+    let text = "this.value";
+    let buffer = crate::buffer::Buffer::new(
+        Some("types.js".into()),
+        crate::files::DecodedFile {
+            text: text.into(),
+            format: crate::files::FileFormat::default(),
+        },
+    );
+    let syntax = Syntax::new(buffer.snapshot(), buffer.path().as_deref());
+    let observer = cx.new(|_| ());
+    cx.update(|cx| syntax.prepare(observer.downgrade().into(), cx));
+    cx.run_until_parked();
+    let mut theme = ThemeSettings::default();
+    let special = StyleRole::SyntaxVariableSpecial;
+    theme.set_style(
+        special,
+        StyleOverride::default()
+            .with_text_attributes(special, None, Some(true), None, None)
+            .unwrap(),
+    );
+    let typography = crate::display::Typography::new(
+        &theme,
+        syntax.display_highlights(),
+        None,
+        0,
+        Arc::from([]),
+    );
+    assert_eq!(typography.font_at(0).italic, Some(true));
+    assert_eq!(typography.font_at(text.find("value").unwrap()).italic, None);
+}
+
+#[gpui_kit::test]
 fn typography_retains_and_releases_old_highlights_on_background(cx: &mut TestAppContext) {
     use crate::theme::{StyleOverride, StyleRole, ThemeSettings};
     let syntax = Syntax::new(buffer().snapshot(), Some(Path::new("worker.rs")));

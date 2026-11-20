@@ -123,6 +123,38 @@ fn javascript_jsx_typescript_and_tsx_combine_queries() {
 }
 
 #[test]
+fn specialized_captures_preserve_instance_keywords_and_builtins() {
+    for path in ["a.js", "a.jsx", "a.ts", "a.tsx"] {
+        let text = "class Cat extends Pet { act() { console.log(this.name, super.act(), require('food')); } }";
+        let parsed = parsed(path, text);
+        assert!(!parsed.layers[0].tree.root_node().has_error());
+        for (token, style) in [
+            ("console", StyleRole::SyntaxVariableBuiltin),
+            ("this", StyleRole::SyntaxVariableSpecial),
+            ("super", StyleRole::SyntaxVariableSpecial),
+            ("name", StyleRole::SyntaxVariable),
+            ("require", StyleRole::SyntaxFunctionBuiltin),
+        ] {
+            assert_token(&parsed, text, token, style);
+        }
+    }
+
+    let text = "impl Cat { fn act(&self) { self.feed(); self::other(); } }";
+    let result = parsed("a.rs", text);
+    assert_token(&result, text, "self)", StyleRole::SyntaxVariableSpecial);
+    assert_token(&result, text, "self.feed", StyleRole::SyntaxVariableSpecial);
+    assert_token(&result, text, "self::", StyleRole::SyntaxVariable);
+    assert_eq!(
+        capture_style("function.builtin.static"),
+        Some(StyleRole::SyntaxFunctionBuiltin)
+    );
+    assert_eq!(
+        capture_style("function.method.static"),
+        Some(StyleRole::SyntaxFunction)
+    );
+}
+
+#[test]
 fn template_substitutions_override_the_enclosing_string() {
     let text = "const s = `hello ${call(42)}!`;";
     let parsed = parsed("a.js", text);
@@ -182,9 +214,9 @@ fn markdown_blocks_inlines_tables_and_unknown_fences_have_defined_styles() {
         ("Heading", StyleRole::MarkupHeading),
         ("italic", StyleRole::MarkupEmphasis),
         ("bold", StyleRole::MarkupStrong),
-        ("label", StyleRole::SyntaxVariable),
-        ("https:", StyleRole::SyntaxString),
-        ("code", StyleRole::SyntaxString),
+        ("label", StyleRole::MarkupLinkLabel),
+        ("https:", StyleRole::MarkupLinkUrl),
+        ("code", StyleRole::MarkupRaw),
         ("cell", StyleRole::MarkupEmphasis),
         ("const", StyleRole::Default),
     ] {

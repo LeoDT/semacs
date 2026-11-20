@@ -41,7 +41,9 @@
 | `syntax.keyword` / `syntax.comment` / `syntax.string` / `syntax.number` | 前景 / 背景及全部文字属性，语法关键字 / 注释 / 字符串 / 数字 |
 | `syntax.type` / `syntax.function` / `syntax.variable` / `syntax.constant` | 前景 / 背景及全部文字属性，语法类型 / 函数 / 变量 / 常量 |
 | `syntax.operator` / `syntax.punctuation` | 前景 / 背景及全部文字属性，语法运算符 / 标点 |
+| `syntax.function.builtin` / `syntax.variable.builtin` / `syntax.variable.special` | 内置函数 / 内置变量 / 实例关键字（如 `this`、`self`），未指定的属性沿用 `syntax.function` 或 `syntax.variable` |
 | `markup.heading` / `markup.strong` / `markup.emphasis` | 前景 / 背景及全部文字属性，Markdown 标题 / 强强调 / 强调；内置分别为加粗 / 加粗 / 斜体 |
+| `markup.raw` / `markup.link.label` / `markup.link.url` | Markdown 字面内容（如行内代码）、链接文字、链接地址；未指定的属性分别沿用 `syntax.string`、`syntax.variable`、`syntax.string` |
 | `diff.file` / `diff.hunk` / `diff.added` / `diff.removed` / `diff.context` | 前景 / 背景及全部文字属性，diff 文件头、hunk 头、增删行及上下文；heading 默认加粗，显式背景铺满逻辑行 |
 | `diff.file-highlight` / `diff.hunk-highlight` / `diff.added-highlight` / `diff.removed-highlight` / `diff.context-highlight` | 当前 section 内对应 diff 角色的样式；缺省沿用普通角色的有效属性，再使用 `section.current` 背景，文件 / hunk 头默认加粗；可独立覆盖，包括 `weight: "normal"` |
 | `diffstat.added` / `diffstat.removed` | 前景 / 背景及全部文字属性，diffstat 的增删计数 |
@@ -162,7 +164,7 @@ rquickjs 只执行 JavaScript。不内置 TypeScript 转译器或类型检查器
 | QuickJS 内存 / 栈 | 每个运行时 32 MiB / 256 KiB，不等于整个进程 RSS 上限 |
 | region 输入 / 返回文本 | 各最多 256 KiB UTF-8 字节 |
 | 脚本命令 / 自定义键位 | 文本变换、随包及用户 workflow 合计最多 256 条；用户自定义键位最多 1024 条 |
-| 自定义主题 / 样式覆盖调用 | 每份配置最多 32 个 / 128 次；每个主题最多 30 个命名样式 |
+| 自定义主题 / 样式覆盖调用 | 每份配置最多 32 个 / 128 次；每个主题最多覆盖一次完整的命名样式表 |
 | 正文请求 | 每个窗口最多一个未完成的脚本命令及一个配置重载；重复请求立即报告忙，不累计 |
 | worker 请求队列 | 容量 1，发送不等待空位 |
 

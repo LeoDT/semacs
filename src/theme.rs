@@ -27,6 +27,12 @@ pub enum StyleRole {
     SyntaxConstant,
     SyntaxOperator,
     SyntaxPunctuation,
+    SyntaxFunctionBuiltin,
+    SyntaxVariableBuiltin,
+    SyntaxVariableSpecial,
+    MarkupRaw,
+    MarkupLinkLabel,
+    MarkupLinkUrl,
     MarkupHeading,
     MarkupStrong,
     MarkupEmphasis,
@@ -73,6 +79,12 @@ impl StyleRole {
         Self::SyntaxConstant,
         Self::SyntaxOperator,
         Self::SyntaxPunctuation,
+        Self::SyntaxFunctionBuiltin,
+        Self::SyntaxVariableBuiltin,
+        Self::SyntaxVariableSpecial,
+        Self::MarkupRaw,
+        Self::MarkupLinkLabel,
+        Self::MarkupLinkUrl,
         Self::MarkupHeading,
         Self::MarkupStrong,
         Self::MarkupEmphasis,
@@ -118,6 +130,12 @@ impl StyleRole {
             Self::SyntaxConstant => "syntax.constant",
             Self::SyntaxOperator => "syntax.operator",
             Self::SyntaxPunctuation => "syntax.punctuation",
+            Self::SyntaxFunctionBuiltin => "syntax.function.builtin",
+            Self::SyntaxVariableBuiltin => "syntax.variable.builtin",
+            Self::SyntaxVariableSpecial => "syntax.variable.special",
+            Self::MarkupRaw => "markup.raw",
+            Self::MarkupLinkLabel => "markup.link.label",
+            Self::MarkupLinkUrl => "markup.link.url",
             Self::MarkupHeading => "markup.heading",
             Self::MarkupStrong => "markup.strong",
             Self::MarkupEmphasis => "markup.emphasis",
@@ -160,6 +178,24 @@ impl StyleRole {
             Self::DiffContextHighlight => Some(Self::DiffContext),
             _ => None,
         }
+    }
+
+    fn syntax_parent(self) -> Option<Self> {
+        match self {
+            Self::SyntaxFunctionBuiltin => Some(Self::SyntaxFunction),
+            Self::SyntaxVariableBuiltin | Self::SyntaxVariableSpecial | Self::MarkupLinkLabel => {
+                Some(Self::SyntaxVariable)
+            }
+            Self::MarkupRaw | Self::MarkupLinkUrl => Some(Self::SyntaxString),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn is_markup_modifier(self) -> bool {
+        matches!(
+            self,
+            Self::MarkupHeading | Self::MarkupStrong | Self::MarkupEmphasis
+        )
     }
 
     pub fn parse(name: &str) -> Result<Self, String> {
@@ -454,7 +490,11 @@ impl ThemeSettings {
         self.resolved = builtin_colors(definition.mode);
         self.attributes = builtin_attributes(definition.mode);
         for role in StyleRole::ALL {
-            if let Some(base) = role.plain() {
+            if let Some(parent) = role.syntax_parent() {
+                debug_assert!(parent < role);
+                self.resolved[role as usize] = self.resolved[parent as usize];
+                self.attributes[role as usize] = self.attributes[parent as usize];
+            } else if let Some(base) = role.plain() {
                 self.resolved[role as usize] = self.resolved[base as usize];
                 self.attributes[role as usize] = self.attributes[base as usize];
                 let background = self.style(StyleRole::SectionCurrent).background;
@@ -525,6 +565,9 @@ fn builtin_colors(mode: ThemeMode) -> [StyleColors; StyleRole::COUNT] {
         StyleRole::Default
         | StyleRole::Completion
         | StyleRole::SyntaxVariable
+        | StyleRole::SyntaxVariableBuiltin
+        | StyleRole::SyntaxVariableSpecial
+        | StyleRole::MarkupLinkLabel
         | StyleRole::SyntaxOperator
         | StyleRole::MarkupEmphasis
         | StyleRole::DiffContext
@@ -541,7 +584,10 @@ fn builtin_colors(mode: ThemeMode) -> [StyleColors; StyleRole::COUNT] {
         StyleRole::Separator => pair(separator, background),
         StyleRole::SyntaxKeyword | StyleRole::SectionHeading => pair(keyword, background),
         StyleRole::SyntaxComment => pair(comment, background),
-        StyleRole::SyntaxString | StyleRole::DiffStatAdded => pair(string, background),
+        StyleRole::SyntaxString
+        | StyleRole::MarkupRaw
+        | StyleRole::MarkupLinkUrl
+        | StyleRole::DiffStatAdded => pair(string, background),
         StyleRole::SyntaxNumber => pair(number, background),
         StyleRole::SyntaxType
         | StyleRole::MarkupHeading
@@ -549,7 +595,7 @@ fn builtin_colors(mode: ThemeMode) -> [StyleColors; StyleRole::COUNT] {
         | StyleRole::DiffFile
         | StyleRole::DiffFileHighlight
         | StyleRole::MagitBranch => pair(type_color, background),
-        StyleRole::SyntaxFunction => pair(function, background),
+        StyleRole::SyntaxFunction | StyleRole::SyntaxFunctionBuiltin => pair(function, background),
         StyleRole::SyntaxConstant | StyleRole::DiffStatRemoved => pair(constant, background),
         StyleRole::DiffHunk | StyleRole::DiffHunkHighlight => pair(function, inactive_bg),
         StyleRole::DiffAdded | StyleRole::DiffAddedHighlight => pair(

@@ -318,28 +318,35 @@ fn injections(
     Ok(children)
 }
 
-pub(super) fn capture_style(name: &str) -> Option<StyleRole> {
-    Some(match name {
-        "none" | "embedded" => StyleRole::Default,
-        "text.title" => StyleRole::MarkupHeading,
-        "text.strong" => StyleRole::MarkupStrong,
-        "text.emphasis" => StyleRole::MarkupEmphasis,
-        "text.reference" => StyleRole::SyntaxVariable,
-        "text.uri" | "text.literal" => StyleRole::SyntaxString,
-        _ => match name.split('.').next()? {
+pub(super) fn capture_style(mut name: &str) -> Option<StyleRole> {
+    loop {
+        return Some(match name {
+            "none" | "embedded" => StyleRole::Default,
+            "text.title" => StyleRole::MarkupHeading,
+            "text.strong" => StyleRole::MarkupStrong,
+            "text.emphasis" => StyleRole::MarkupEmphasis,
+            "text.reference" => StyleRole::MarkupLinkLabel,
+            "text.uri" => StyleRole::MarkupLinkUrl,
+            "text.literal" => StyleRole::MarkupRaw,
             "keyword" => StyleRole::SyntaxKeyword,
             "comment" => StyleRole::SyntaxComment,
             "string" | "escape" => StyleRole::SyntaxString,
             "number" => StyleRole::SyntaxNumber,
             "type" | "constructor" | "tag" => StyleRole::SyntaxType,
+            "function.builtin" => StyleRole::SyntaxFunctionBuiltin,
             "function" => StyleRole::SyntaxFunction,
+            "variable.builtin" => StyleRole::SyntaxVariableBuiltin,
+            "variable.special" => StyleRole::SyntaxVariableSpecial,
             "variable" | "property" | "label" | "attribute" => StyleRole::SyntaxVariable,
             "constant" => StyleRole::SyntaxConstant,
             "operator" => StyleRole::SyntaxOperator,
             "punctuation" => StyleRole::SyntaxPunctuation,
-            _ => return None,
-        },
-    })
+            _ => {
+                name = name.rsplit_once('.')?.0;
+                continue;
+            }
+        });
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -369,13 +376,12 @@ fn emit_until(
         let style = selected.4.role;
         let mut stop = selected.3.min(end);
         let mut modifiers = selected.4.modifiers.clone();
-        if inherit || selected.4.inherit || style >= StyleRole::MarkupHeading {
+        if inherit || selected.4.inherit || style.is_markup_modifier() {
             let mut enclosing: Vec<_> = active
                 .iter()
                 .filter(|entry| {
                     entry.3 > *position
-                        && (entry.4.role >= StyleRole::MarkupHeading
-                            || !entry.4.modifiers.is_empty())
+                        && (entry.4.role.is_markup_modifier() || !entry.4.modifiers.is_empty())
                 })
                 .collect();
             enclosing.sort_unstable();
@@ -387,7 +393,7 @@ fn emit_until(
                     .modifiers
                     .iter()
                     .copied()
-                    .chain((entry.4.role >= StyleRole::MarkupHeading).then_some(entry.4.role))
+                    .chain(entry.4.role.is_markup_modifier().then_some(entry.4.role))
                 {
                     if let Some(index) = modifiers.iter().position(|previous| *previous == role) {
                         modifiers.remove(index);
@@ -428,7 +434,7 @@ fn query(
     let inherit_markup = styles
         .iter()
         .flatten()
-        .any(|style| *style >= StyleRole::MarkupHeading);
+        .any(|style| style.is_markup_modifier());
     let mut cursor = QueryCursor::new();
     let mut progress = |_: &tree_sitter::QueryCursorState| {
         if cancelled.load(Ordering::Relaxed) {

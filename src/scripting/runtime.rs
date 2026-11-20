@@ -73,7 +73,8 @@ impl Engine {
             .map_err(|error| error.to_string())?;
         let configuration = context.with(|ctx| {
             let result = (|| -> rquickjs::Result<Object<'_>> {
-                let builder: Object = ctx.eval(include_str!("bootstrap.js"))?;
+                let bootstrap: Function = ctx.eval(include_str!("bootstrap.js"))?;
+                let builder: Object = bootstrap.call((StyleRole::COUNT,))?;
                 ctx.globals()
                     .set("semacs", builder.get::<_, Object>("api")?)?;
                 ctx.eval::<(), _>(include_str!("bundled.js"))?;

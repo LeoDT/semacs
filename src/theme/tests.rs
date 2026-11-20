@@ -33,6 +33,53 @@ fn switching_rebuilds_from_base_and_keeps_only_explicit_overrides() {
 }
 
 #[test]
+fn syntax_substyles_inherit_parent_attributes_and_override_independently() {
+    let mut theme = ThemeSettings::default();
+    let parent = StyleRole::SyntaxVariable;
+    let child = StyleRole::SyntaxVariableSpecial;
+    let sibling = StyleRole::SyntaxVariableBuiltin;
+    assert_eq!(theme.attributes(child), theme.attributes(parent));
+    theme.set_style(
+        parent,
+        StyleOverride::new(parent, Some("#123456"), Some("#234567"))
+            .unwrap()
+            .with_text_attributes(parent, Some("bold"), None, None, None)
+            .unwrap(),
+    );
+    theme
+        .define(
+            "custom",
+            "light",
+            vec![(
+                child,
+                StyleOverride::new(child, Some("#abcdef"), None)
+                    .unwrap()
+                    .with_text_attributes(child, None, Some(true), None, None)
+                    .unwrap(),
+            )],
+        )
+        .unwrap();
+    theme.select("custom").unwrap();
+    let attrs = theme.attributes(child);
+    assert_eq!(attrs.foreground, Some(parse_color("#abcdef").unwrap()));
+    assert_eq!(attrs.background, Some(parse_color("#234567").unwrap()));
+    assert_eq!(attrs.bold, Some(true));
+    assert_eq!(attrs.italic, Some(true));
+    assert_eq!(theme.attributes(sibling), theme.attributes(parent));
+
+    theme.select("dark").unwrap();
+    assert_eq!(theme.attributes(child), theme.attributes(parent));
+    assert_eq!(
+        theme.attributes(StyleRole::MarkupLinkUrl),
+        theme.attributes(StyleRole::SyntaxString)
+    );
+    assert_eq!(
+        theme.attributes(StyleRole::MarkupRaw),
+        theme.attributes(StyleRole::SyntaxString)
+    );
+}
+
+#[test]
 fn diff_highlights_follow_base_styles_and_allow_independent_overrides() {
     let mut theme = ThemeSettings::default();
     let role = StyleRole::DiffAdded;
