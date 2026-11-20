@@ -12,6 +12,7 @@ use unicode_width::UnicodeWidthStr;
 pub struct Minibuffer {
     editor: Entity<BufferView>,
     candidates: Option<CandidateList>,
+    peak_candidate_rows: usize,
     _editor_subscription: Subscription,
 }
 
@@ -32,6 +33,7 @@ impl Minibuffer {
         Self {
             editor,
             candidates: None,
+            peak_candidate_rows: 0,
             _editor_subscription: subscription,
         }
     }
@@ -80,6 +82,7 @@ impl Render for Minibuffer {
         let fonts = cx.global::<crate::appearance::FontSettings>();
         let available = window.viewport_size().height - input_height - px(72.) - line_height;
         let rows = (f32::from(available.max(px(0.))) / f32::from(line_height)).floor() as usize;
+        let row_limit = rows.min(8);
         let mut panel = div()
             .w_full()
             .overflow_hidden()
@@ -101,15 +104,20 @@ impl Render for Minibuffer {
                     list.items.len()
                 )
             };
-            panel = panel.child(
-                div()
-                    .h(px(24.))
-                    .px_3()
-                    .text_sm()
-                    .text_color(annotation.foreground)
-                    .child(count),
-            );
-            let visible = list.visible_range(rows.min(8));
+            let visible = list.visible_range(row_limit);
+            self.peak_candidate_rows = self.peak_candidate_rows.max(visible.len());
+            let reserved_rows = self.peak_candidate_rows.min(row_limit);
+            let count_height = px(24.);
+            panel = panel
+                .h(count_height + line_height * reserved_rows as f32)
+                .child(
+                    div()
+                        .h(count_height)
+                        .px_3()
+                        .text_sm()
+                        .text_color(annotation.foreground)
+                        .child(count),
+                );
             let column = match list.annotation {
                 AnnotationPlacement::MarginaliaLeft => {
                     let font_id = window.text_system().resolve_font(&fonts.font());
