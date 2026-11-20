@@ -48,6 +48,8 @@ cargo run --release
 
 The binary is written to `target/release/semacs`.
 
+For local installation, run `./scripts/install-local.sh` (requires Python 3). It builds the release binary and copies it to `~/.local/bin/semacs` on success. Re-run the script to update it, and make sure `~/.local/bin` is on your `PATH`.
+
 ## Configuration
 
 semacs reads `$XDG_CONFIG_HOME/semacs/init.js`, falling back to `$HOME/.config/semacs/init.js`. The configuration is a single JavaScript file; see [`examples/init.js`](examples/init.js) and the [configuration guide](docs/scripting.md).

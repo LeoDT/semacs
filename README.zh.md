@@ -48,6 +48,8 @@ cargo run --release
 
 二进制输出到 `target/release/semacs`。
 
+本机安装可运行 `./scripts/install-local.sh`（需要 Python 3）。脚本构建 release 版，成功后复制到 `~/.local/bin/semacs`。更新时重新运行脚本，并确保 `~/.local/bin` 在 `PATH` 中。
+
 ## 配置
 
 semacs 读取 `$XDG_CONFIG_HOME/semacs/init.js`；变量不可用时回退到 `$HOME/.config/semacs/init.js`。配置是一个普通 JavaScript 文件；示例见 [`examples/init.js`](examples/init.js)，说明见 [配置文档](docs/scripting.md)。
