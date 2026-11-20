@@ -101,6 +101,7 @@ fn contiguous_unicode_deletes_merge_and_restore_the_original_point_and_marker() 
             at(&mut target, mark);
             run(&mut target, Command::SetMark);
             at(&mut target, if backward { 11 } else { 1 });
+            run(&mut target, Command::KeyboardQuit);
             let point = target.buffer().point();
             for _ in 0..4 {
                 run(

@@ -860,7 +860,9 @@ fn printable_binding_runs_the_registered_command_instead_of_self_insert(cx: &mut
 }
 
 #[gpui::test]
-fn gui_delete_uses_emacs_region_semantics_and_backspace_remains_scalar(cx: &mut TestAppContext) {
+fn gui_delete_removes_active_region_and_backspace_without_region_deletes_one_char(
+    cx: &mut TestAppContext,
+) {
     let (mut visual, editor) = open("abcdef", cx);
     visual.simulate_keystrokes("ctrl-f ctrl-t ctrl-f ctrl-f ctrl-f delete");
     redraw(&mut visual);
@@ -873,6 +875,34 @@ fn gui_delete_uses_emacs_region_semantics_and_backspace_remains_scalar(cx: &mut 
     visual.simulate_keystrokes("backspace");
     redraw(&mut visual);
     visual.read(|cx| assert_eq!(editor.read(cx).buffer().text().to_string(), "ef"));
+}
+
+#[gpui::test]
+fn backspace_deletes_keyboard_region_as_one_edit_without_killing(cx: &mut TestAppContext) {
+    let (mut visual, editor) = open("abcdef", cx);
+    visual.simulate_keystrokes("ctrl-f ctrl-t ctrl-f ctrl-f ctrl-f backspace");
+    redraw(&mut visual);
+    visual.read(|cx| {
+        let view = editor.read(cx);
+        assert_eq!(view.buffer().text().to_string(), "aef");
+        assert_eq!(view.buffer().point(), ByteOffset(1));
+        assert!(!view.buffer().mark_active());
+        assert!(view.target.kill_ring().latest().is_none());
+    });
+    visual.simulate_keystrokes("backspace ctrl-/");
+    redraw(&mut visual);
+    visual.read(|cx| assert_eq!(editor.read(cx).buffer().text().to_string(), "aef"));
+    visual.simulate_keystrokes("ctrl-/");
+    redraw(&mut visual);
+    visual.read(|cx| assert_eq!(editor.read(cx).buffer().text().to_string(), "abcdef"));
+}
+
+#[gpui::test]
+fn ctrl_d_does_not_delete_the_active_region(cx: &mut TestAppContext) {
+    let (mut visual, editor) = open("abcdef", cx);
+    visual.simulate_keystrokes("ctrl-f ctrl-t ctrl-f ctrl-f ctrl-f ctrl-d");
+    redraw(&mut visual);
+    visual.read(|cx| assert_eq!(editor.read(cx).buffer().text().to_string(), "abcdf"));
 }
 
 #[gpui::test]

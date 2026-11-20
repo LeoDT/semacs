@@ -53,6 +53,7 @@ fn listener_deletion_chain_and_history_need_no_intermediate_paint(cx: &mut TestA
             "ctrl-f",
             "ctrl-f",
             "ctrl-f",
+            "ctrl-g",
             "backspace",
             "backspace",
             "backspace",

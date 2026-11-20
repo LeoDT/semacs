@@ -86,6 +86,33 @@ fn dragging_keeps_the_press_mark_and_an_active_region_until_the_next_command(
 }
 
 #[gpui::test]
+fn backspace_deletes_a_mouse_region_even_with_point_at_buffer_start(cx: &mut TestAppContext) {
+    let (mut visual, editor) = open("abcdef", cx);
+    let press = caret(&mut visual, &editor, 3);
+    let start = caret(&mut visual, &editor, 0);
+    visual.simulate_mouse_down(press, MouseButton::Left, Default::default());
+    redraw(&mut visual);
+    visual.simulate_mouse_move(start, MouseButton::Left, Default::default());
+    redraw(&mut visual);
+    visual.simulate_mouse_up(start, MouseButton::Left, Default::default());
+    redraw(&mut visual);
+    visual.read(|cx| {
+        assert_eq!(
+            editor.read(cx).buffer().region(),
+            Some(ByteOffset(0)..ByteOffset(3))
+        );
+    });
+    visual.simulate_keystrokes("backspace");
+    redraw(&mut visual);
+    visual.read(|cx| {
+        let buffer = editor.read(cx).buffer();
+        assert_eq!(buffer.text().to_string(), "def");
+        assert_eq!(buffer.point(), ByteOffset(0));
+        assert!(!buffer.mark_active());
+    });
+}
+
+#[gpui::test]
 fn dragging_forward_selects_through_the_pointer_offset(cx: &mut TestAppContext) {
     let (mut visual, editor) = open("abcdef", cx);
     let press = caret(&mut visual, &editor, 1);

@@ -434,6 +434,13 @@ impl EditTarget {
         viewport: Option<&dyn CommandViewport>,
         append_kill: bool,
     ) -> Result<CommandOutcome, RouteError> {
+        if matches!(
+            command,
+            Command::DeleteForwardChar | Command::DeleteBackwardChar
+        ) && let Some(region) = self.buffer.region()
+        {
+            return self.replace_command(token, region, "");
+        }
         let point = self.buffer.point();
         let field = self.field_range();
         let text = &self.buffer.text();
@@ -538,12 +545,6 @@ impl EditTarget {
                     viewport: Some(ViewportRequest::Recenter(position)),
                     ..CommandOutcome::default()
                 });
-            }
-            Command::DeleteForwardChar
-                if self.buffer.mark_active() && self.buffer.mark() != Some(point) =>
-            {
-                let mark = self.buffer.mark().expect("active mark");
-                return self.replace_command(token, point.min(mark)..point.max(mark), "");
             }
             Command::DeleteChar | Command::DeleteForwardChar => {
                 let end = next().ok_or(RouteError::EndOfBuffer)?;

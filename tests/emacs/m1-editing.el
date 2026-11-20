@@ -19,9 +19,11 @@
     (move-end-of-line 1)
     (should (= (point) 5))))
 
-(ert-deftest reference/m1-forward-delete-region ()
+(ert-deftest reference/m1-delete-region ()
   (should (equal emacs-version "31.1"))
-  (dolist (command '(delete-forward-char delete-char))
+  (should delete-active-region)
+  (should-not delete-selection-mode)
+  (dolist (command '(delete-backward-char delete-forward-char delete-char))
     (with-temp-buffer
       (fundamental-mode)
       (transient-mark-mode 1)
@@ -32,7 +34,7 @@
       (setq mark-active t)
       (funcall command 1)
       (should (equal (buffer-string)
-                     (if (eq command 'delete-forward-char) "aef" "abcdf"))))))
+                     (if (eq command 'delete-char) "abcdf" "aef"))))))
 
 (ert-deftest reference/m1-escape-quit ()
   (should (equal emacs-version "31.1"))
