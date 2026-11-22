@@ -89,6 +89,8 @@ impl AppShell {
         self.minibuffer = Some(MinibufferMount {
             view: minibuffer.clone(),
             completion: None,
+            project_files_work: None,
+            project_files: None,
             candidate_snapshot: None,
             pending_candidate_action: None,
             _subscription: subscription,
@@ -383,6 +385,13 @@ impl AppShell {
             ReadKind::TreeRoot | ReadKind::TreeFile | ReadKind::TreeWidth => {
                 self.confirm_tree_read(kind, id, window, cx)
             }
+            ReadKind::ProjectSelect { .. }
+            | ReadKind::ProjectDirectory { .. }
+            | ReadKind::ProjectScanDirectory
+            | ReadKind::ProjectFindFile { .. }
+            | ReadKind::ProjectSwitchToBuffer { .. } => {
+                self.confirm_project_read(kind, id, window, cx)
+            }
             ReadKind::FindFile => self.confirm_find_file(id, window, cx),
             ReadKind::WriteFile => self.confirm_write_file(id, window, cx),
             ReadKind::SwitchToBuffer { default } => {
@@ -452,6 +461,9 @@ impl AppShell {
             self.cancel_save_confirmation(cx);
         }
         let Some(target) = self.end_session(id, window, cx) else {
+            if matches!(kind, ReadKind::KillBufferConfirm { batch: true, .. }) {
+                self.cancel_closing();
+            }
             return;
         };
         match kind {
@@ -536,15 +548,31 @@ impl AppShell {
                     self.decline_save(&target, window, cx);
                 }
             }
-            ReadKind::KillBufferConfirm { .. } => match answer {
+            ReadKind::KillBufferConfirm { batch, .. } => match answer {
                 Answer::Yes => {
                     if let Some(index) = self.buffer_index(&target, cx) {
                         self.remove_buffer(index, window, cx);
                     }
+                    if batch {
+                        self.process_next_kill(window, cx);
+                    }
                 }
-                Answer::Save => self.save_then_kill(&target, window, cx),
-                _ => self.show_message(&target, "Canceled", cx),
+                Answer::Save => self.save_then_kill(&target, batch, window, cx),
+                _ => {
+                    if batch {
+                        self.process_next_kill(window, cx);
+                    } else {
+                        self.show_message(&target, "Canceled", cx);
+                    }
+                }
             },
+            ReadKind::ProjectKillBuffersConfirm { buffers, .. } => {
+                if answer == Answer::Yes {
+                    self.begin_kill_queue(buffers, &target, window, cx);
+                } else {
+                    self.show_message(&target, "Canceled", cx);
+                }
+            }
             ReadKind::ExitSave { .. } => {
                 if answer == Answer::No {
                     self.process_next_exit(window, cx);

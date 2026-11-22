@@ -1,0 +1,9 @@
+# emacs-version: 31.1
+# major-mode: fundamental-mode
+# driving: emacs -Q --batch, key-binding lookup (not a command loop)
+#
+C-x p	PREFIX
+C-x p p	project-switch-project
+C-x p f	project-find-file
+C-x p b	project-switch-to-buffer
+C-x p k	project-kill-buffers

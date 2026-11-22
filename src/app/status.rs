@@ -41,11 +41,26 @@ impl AppShell {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.open_status_in(origin, None, window, cx);
+    }
+
+    pub(super) fn open_status_in(
+        &mut self,
+        origin: &Entity<BufferView>,
+        directory_override: Option<std::path::PathBuf>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         if !self.git_available(origin, cx) || !origin.read(cx).git_open_ready() {
             return;
         }
-        let repository = origin.read(cx).buffer().repository();
-        let directory = self.default_directory_for(origin, cx);
+        let (repository, directory) = match directory_override {
+            Some(directory) => (None, directory),
+            None => (
+                origin.read(cx).buffer().repository(),
+                self.default_directory_for(origin, cx),
+            ),
+        };
         let session = origin.read(cx).display_snapshot().id().session;
         let operation = operation_id();
         let origin = origin.clone();

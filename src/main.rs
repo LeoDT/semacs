@@ -43,11 +43,19 @@ fn main() -> ExitCode {
                 eprintln!("semacs: file-name history unavailable: {error}");
                 (semacs::file_history::FileHistory::default(), None)
             });
+    let (project_list, _project_list_persistence) = semacs::persisted::state_path("projects")
+        .and_then(semacs::project::open_list)
+        .map(|(list, persistence)| (list, Some(persistence)))
+        .unwrap_or_else(|error| {
+            eprintln!("semacs: project list unavailable: {error}");
+            (semacs::project::ProjectList::default(), None)
+        });
     let title = format!("{} - semacs", buffer.display_name());
     gpui_kit::application().run(move |cx| {
         semacs::app::init(cx);
         cx.set_global(history);
         cx.set_global(file_history);
+        cx.set_global(project_list);
         let options = WindowOptions {
             titlebar: Some(TitlebarOptions {
                 title: Some(title.into()),

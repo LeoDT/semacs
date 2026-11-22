@@ -47,6 +47,53 @@ impl List {
         }
         self.entries.insert(0, entry.to_owned());
         self.entries.truncate(self.capacity);
+        self.flush();
+    }
+
+    /// Moves `entry` to the front of a deduplicated newest-first list, dropping
+    /// any earlier occurrence and overflow past capacity. Returns whether the
+    /// list changed.
+    pub fn promote(&mut self, entry: &str) -> bool {
+        if entry.is_empty() || self.entries.first().is_some_and(|first| first == entry) {
+            return false;
+        }
+        self.entries.retain(|existing| existing != entry);
+        self.entries.insert(0, entry.to_owned());
+        self.entries.truncate(self.capacity);
+        self.flush();
+        true
+    }
+
+    /// Removes all occurrences of `entry`. Returns whether any entry was removed.
+    pub fn remove(&mut self, entry: &str) -> bool {
+        let before = self.entries.len();
+        self.entries.retain(|existing| existing != entry);
+        if self.entries.len() == before {
+            return false;
+        }
+        self.flush();
+        true
+    }
+
+    /// Keeps entries satisfying `predicate` and returns how many were removed.
+    pub fn retain(&mut self, mut predicate: impl FnMut(&str) -> bool) -> usize {
+        let before = self.entries.len();
+        self.entries.retain(|existing| predicate(existing));
+        let removed = before - self.entries.len();
+        if removed > 0 {
+            self.flush();
+        }
+        removed
+    }
+
+    /// Removes duplicate entries while keeping the first (most recent)
+    /// occurrence of each entry.
+    pub fn dedup_in_place(&mut self) {
+        let mut seen = std::collections::HashSet::with_capacity(self.entries.len());
+        self.entries.retain(|entry| seen.insert(entry.clone()));
+    }
+
+    fn flush(&self) {
         if let Some(writer) = &self.writer {
             writer.pending.lock().unwrap().text = Some(self.entries.join("\n"));
             writer.changed.notify_one();

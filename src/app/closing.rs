@@ -93,6 +93,12 @@ impl AppShell {
                     self.remove_buffer(index, window, cx);
                 }
             }
+            AfterSave::KillBatchNext => {
+                if let Some(index) = self.buffer_index(view, cx) {
+                    self.remove_buffer(index, window, cx);
+                }
+                self.process_next_kill(window, cx);
+            }
             AfterSave::ContinueExit => self.process_next_exit(window, cx),
             AfterSave::Cancel(reason) => {
                 self.cancel_closing();
@@ -106,19 +112,113 @@ impl AppShell {
     pub(super) fn save_then_kill(
         &mut self,
         target: &Entity<BufferView>,
+        batch: bool,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         let Some(index) = self.buffer_index(target, cx) else {
+            if batch {
+                self.process_next_kill(window, cx);
+            }
             return;
         };
         if !self.buffers[index].buffer.is_modified() && !self.buffers[index].save.is_saving() {
             self.remove_buffer(index, window, cx);
+            if batch {
+                self.process_next_kill(window, cx);
+            }
             return;
         }
-        self.closing = Some(Closing::Kill(target.read(cx).buffer().snapshot_id().buffer));
+        let id = target.read(cx).buffer().snapshot_id().buffer;
+        if batch {
+            let Some((waiting_save, _)) = self.closing.as_mut().and_then(Closing::kill_batch_mut)
+            else {
+                return;
+            };
+            if waiting_save.is_some() {
+                self.show_message(target, "Another close operation is in progress", cx);
+                return;
+            }
+            *waiting_save = Some(id);
+            if !self.save_buffer(target, window, cx) {
+                self.cancel_closing();
+            }
+            return;
+        }
+        if self.closing.is_some() {
+            self.show_message(target, "Another close operation is in progress", cx);
+            return;
+        }
+        self.closing = Some(Closing::kill_one(id));
         if !self.save_buffer(target, window, cx) {
             self.cancel_closing();
+        }
+    }
+
+    pub(super) fn begin_kill_queue(
+        &mut self,
+        buffers: Vec<BufferId>,
+        origin: &Entity<BufferView>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if buffers.is_empty() {
+            return;
+        }
+        if self.closing.is_some() {
+            self.show_message(origin, "Another close operation is in progress", cx);
+            return;
+        }
+        self.closing = Some(Closing::kill_many(buffers));
+        self.process_next_kill(window, cx);
+    }
+
+    pub(super) fn process_next_kill(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.closing.as_ref().is_some_and(Closing::is_kill_batch) || self.session.is_some() {
+            return;
+        }
+        loop {
+            let next = match self.closing.as_mut().and_then(Closing::kill_batch_mut) {
+                Some((waiting_save, _)) if waiting_save.is_some() => return,
+                Some((_, remaining)) => remaining.pop_front(),
+                None => return,
+            };
+            let Some(id) = next else {
+                self.closing = None;
+                return;
+            };
+            let Some(index) = self.buffers.index_of(id) else {
+                continue;
+            };
+            #[cfg(unix)]
+            if self.commit_editors.contains_key(&id) {
+                let target = self.buffer_target(index, window, cx);
+                self.show_message(
+                    &target,
+                    "Use with-editor-cancel to end this editor session",
+                    cx,
+                );
+                continue;
+            }
+            let modified = self.buffers[index].buffer.is_modified();
+            if modified {
+                let name = self.buffers[index].buffer.display_name();
+                let target = self.buffer_target(index, window, cx);
+                if self
+                    .begin_read(
+                        ReadKind::KillBufferConfirm { name, batch: true },
+                        &target,
+                        "",
+                        window,
+                        cx,
+                    )
+                    .is_none()
+                {
+                    self.cancel_closing();
+                }
+                return;
+            }
+            self.remove_buffer(index, window, cx);
         }
     }
 

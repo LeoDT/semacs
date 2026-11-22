@@ -81,6 +81,38 @@ impl Drop for TreeWork {
 }
 
 impl AppShell {
+    pub(super) fn open_tree_for_project(
+        &mut self,
+        root: PathBuf,
+        origin: &Entity<BufferView>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.minibuffer.is_some() {
+            return;
+        }
+        if !crate::project::is_available(&root) {
+            self.show_message(
+                origin,
+                format!("Directory does not exist: {}", root.display()),
+                cx,
+            );
+            return;
+        }
+        let existing = self
+            .buffers
+            .iter()
+            .position(|slot| slot.buffer.tree_root().is_some());
+        if let Some(index) = existing {
+            if self.buffers[index].buffer.tree_root().as_deref() == Some(root.as_path()) {
+                self.show_tree(origin, Some(root), window, cx);
+                return;
+            }
+            self.remove_buffer(index, window, cx);
+        }
+        self.show_tree(origin, Some(root), window, cx);
+    }
+
     pub(super) fn toggle_tree(
         &mut self,
         origin: &Entity<BufferView>,

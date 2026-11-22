@@ -127,6 +127,14 @@ commands! {
     Treemacs => "treemacs", Application, [];
     TreemacsSelectWindow => "treemacs-select-window", Application, [];
     TreemacsFindFile => "treemacs-find-file", Application, [];
+    ProjectSwitchProject => "project-switch-project", Application, ["ctrl-x p p" => "C-x p p"];
+    ProjectFindFile => "project-find-file", Application, ["ctrl-x p f" => "C-x p f"];
+    ProjectSwitchToBuffer => "project-switch-to-buffer", Application, ["ctrl-x p b" => "C-x p b"];
+    ProjectKillBuffers => "project-kill-buffers", Application, ["ctrl-x p k" => "C-x p k"];
+    ProjectRememberProject => "project-remember-project", Application, [];
+    ProjectForgetProject => "project-forget-project", Application, [];
+    ProjectForgetZombieProjects => "project-forget-zombie-projects", Application, [];
+    ProjectRememberProjectsUnder => "project-remember-projects-under", Application, [];
     TreemacsToggle => "treemacs-TAB-action", Application("treemacs"), ["tab" => "TAB", "ctrl-i" => "C-i"];
     TreemacsRefresh => "treemacs-refresh", Application("treemacs"), ["g" => "g", "r" => "r"];
     TreemacsReturn => "treemacs-RET-action", Application("treemacs"), ["enter" => "RET", "ctrl-m" => "C-m", "l" => "l"];

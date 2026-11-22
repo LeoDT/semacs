@@ -49,6 +49,7 @@ fn default_bindings_match_the_emacs_reference_or_approved_contracts() {
     let body_reference = reference_table(include_str!("emacs/m1-bindings.tsv"));
     let session_reference = reference_table(include_str!("emacs/m2-minibuffer-bindings.tsv"));
     let messages_reference = reference_table(include_str!("emacs/d1-bindings.tsv"));
+    let project_reference = reference_table(include_str!("emacs/f7-bindings.tsv"));
     let application = Keymap::for_scope(Scope::Application);
     let edit = Keymap::for_scope(Scope::Edit);
     let session = Keymap::for_scope(Scope::ReadSession);
@@ -69,6 +70,7 @@ fn default_bindings_match_the_emacs_reference_or_approved_contracts() {
                 // Approved override: the user binds kill-current-buffer here.
                 "C-x C-k" => Some("kill-current-buffer"),
                 "C-h e" => messages_reference.get("C-h e").copied(),
+                key if project_reference.contains_key(key) => project_reference.get(key).copied(),
                 key => reference.get(key).copied(),
             };
             assert_eq!(expected, Some(spec.name));
@@ -80,7 +82,14 @@ fn default_bindings_match_the_emacs_reference_or_approved_contracts() {
             );
         }
     }
-    for sequence in ["ctrl-x", "ctrl-h", "escape", "escape escape", "alt-escape"] {
+    for sequence in [
+        "ctrl-x",
+        "ctrl-x p",
+        "ctrl-h",
+        "escape",
+        "escape escape",
+        "alt-escape",
+    ] {
         assert_eq!(lookup(&body, &keys(sequence)), Lookup::Prefix);
     }
     // Application bindings live only in the application layer used by the body.

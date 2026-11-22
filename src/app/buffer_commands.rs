@@ -168,7 +168,7 @@ impl AppShell {
         if modified {
             let target = self.buffer_target(index, window, cx);
             self.begin_read(
-                ReadKind::KillBufferConfirm { name },
+                ReadKind::KillBufferConfirm { name, batch: false },
                 &target,
                 "",
                 window,
@@ -231,6 +231,19 @@ impl AppShell {
         self.cancel_file_open();
         if matches!(&self.closing, Some(Closing::Kill(target)) if *target == id) {
             self.closing = None;
+        } else if let Some((waiting_save, remaining)) =
+            self.closing.as_mut().and_then(Closing::kill_batch_mut)
+        {
+            if *waiting_save == Some(id) {
+                // The buffer whose save was gating this batch was killed out of
+                // band; cancel the batch so a dangling queue cannot fire later.
+                self.closing = None;
+            } else {
+                remaining.retain(|other| *other != id);
+                if waiting_save.is_none() && remaining.is_empty() {
+                    self.closing = None;
+                }
+            }
         }
         self.reset_message_log(id);
         self.discard_tree_window(id, window, cx);

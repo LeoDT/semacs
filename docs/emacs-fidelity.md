@@ -500,3 +500,33 @@ F2 仅提供 status 与单文件整文件级 index 操作，不包含 hunk / 批
 ### 首版不提供的上游能力
 
 以下上游命令 / 能力在首版不实现，对应键位不绑定；它们是已确认的首版范围缺口，不是对上游行为的改写，也不额外添加上游没有的限制：排序选择 `s`、gitignored 隐藏 `t i` 与 git 状态注解（依赖仓库读取）、filewatch 与 `t a`、图标 / fringe / 序号等视觉开关（`t v` / `t n` / `t c` / `t d` / `t w` / `W`）、peek（`P`）、文件管理与 `d` / `R` / `m` / `c f` / `c d`、复制前缀 `y`、`b` 书签、`C` 清理、`!` / `M-!` 外部命令、`?` / `C-?` hydra、`M-m`、`o a *`（ace-window）与 `o x`（外部程序）、workspaces / 多根 / 项目前缀（`C-c C-w`、`C-c C-p`、`C-j` / `C-k`、`S-TAB`、`M-<up>` / `M-<down>`）、持久化与远程路径、鼠标动作。
+
+## 阶段 F7：基础 project
+
+本节定义已确认的 `project.el` 对齐行为，以 GNU Emacs 31.1 内置 `project.el` 为参照（不使用 `projectile`），默认绑定参照见 [f7-bindings.tsv](../tests/emacs/f7-bindings.tsv)。F6 treemacs 自身的“无 VCS 回退当前目录”规则保持不变。
+
+### 项目识别与已知项目列表
+
+- 项目发现（`project-current` 语义）：从当前 buffer 关联目录（Magit 仓库根 → treemacs 根 → visited 文件父目录 → 启动目录）向上查找最近的 `.git`（目录或文件，覆盖 worktree）。命中即为 Git 项目并记入已知项目列表；未命中时交互弹出项目选择器（已知项目列表按 MRU 排列，末项为 `... (choose a dir)`），不把当前普通目录静默记成持久化项目。
+- 选定无 `.git` 的已存在目录时，按上游作为 transient project 仅用于本次命令，不写入已知项目列表；若该目录原在已知列表中（如 `.git` 已被移除）或目录已不存在，则从列表移除并提示 `Project '<dir>' not found; removed from list`。
+- 已知项目列表在应用内共享并持久化在 `$XDG_STATE_HOME/semacs/projects` 或 `$HOME/.local/state/semacs/projects`（沿用历史状态文件约定，不读写 `~/.emacs.d/projects.eld`）。每次弹出项目选择前自动清理已不存在的本地目录（对齐 Emacs 31.1 `project-prune-zombie-projects` 默认 `prompt` 策略）。
+- 选择 `... (choose a dir)` 与 `project-remember-projects-under` 复用既有 minibuffer 目录路径补全，仅接受已存在目录。
+
+### 键位与命令（首版提供）
+
+| 键位 | 命令 | 行为 |
+|---|---|---|
+| `C-x p p` | `project-switch-project` | 选择已知项目或 `... (choose a dir)`，记住有效 Git 项目后显示单键分派菜单，在目标项目上下文执行所选动作；未识别键提示并保留菜单，`C-g` 取消。 |
+| `C-x p f` | `project-find-file` | 后台列出当前项目相对路径文件：Git 项目用 `git ls-files -z -c --exclude-standard -o`（含 untracked、遵循 `.gitignore`、排除 submodule 入口并合并已初始化的非软链 submodule）；transient 项目按迭代目录遍历并排除标准 VCS 目录。候选读入沿用模糊过滤与 `file-name-history` 相对路径排名，`RET` 打开所选文件，`M-RET` 允许新相对路径，空列表结束并回显 `Empty file list`。 |
+| `C-x p b` | `project-switch-to-buffer` | 在属于当前项目的已打开 buffer 中切换（按目录前缀归属，兼容符号链接与规范化仓库根），默认选中同项目最近其他 buffer。 |
+| `C-x p k` | `project-kill-buffers` | 筛选当前项目相关 buffer（排除全局 `*Messages*`），以完整 `yes` / `no` 确认（`Kill N buffers in <name>? (yes or no) `）后逐一走既有 kill 流程；含多个 dirty buffer 时逐个询问 `y` / `n` / `s`（`n` 跳过继续下一个，`C-g` 中止剩余队列）；无目标时回显 `No buffers to kill`。 |
+| （`M-x`） | `project-remember-project` / `project-forget-project` / `project-forget-zombie-projects` / `project-remember-projects-under` | 维护已知项目列表；`project-remember-project` 仅持久化已识别的 Git 项目，拒绝将 transient 普通目录写入列表。 |
+
+### 已批准差异与联动
+
+- **`project-switch-project` 单键分派菜单**：上游默认菜单包含依赖 dired / eshell / vc-dir / grep 的项；用户批准本阶段菜单固定为 `[f] Find file`、`[b] Switch buffer`、`[v] Magit status`、`[t] Treemacs`（接替上游 `v` 的 VCS 槽位并接入文件树）。
+- **Treemacs 联动**：通过 `C-x p p` 选择 `[t]` 时把左侧树切换到目标项目根并显示；通过 `C-x p p` 选择 `[f]` 打开另一项目的文件时保持已打开的 treemacs 树根不变。从 treemacs 侧窗触发 `project-find-file` 或 `project-switch-to-buffer` 时，切到普通 pane 打开/切换目标，不因侧窗 dedicated 失败。
+
+### 首版不提供的上游能力
+
+以下 `project.el` 能力在首版不实现，对应键位不绑定：`project-find-regexp` / `project-or-external-find-regexp`（留待项目内搜索阶段）、`project-find-dir` / `project-dired`、`project-vc-dir`、`project-shell` / `project-eshell` / `project-compile` / `project-shell-command` / `project-async-shell-command`、`project-query-replace-regexp`、`project-list-buffers`、`project-save-some-buffers`、`project-or-external-find-file`、`project-any-command` / `project-execute-extended-command`、`project-mode-line`、`.dir-locals.el` / `project-vc-extra-root-markers`、`C-u C-x p f`、非 Git VCS、TRAMP / 远程、多根 workspace 与 JS 配置 `project-switch-commands` 扩展。

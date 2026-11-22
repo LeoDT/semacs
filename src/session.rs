@@ -12,6 +12,17 @@ use crate::command::{CANDIDATE_BINDINGS, Command, Scope};
 use crate::completion::CandidateList;
 use crate::view::BufferView;
 
+/// What a confirmed project prompt executes once a project root is chosen.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ProjectAction {
+    SwitchMenu,
+    FindFile,
+    SwitchToBuffer,
+    KillBuffers,
+    Remember,
+    Forget,
+}
+
 /// What a confirmed session does with the text read in the minibuffer.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ReadKind {
@@ -20,6 +31,30 @@ pub enum ReadKind {
     FontFamily,
     Theme,
     CommitMenu,
+    ProjectSelect {
+        action: ProjectAction,
+        prompt: String,
+        default: Option<String>,
+        require_known: bool,
+    },
+    ProjectDirectory {
+        action: ProjectAction,
+    },
+    ProjectScanDirectory,
+    ProjectSwitchMenu {
+        project: crate::project::Project,
+    },
+    ProjectFindFile {
+        project: crate::project::Project,
+    },
+    ProjectSwitchToBuffer {
+        project: crate::project::Project,
+        default: Option<String>,
+    },
+    ProjectKillBuffersConfirm {
+        project_name: String,
+        buffers: Vec<crate::buffer::BufferId>,
+    },
     HistoryFileVersion {
         versions: Vec<crate::history::FileVersion>,
     },
@@ -56,6 +91,7 @@ pub enum ReadKind {
     /// A modified buffer would be killed.
     KillBufferConfirm {
         name: String,
+        batch: bool,
     },
     /// Exit coordination asks whether to save one dirty buffer.
     ExitSave {
@@ -132,6 +168,11 @@ impl ReadKind {
             Self::Command
                 | Self::HistoryFileVersion { .. }
                 | Self::Theme
+                | Self::ProjectSelect { .. }
+                | Self::ProjectDirectory { .. }
+                | Self::ProjectScanDirectory
+                | Self::ProjectFindFile { .. }
+                | Self::ProjectSwitchToBuffer { .. }
                 | Self::FindFile
                 | Self::TreeRoot
                 | Self::TreeFile
@@ -143,7 +184,9 @@ impl ReadKind {
 
     pub fn candidate_default(&self) -> Option<&str> {
         match self {
-            Self::SwitchToBuffer { default } => default.as_deref(),
+            Self::SwitchToBuffer { default }
+            | Self::ProjectSwitchToBuffer { default, .. }
+            | Self::ProjectSelect { default, .. } => default.as_deref(),
             Self::KillBuffer { default } => Some(default),
             _ => None,
         }
@@ -160,6 +203,7 @@ impl ReadKind {
                 | Self::CommitMerge { .. }
                 | Self::CommitInterrupt { .. }
                 | Self::CommitMenu
+                | Self::ProjectSwitchMenu { .. }
         ) || match self {
             #[cfg(unix)]
             Self::CommitPublished { .. } | Self::CommitTargetMerges { .. } => true,
@@ -171,6 +215,7 @@ impl ReadKind {
         match self {
             Self::KillBufferConfirm { .. } => "Please answer y, n, or s",
             Self::CommitMenu => "Choose c, a, w, f, s; C-g cancels",
+            Self::ProjectSwitchMenu { .. } => "Unrecognized input; choose f, b, v, t; C-g cancels",
             #[cfg(unix)]
             Self::CommitTargetMerges { .. } => "Choose c (continue), s (select other), a (abort)",
             _ if self.is_single_key() => "Please answer y or n",
@@ -184,6 +229,29 @@ impl ReadKind {
             ReadKind::FontFamily => "Font family: ".to_owned(),
             ReadKind::Theme => "Load theme: ".to_owned(),
             ReadKind::CommitMenu => "Commit: [c] create  [a] amend  [w] reword  [f] fixup  [s] squash; C-g cancels: ".into(),
+            ReadKind::ProjectSelect { prompt, .. } => prompt.clone(),
+            ReadKind::ProjectDirectory { .. } => "Select directory: ".to_owned(),
+            ReadKind::ProjectScanDirectory => "Directory: ".to_owned(),
+            ReadKind::ProjectSwitchMenu { project } => format!(
+                "Command in `{}': [f] Find file  [b] Switch buffer  [v] Magit status  [t] Treemacs ",
+                crate::files::directory_input(&project.root)
+            ),
+            ReadKind::ProjectFindFile { project } => format!(
+                "Find file in {}: ",
+                crate::files::directory_input(&project.root)
+            ),
+            ReadKind::ProjectSwitchToBuffer { default, .. } => match default {
+                Some(name) => format!("Switch to buffer (default {name}): "),
+                None => "Switch to buffer: ".to_owned(),
+            },
+            ReadKind::ProjectKillBuffersConfirm {
+                project_name,
+                buffers,
+            } => format!(
+                "Kill {} buffers in {}? (yes or no) ",
+                buffers.len(),
+                project_name
+            ),
             ReadKind::HistoryFileVersion { .. } => "Visit file version: ".into(),
             #[cfg(unix)]
             ReadKind::CommitPublished { branches, amending, .. } => format!("{} already been published to {}. Do you really want to modify {}? (y or n) ", if *amending { "This commit has" } else { "Some of these commits have" }, branches.join(", "), if *amending { "it" } else { "them" }),
@@ -208,7 +276,7 @@ impl ReadKind {
             ReadKind::KillBuffer { default } => {
                 format!("Kill buffer (default {default}): ")
             }
-            ReadKind::KillBufferConfirm { name } => {
+            ReadKind::KillBufferConfirm { name, .. } => {
                 format!("Buffer {name} modified; kill anyway? (y, n, s) ")
             }
             ReadKind::ExitSave { path, name } => match path {
@@ -259,6 +327,7 @@ impl ReadSession {
             let mut keymap = Keymap::default();
             let keys: &[&str] = match &kind {
                 ReadKind::CommitMenu => &["c", "a", "w", "f", "s"],
+                ReadKind::ProjectSwitchMenu { .. } => &["f", "b", "v", "t"],
                 #[cfg(unix)]
                 ReadKind::CommitTargetMerges { .. } => &["c", "s", "a"],
                 _ => &["y", "shift-y", "n", "shift-n", "enter", "ctrl-m"],
@@ -271,10 +340,12 @@ impl ReadSession {
                     )
                     .unwrap();
             }
-            let extra = if matches!(kind, ReadKind::KillBufferConfirm { .. }) {
-                &["s", "shift-s"][..]
-            } else {
-                &["space", "backspace", "delete"][..]
+            let extra: &[&str] = match &kind {
+                ReadKind::KillBufferConfirm { .. } => &["s", "shift-s"],
+                ReadKind::CommitMenu | ReadKind::ProjectSwitchMenu { .. } => &[],
+                #[cfg(unix)]
+                ReadKind::CommitTargetMerges { .. } => &[],
+                _ => &["space", "backspace", "delete"],
             };
             for key in extra {
                 keymap

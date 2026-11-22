@@ -46,6 +46,7 @@ mod index_write;
 pub use git::records::{GitWritePhase, GitWriteRecord};
 pub use index_write::StatusWriteTarget;
 mod messages;
+mod project;
 mod reads;
 mod scripting;
 #[cfg(test)]
@@ -64,11 +65,14 @@ pub fn init(cx: &mut App) {
     crate::theme::ThemeSettings::default().install(cx);
     cx.default_global::<crate::command_history::CommandHistory>();
     cx.default_global::<crate::file_history::FileHistory>();
+    cx.default_global::<crate::project::ProjectList>();
 }
 
 struct MinibufferMount {
     view: Entity<Minibuffer>,
     completion: Option<candidates::CompletionWork>,
+    project_files_work: Option<candidates::CompletionWork>,
+    project_files: Option<std::sync::Arc<Vec<String>>>,
     candidate_snapshot: Option<crate::input::DisplayId>,
     pending_candidate_action: Option<crate::completion::CandidateAction>,
     _subscription: Subscription,
@@ -86,6 +90,7 @@ pub struct AppShell {
     next_pane: u64,
     tree_window: tree::TreeWindow,
     tree_work: Option<tree::TreeWork>,
+    project_scan_task: Option<project::ProjectScanWork>,
     body_keymap: Keymap,
     mode_keymaps: HashMap<crate::mode::ModeId, Keymap>,
     commands: CommandRegistry,
@@ -124,6 +129,8 @@ pub struct AppShell {
     workflow_return_gate: Option<futures_channel::oneshot::Receiver<()>>,
     #[cfg(test)]
     tree_read_gate: Option<futures_channel::oneshot::Receiver<()>>,
+    #[cfg(test)]
+    project_files_gate: Option<futures_channel::oneshot::Receiver<()>>,
     startup_directory: PathBuf,
     minibuffer: Option<MinibufferMount>,
     session: Option<ReadSession>,
@@ -197,6 +204,7 @@ impl AppShell {
             next_pane: 1,
             tree_window: tree::TreeWindow::default(),
             tree_work: None,
+            project_scan_task: None,
             body_keymap: configuration.body_keymap,
             mode_keymaps: configuration.mode_keymaps,
             commands: configuration.commands,
@@ -235,6 +243,8 @@ impl AppShell {
             workflow_return_gate: None,
             #[cfg(test)]
             tree_read_gate: None,
+            #[cfg(test)]
+            project_files_gate: None,
             startup_directory: std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
             minibuffer: None,
             session: None,
@@ -343,6 +353,9 @@ impl AppShell {
                     && command.scope() == Scope::ReadSession
                 {
                     if single_key && command == Command::MinibufferCompleteAndExit {
+                        if self.answer_project_switch_menu(stroke, window, cx) {
+                            return true;
+                        }
                         #[cfg(unix)]
                         if self.answer_commit_choice(stroke, window, cx) {
                             return true;
@@ -374,6 +387,16 @@ impl AppShell {
             Command::Treemacs => self.toggle_tree(origin, window, cx),
             Command::TreemacsSelectWindow => self.select_tree_window(origin, window, cx),
             Command::TreemacsFindFile => self.find_tree_file(origin, window, cx),
+            Command::ProjectSwitchProject
+            | Command::ProjectFindFile
+            | Command::ProjectSwitchToBuffer
+            | Command::ProjectKillBuffers
+            | Command::ProjectRememberProject
+            | Command::ProjectForgetProject
+            | Command::ProjectForgetZombieProjects
+            | Command::ProjectRememberProjectsUnder => {
+                self.project_command(command, origin, window, cx);
+            }
             Command::TreemacsToggle
             | Command::TreemacsRefresh
             | Command::TreemacsReturn

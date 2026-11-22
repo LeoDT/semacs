@@ -2,9 +2,9 @@
 
 本文是当前工作和跨会话待办的唯一入口；维护与归档规则见 [文档说明](README.md#维护规则)。范围与当前方向见 [需求](requirements.md#当前方向v1-后)，行为见 [保真度契约](emacs-fidelity.md)。里程碑按可验收行为划分，不按工期估算。
 
-## 当前状态：F6 已完成，后续方向待确认
+## 当前状态：F7 已完成，后续方向待确认
 
-R0–F5、日常编辑增强及 F5 后插入项均已完成，交付摘要见 [R0–F1 归档](archive/completed-through-f1.md)、[F2 归档](archive/f2-status.md)、[F3 归档](archive/f3-window-commit.md)、[F4 归档](archive/f4-status-hunks.md)、[F5 归档](archive/f5-history-commit.md) 与 [F5 后插入项归档](archive/post-f5-insertions.md)。固定源码 / 环境、结果和未测边界见[冻结记录索引](records/README.md)。
+R0–F7、日常编辑增强及 F5 后插入项均已完成，交付摘要见 [R0–F1 归档](archive/completed-through-f1.md)、[F2 归档](archive/f2-status.md)、[F3 归档](archive/f3-window-commit.md)、[F4 归档](archive/f4-status-hunks.md)、[F5 归档](archive/f5-history-commit.md)、[F5 后插入项归档](archive/post-f5-insertions.md)、[F6 归档](archive/f6-tree-viewer.md) 与 [F7 归档](archive/f7-project.md)。固定源码 / 环境、结果和未测边界见[冻结记录索引](records/README.md)。
 
 没有已知阻塞性遗留；已接受的性能观察、字体 / 中文输入差异和未测边界保持原结论，不因功能收尾或方向调整视为预算通过。
 
@@ -24,15 +24,17 @@ R0–F5、日常编辑增强及 F5 后插入项均已完成，交付摘要见 [R
 
 项目根、独立文本树 / 左侧 side window、完整首版导航与访问已完成，交付摘要和未测边界见 [F6 归档](archive/f6-tree-viewer.md)。本地回归与集中审查修复已完成，获准的单窗口宿主功能观察及独立路径 / 字节核对通过，固定身份和证据见 [F6 宿主记录](records/f6-tree-host-01.md)。这不表示精确 0.2 秒宿主时序、原生性能、IME 或 GPU 已测；窗口尺寸未提供。
 
-阶段收尾后停下汇报，不自动进入下一阶段。下一候选为下述基础 project，具体实施范围仍需用户确认。
+## F7 基础 project（已完成）
+
+按 GNU Emacs 31.1 内置 `project.el` 语义完成了项目识别、已知项目列表持久化（`$XDG_STATE_HOME/semacs/projects`）、`C-x p` 前缀与 `project-switch-project` / `project-find-file` / `project-switch-to-buffer` / `project-kill-buffers` 及管理命令，交付摘要与未测边界见 [F7 归档](archive/f7-project.md)，有效行为见 [F7 契约](emacs-fidelity.md#阶段-f7基础-project)。
+
+阶段收尾后停下汇报，不自动进入下一阶段。下一候选方向（项目内搜索 `C-x p g` / `isearch` / diff range）待用户确认。
 
 ## 后续方向（顺序与依赖，尚未排期）
 
-### 1. 基础 project
+### 1. 搜索（项目内搜索 `C-x p g` / `isearch`）
 
-- 首版范围：项目根识别沿用 F6a、项目切换、项目内文件查找。
-- 项目内内容搜索是已确认的增强方向（搜索优先）；是否并入 project 首版待定，不默认扩大。
-- 不预设完整 `project.el` 兼容、多根 / workspace 或远程 / TRAMP 支持。
+- 项目内内容搜索（基于 `rg` 或匹配行结果 buffer 与跳转，复用 F7 项目根与有界后台进程）与当前 buffer / diff `isearch`；具体范围与交互待用户确认。
 
 ### 2. diff range / revision
 

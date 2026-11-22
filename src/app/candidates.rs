@@ -56,10 +56,172 @@ impl AppShell {
         mount.pending_candidate_action = None;
         mount.candidate_snapshot = Some(snapshot);
         let input = mount.view.read(cx).contents(cx);
+        if let ReadKind::ProjectFindFile { project } = &kind {
+            if let Some(files) = mount.project_files.clone() {
+                let history = cx
+                    .global::<crate::file_history::FileHistory>()
+                    .entries()
+                    .to_vec();
+                let current = origin.read(cx).buffer().path();
+                if files.len() <= 4096 {
+                    let items = Self::filter_project_files(
+                        &files,
+                        &input,
+                        &history,
+                        &project.root,
+                        current.as_deref(),
+                        &AtomicBool::new(false),
+                    );
+                    self.session.as_mut().unwrap().candidates =
+                        Some(CandidateList::ready(items, &input, None, false));
+                    self.publish_candidates(cx);
+                } else {
+                    self.session
+                        .as_mut()
+                        .unwrap()
+                        .candidates
+                        .as_mut()
+                        .unwrap()
+                        .loading = true;
+                    self.publish_candidates(cx);
+                    let cancelled = Arc::new(AtomicBool::new(false));
+                    let worker_cancelled = cancelled.clone();
+                    let root = project.root.clone();
+                    let task = cx.spawn_in(window, async move |shell, cx| {
+                        let items = cx
+                            .background_executor()
+                            .spawn(async move {
+                                Self::filter_project_files(
+                                    &files,
+                                    &input,
+                                    &history,
+                                    &root,
+                                    current.as_deref(),
+                                    &worker_cancelled,
+                                )
+                            })
+                            .await;
+                        shell
+                            .update_in(cx, |shell, window, cx| {
+                                if !shell.session.as_ref().is_some_and(|session| {
+                                    session.id() == id && session.origin() == &origin
+                                }) || !shell
+                                    .minibuffer
+                                    .as_ref()
+                                    .is_some_and(|mount| mount.candidate_snapshot == Some(snapshot))
+                                    || editor.read(cx).display_snapshot().id().committed
+                                        != snapshot.committed
+                                    || editor.read(cx).display_snapshot().marked_range().is_some()
+                                {
+                                    return;
+                                }
+                                let input = shell.session_input(cx).unwrap_or_default();
+                                shell.session.as_mut().unwrap().candidates =
+                                    Some(CandidateList::ready(items, &input, None, false));
+                                let mount = shell.minibuffer.as_mut().unwrap();
+                                let action = mount.pending_candidate_action.take();
+                                mount.completion = None;
+                                shell.publish_candidates(cx);
+                                if let Some(action) = action {
+                                    shell.candidate_action(action, window, cx);
+                                }
+                            })
+                            .ok();
+                    });
+                    self.minibuffer.as_mut().unwrap().completion = Some(CompletionWork {
+                        cancelled,
+                        _task: task,
+                    });
+                }
+                return;
+            }
+            if mount.project_files_work.is_some() {
+                return;
+            }
+            self.session
+                .as_mut()
+                .unwrap()
+                .candidates
+                .as_mut()
+                .unwrap()
+                .loading = true;
+            self.publish_candidates(cx);
+            let cancelled = Arc::new(AtomicBool::new(false));
+            let worker_cancelled = cancelled.clone();
+            let project = project.clone();
+            #[cfg(test)]
+            let gate = self.project_files_gate.take();
+            let task = cx.spawn_in(window, async move |shell, cx| {
+                #[cfg(test)]
+                if let Some(gate) = gate {
+                    let _ = gate.await;
+                }
+                let bg_cancelled = worker_cancelled.clone();
+                let result = cx
+                    .background_executor()
+                    .spawn(async move { crate::project::list_files(&project, &bg_cancelled) })
+                    .await;
+                shell
+                    .update_in(cx, |shell, window, cx| {
+                        if !shell.session.as_ref().is_some_and(|session| {
+                            session.id() == id && session.origin() == &origin
+                        }) {
+                            return;
+                        }
+                        if let Some(mount) = &mut shell.minibuffer {
+                            mount.project_files_work = None;
+                        }
+                        match result {
+                            Ok(files) if files.is_empty() => {
+                                if let Some(target) = shell.end_session(id, window, cx) {
+                                    shell.show_message(&target, "Empty file list", cx);
+                                }
+                            }
+                            Ok(files) => {
+                                let action = if let Some(mount) = &mut shell.minibuffer {
+                                    mount.project_files = Some(Arc::new(files));
+                                    mount.candidate_snapshot = None;
+                                    mount.pending_candidate_action.take()
+                                } else {
+                                    None
+                                };
+                                shell.refresh_candidates(window, cx);
+                                if let Some(action) = action {
+                                    shell.candidate_action(action, window, cx);
+                                }
+                            }
+                            Err(error) => {
+                                if !worker_cancelled.load(Ordering::Relaxed)
+                                    && let Some(target) = shell.end_session(id, window, cx)
+                                {
+                                    shell.show_message(&target, error, cx);
+                                }
+                            }
+                        }
+                    })
+                    .ok();
+            });
+            self.minibuffer.as_mut().unwrap().project_files_work = Some(CompletionWork {
+                cancelled,
+                _task: task,
+            });
+            return;
+        }
         if matches!(
             kind,
-            ReadKind::FindFile | ReadKind::WriteFile | ReadKind::TreeRoot | ReadKind::TreeFile
+            ReadKind::FindFile
+                | ReadKind::WriteFile
+                | ReadKind::TreeRoot
+                | ReadKind::TreeFile
+                | ReadKind::ProjectDirectory { .. }
+                | ReadKind::ProjectScanDirectory
         ) {
+            let directories_only = matches!(
+                kind,
+                ReadKind::TreeRoot
+                    | ReadKind::ProjectDirectory { .. }
+                    | ReadKind::ProjectScanDirectory
+            );
             let directory = self.file_read_directory(&origin, cx);
             let history = cx
                 .global::<crate::file_history::FileHistory>()
@@ -88,7 +250,7 @@ impl AppShell {
                         let candidates = listing
                             .candidates
                             .into_iter()
-                            .filter(|candidate| kind != ReadKind::TreeRoot || candidate.directory)
+                            .filter(|candidate| !directories_only || candidate.directory)
                             .collect();
                         let mut items = completion::filter_unranked(
                             candidates,
@@ -137,6 +299,16 @@ impl AppShell {
                 cancelled,
                 _task: task,
             });
+        } else if let ReadKind::ProjectSelect { require_known, .. } = &kind {
+            let roots = cx.global::<crate::project::ProjectList>().roots();
+            let items = super::project::project_select_candidates(&roots, *require_known, &input);
+            self.session.as_mut().unwrap().candidates = Some(CandidateList::ready(
+                items,
+                &input,
+                kind.candidate_default(),
+                false,
+            ));
+            self.publish_candidates(cx);
         } else {
             let candidates = match &kind {
                 ReadKind::HistoryFileVersion { versions } => versions
@@ -171,6 +343,27 @@ impl AppShell {
                         Candidate::named(command.name.clone(), command.annotation.clone())
                     })
                     .collect(),
+                ReadKind::ProjectSwitchToBuffer { project, .. } => {
+                    let allowed = self.project_buffers(project);
+                    self.buffers
+                        .iter()
+                        .filter(|slot| {
+                            slot.id() != self.active_buffer_id() && allowed.contains(&slot.id())
+                        })
+                        .map(|slot| {
+                            let buffer = &slot.buffer;
+                            let annotation = format!(
+                                "{} {}",
+                                if buffer.is_modified() { "**" } else { "--" },
+                                buffer
+                                    .path()
+                                    .map(|path| path.display().to_string())
+                                    .unwrap_or_default()
+                            );
+                            Candidate::named(buffer.display_name(), annotation)
+                        })
+                        .collect()
+                }
                 ReadKind::SwitchToBuffer { .. } | ReadKind::KillBuffer { .. } => self
                     .buffers
                     .iter()

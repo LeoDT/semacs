@@ -6,25 +6,55 @@ use crate::buffer::{BufferId, SnapshotId};
 
 pub(crate) enum Closing {
     Kill(BufferId),
+    KillBatch {
+        waiting_save: Option<BufferId>,
+        remaining: VecDeque<BufferId>,
+    },
     Exit(ExitFlow),
 }
 
 pub(crate) enum AfterSave {
     Message,
     Kill,
+    KillBatchNext,
     ContinueExit,
     Cancel(Option<&'static str>),
 }
 
 impl Closing {
+    pub fn kill_one(buffer: BufferId) -> Self {
+        Self::Kill(buffer)
+    }
+
+    pub fn kill_many(buffers: impl IntoIterator<Item = BufferId>) -> Self {
+        Self::KillBatch {
+            waiting_save: None,
+            remaining: buffers.into_iter().collect(),
+        }
+    }
+
     pub fn is_exit(&self) -> bool {
         matches!(self, Self::Exit(_))
+    }
+
+    pub fn is_kill_batch(&self) -> bool {
+        matches!(self, Self::KillBatch { .. })
+    }
+
+    pub fn kill_batch_mut(&mut self) -> Option<(&mut Option<BufferId>, &mut VecDeque<BufferId>)> {
+        match self {
+            Self::KillBatch {
+                waiting_save,
+                remaining,
+            } => Some((waiting_save, remaining)),
+            Self::Kill(_) | Self::Exit(_) => None,
+        }
     }
 
     pub fn exit_mut(&mut self) -> Option<&mut ExitFlow> {
         match self {
             Self::Exit(flow) => Some(flow),
-            Self::Kill(_) => None,
+            Self::Kill(_) | Self::KillBatch { .. } => None,
         }
     }
 
@@ -37,6 +67,16 @@ impl Closing {
                     AfterSave::Cancel(Some("Buffer still modified; not killed"))
                 } else {
                     AfterSave::Kill
+                }
+            }
+            Self::KillBatch { waiting_save, .. } if *waiting_save == Some(buffer) => {
+                *waiting_save = None;
+                if !saved {
+                    AfterSave::Cancel(None)
+                } else if modified {
+                    AfterSave::Cancel(Some("Buffer still modified; not killed"))
+                } else {
+                    AfterSave::KillBatchNext
                 }
             }
             Self::Exit(flow) if flow.is_waiting_for(buffer) => {
