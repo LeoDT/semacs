@@ -138,6 +138,13 @@ commands! {
     ProjectRememberProjectsUnder => "project-remember-projects-under", Application, [];
     Rg => "rg", Application, [];
     RgProject => "rg-project", Application, [];
+    IsearchForward => "isearch-forward", Application, ["ctrl-s" => "C-s"];
+    IsearchBackward => "isearch-backward", Application, ["ctrl-r" => "C-r"];
+    IsearchForwardRegexp => "isearch-forward-regexp", Application, ["ctrl-alt-s" => "C-M-s"];
+    IsearchBackwardRegexp => "isearch-backward-regexp", Application, ["ctrl-alt-r" => "C-M-r"];
+    IsearchForwardWord => "isearch-forward-word", Application, ["alt-s w" => "M-s w"];
+    IsearchForwardSymbol => "isearch-forward-symbol", Application, ["alt-s _" => "M-s _"];
+    IsearchForwardSymbolAtPoint => "isearch-forward-symbol-at-point", Application, ["alt-s ." => "M-s ."];
     NextError => "next-error", Application, ["alt-g n" => "M-g n", "alt-g alt-n" => "M-g M-n", "ctrl-x `" => "C-x `"];
     PreviousError => "previous-error", Application, ["alt-g p" => "M-g p", "alt-g alt-p" => "M-g M-p"];
     CompileGotoError => "compile-goto-error", Application("rg"), ["enter" => "RET", "ctrl-m" => "C-m"];
@@ -239,4 +246,6 @@ commands! {
     CandidateNext => "semacs-candidate-next", ReadSession, [];
     CandidatePrevious => "semacs-candidate-previous", ReadSession, [];
     CandidateExitInput => "semacs-candidate-exit-input", ReadSession, [];
+    IsearchEditForward => "isearch-forward-exit-minibuffer", ReadSession, [];
+    IsearchEditBackward => "isearch-reverse-exit-minibuffer", ReadSession, [];
 }

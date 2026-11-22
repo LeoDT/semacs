@@ -6,13 +6,21 @@ pub(crate) enum Feedback {
     Hint(SharedString),
     Prefix(SharedString),
     Clear,
+    PointerDown,
+    IsearchPreedit(SharedString),
+    IsearchCommit(SharedString),
+    IsearchViewport(std::ops::Range<usize>),
 }
 
 impl Feedback {
     pub fn text(&self) -> Option<&str> {
         match self {
             Self::Message(text) | Self::Hint(text) | Self::Prefix(text) => Some(text),
-            Self::Clear => None,
+            Self::Clear
+            | Self::PointerDown
+            | Self::IsearchPreedit(_)
+            | Self::IsearchCommit(_)
+            | Self::IsearchViewport(_) => None,
         }
     }
 }

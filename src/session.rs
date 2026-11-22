@@ -78,6 +78,11 @@ pub enum ReadKind {
         buffer: crate::buffer::BufferId,
         query: crate::search::SearchQuery,
     },
+    IsearchEdit {
+        forward: bool,
+        nonincremental: bool,
+        prompt: String,
+    },
     HistoryFileVersion {
         versions: Vec<crate::history::FileVersion>,
     },
@@ -283,6 +288,7 @@ impl ReadKind {
             ReadKind::SearchFiles { .. } => {
                 "Files glob (empty for all, e.g. *.rs !target/*): ".to_owned()
             }
+            ReadKind::IsearchEdit { prompt, .. } => prompt.clone(),
             ReadKind::HistoryFileVersion { .. } => "Visit file version: ".into(),
             #[cfg(unix)]
             ReadKind::CommitPublished { branches, amending, .. } => format!("{} already been published to {}. Do you really want to modify {}? (y or n) ", if *amending { "This commit has" } else { "Some of these commits have" }, branches.join(", "), if *amending { "it" } else { "them" }),
@@ -406,6 +412,20 @@ impl ReadSession {
             for &(key, command) in CANDIDATE_BINDINGS {
                 keymap.bind(&parse_sequence(key).unwrap(), command).unwrap();
             }
+        }
+        if matches!(kind, ReadKind::IsearchEdit { .. }) {
+            keymap
+                .bind(
+                    &parse_sequence("ctrl-s").unwrap(),
+                    Command::IsearchEditForward,
+                )
+                .unwrap();
+            keymap
+                .bind(
+                    &parse_sequence("ctrl-r").unwrap(),
+                    Command::IsearchEditBackward,
+                )
+                .unwrap();
         }
         let candidates = kind.has_candidates().then(CandidateList::default);
         Self {

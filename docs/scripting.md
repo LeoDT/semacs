@@ -31,6 +31,7 @@
 | `default` | 前景 / 背景及全部文字属性，正文及输入基准 |
 | `cursor` | `foreground` 为覆盖文字颜色，`background` 为方块填色 |
 | `region` | 仅 `background`，保留正文文字颜色 |
+| `isearch` / `isearch.lazy` | `foreground` / `background`，`isearch` 当前匹配与视口内其余匹配高亮 |
 | `mode-line` / `mode-line-inactive` | `foreground` / `background` |
 | `minibuffer-prompt` | 前景 / 背景及全部文字属性 |
 | `echo-area` | `foreground` / `background`；读入末尾临时注记只使用其前景色 |

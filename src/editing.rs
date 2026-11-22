@@ -721,6 +721,26 @@ impl EditTarget {
         self.buffer.set_point(point).expect("valid display point");
     }
 
+    pub(crate) fn save_mark(&mut self, point: ByteOffset) -> bool {
+        self.buffer.save_mark(point)
+    }
+
+    pub(crate) fn isearch_temp_open(
+        &mut self,
+        range: Range<ByteOffset>,
+        opened: &mut Vec<String>,
+    ) -> bool {
+        self.buffer.isearch_temp_open(range, opened)
+    }
+
+    pub(crate) fn isearch_finalize_opened(
+        &mut self,
+        keep_range: Option<Range<ByteOffset>>,
+        opened: &mut Vec<String>,
+    ) -> bool {
+        self.buffer.isearch_finalize_opened(keep_range, opened)
+    }
+
     /// Moves only the point, without a mark or region. Mouse presses and drags
     /// use [`Self::press_pointer`], [`Self::drag_pointer`] and
     /// [`Self::release_pointer`]; this helper stays for callers that just place

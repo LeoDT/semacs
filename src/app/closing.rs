@@ -237,6 +237,9 @@ impl AppShell {
         if self.exiting() {
             return false;
         }
+        if self.isearch.is_some() {
+            self.finish_isearch(true, false, true, Some(window), cx);
+        }
         self.cancel_file_open();
         self.end_all_input(cx);
         let remaining: Vec<_> = self

@@ -206,6 +206,85 @@ impl Sections {
         self.rebuild();
     }
 
+    pub fn is_range_hidden(&self, range: Range<ByteOffset>) -> bool {
+        self.hidden
+            .iter()
+            .any(|(hidden, _)| ranges_intersect(&range, hidden))
+    }
+
+    /// Temporarily expands any collapsed section whose body intersects `range`,
+    /// recording newly opened keys in `opened`, and immediately re-collapses
+    /// previously recorded keys whose bodies no longer intersect `range`
+    /// (matching Emacs `search-invisible = 'open` and `isearch-hide-immediately`).
+    pub fn temp_open_for_range(
+        &mut self,
+        range: Range<ByteOffset>,
+        opened: &mut Vec<String>,
+    ) -> bool {
+        let mut changed = false;
+        let mut kept = Vec::with_capacity(opened.len());
+        for key in opened.drain(..) {
+            if let Some(node) = self.nodes.iter_mut().find(|node| node.key == key) {
+                let body = node.body..node.range.end;
+                if ranges_intersect(&range, &body) {
+                    kept.push(key);
+                } else if !node.collapsed {
+                    node.collapsed = true;
+                    changed = true;
+                }
+            }
+        }
+        *opened = kept;
+        for node in self.nodes.iter_mut().skip(1) {
+            if node.collapsed && node.body < node.range.end {
+                let body = node.body..node.range.end;
+                if ranges_intersect(&range, &body) {
+                    node.collapsed = false;
+                    if !opened.iter().any(|key| key == &node.key) {
+                        opened.push(node.key.clone());
+                    }
+                    changed = true;
+                }
+            }
+        }
+        if changed {
+            self.rebuild();
+        }
+        changed
+    }
+
+    /// Finalizes temporarily opened sections when ending isearch: keeps any
+    /// section whose body intersects `keep_range` permanently open (recording it
+    /// in `remembered`) and re-collapses all other temporarily opened sections.
+    pub fn finalize_temp_opened(
+        &mut self,
+        keep_range: Option<Range<ByteOffset>>,
+        opened: &mut Vec<String>,
+    ) -> bool {
+        if opened.is_empty() {
+            return false;
+        }
+        let mut changed = false;
+        for key in opened.drain(..) {
+            if let Some(node) = self.nodes.iter_mut().find(|node| node.key == key) {
+                let body = node.body..node.range.end;
+                let keep = keep_range
+                    .as_ref()
+                    .is_some_and(|range| ranges_intersect(range, &body));
+                if keep {
+                    self.remembered.insert(node.key.clone(), false);
+                } else if !node.collapsed {
+                    node.collapsed = true;
+                    changed = true;
+                }
+            }
+        }
+        if changed {
+            self.rebuild();
+        }
+        changed
+    }
+
     pub fn restore(&mut self, previous: &Self) {
         self.remembered = previous.remembered.clone();
         for node in &previous.nodes {
@@ -362,5 +441,16 @@ impl Sections {
             .filter(|line| self.collapse_point(line.start) == line.start)
             .cloned()
             .collect();
+    }
+}
+
+fn ranges_intersect(a: &Range<ByteOffset>, b: &Range<ByteOffset>) -> bool {
+    if b.start >= b.end {
+        return false;
+    }
+    if a.start == a.end {
+        a.start >= b.start && a.start < b.end
+    } else {
+        a.start < b.end && a.end > b.start
     }
 }

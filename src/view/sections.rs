@@ -9,13 +9,26 @@ impl BufferView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.show_isearch_point(point, Some(window), cx);
+    }
+
+    pub(crate) fn show_isearch_point(
+        &mut self,
+        point: ByteOffset,
+        window: Option<&mut Window>,
+        cx: &mut Context<Self>,
+    ) {
         self.target.show_point(point);
         self.target.clear_pending();
         self.scroll_anchor = None;
         self.pending_scroll = None;
         self.reveal_caret = true;
-        self.invalidate_input_registration();
-        window.notify_text_selection_changed(&self.focus);
+        if self.isearch_capture.is_none() {
+            self.invalidate_input_registration();
+        }
+        if let Some(window) = window {
+            window.notify_text_selection_changed(&self.focus);
+        }
         cx.notify();
     }
 

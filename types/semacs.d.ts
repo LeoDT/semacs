@@ -4,7 +4,7 @@ interface SemacsFontSettings {
 }
 
 type SemacsStyleName =
-    | "default" | "cursor" | "region" | "mode-line" | "mode-line-inactive"
+    | "default" | "cursor" | "region" | "isearch" | "isearch.lazy" | "mode-line" | "mode-line-inactive"
     | "minibuffer-prompt" | "echo-area" | "completion" | "completion-selected"
     | "completion-match" | "completion-annotation" | "separator"
     | "syntax.keyword" | "syntax.comment" | "syntax.string" | "syntax.number"

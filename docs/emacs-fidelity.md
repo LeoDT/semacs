@@ -572,3 +572,36 @@ F2 仅提供 status 与单文件整文件级 index 操作，不包含 hunk / 批
 ### 首版不提供的上游能力
 
 以下 `grep-mode` / `rg.el` 能力在首版不实现：`wgrep` / `grep-edit-mode`（`e` 就地编辑写回多文件）、`rg-menu` transient 弹窗（`m`）、`rg-dwim`、多 `*rg*` 命名保存与搜索历史列表（`L` / `S`）、`next-error-follow-minor-mode`（`C-c C-f`）、上下文行（`-A`/`-B`/`-C`）、自定义原始 CLI flags 编辑（`C-u`）、结果内正则过滤与跨重启持久化。
+
+## 阶段 F9：当前 buffer / diff 增量搜索（`isearch`）
+
+本节定义已确认的当前 buffer 与 diff / section 增量搜索行为，以 GNU Emacs 31.1 内置 `isearch.el` 为参照（全局入口默认绑定参照见 [f9-bindings.tsv](../tests/emacs/f9-bindings.tsv)）。
+
+### 全局入口与匹配模式
+
+| 键位 | 命令 | 行为 |
+|---|---|---|
+| `C-s` | `isearch-forward` | 向前增量字面量搜索 |
+| `C-r` | `isearch-backward` | 向后增量字面量搜索 |
+| `C-M-s` | `isearch-forward-regexp` | 向前增量正则搜索 |
+| `C-M-r` | `isearch-backward-regexp` | 向后增量正则搜索 |
+| `M-s w` | `isearch-forward-word` | 向前增量词边界搜索 |
+| `M-s _` | `isearch-forward-symbol` | 向前增量符号边界搜索 |
+| `M-s .` | `isearch-forward-symbol-at-point` | 抓取光标处完整符号并进入严格双端边界符号搜索（空白处提示 `No symbol at point` 且仍可继续输入） |
+
+- **默认匹配选项**：沿用 Emacs 31.1 默认值：`case-fold-search = t` 与 `search-upper-case = not-yanks`（全小写输入不区分大小写，输入大写自动切换区分大小写，yank 进来的文本在大小写折叠时自动转小写）、`isearch-lax-whitespace = t`（字面量搜索中空格 / Tab 序列匹配 `[ \t]+`）、`isearch-wrap-pause = t`（到达尽头首次失败暂停，再次同向重复后回绕并标注 `Wrapped` / `Overwrapped`）、`isearch-repeat-on-direction-change = nil`（反向切换时先在当前匹配另一端重新落点）、`search-invisible = open` 与 `isearch-hide-immediately = t`。
+- **已确认正则语法差异**：正则模式采用 Rust `regex` 语法（与 F8 `rg` 保持一致），启用多行 `^`/`$` 与不跨换行的 `.` 以对齐 Emacs 行语义；不使用 elisp 专属正则转义（如 `\(`、`\|`）。输入不完整正则时提示 `[incomplete input]` 并在补全后自动恢复匹配。
+
+### 会话内交互与高亮
+
+- **会话内按键**：普通可打印字符、`TAB`、`C-j` 及 IME 提交文本追加到搜索串；`C-s` / `C-M-s` 与 `C-r` / `C-M-r` 重复/反向搜索（空串时从对应历史环召回最近条目）；`DEL` 撤销上一步状态（`isearch-cmds` 栈），`C-M-d` 仅删搜索串末字符并重搜；`C-w`（词/字符）、`C-M-w`（符号/字符）、`M-s C-e`（至行尾）、`C-y`（kill ring 顶项）抓取文本；`C-q` 字面引用下一字符；`M-p` / `M-n` 浏览应用内 `search-ring` / `regexp-search-ring`（各最多 16 条、去重前置）；`M-e` / `M-s e` 进入 minibuffer 编辑搜索串（`RET` / `C-s` / `C-r` 恢复增量搜索，`C-g` 恢复编辑前搜索状态）；`M-c` / `M-s c`、`M-r` / `M-s r`、`M-s w`、`M-s _`、`M-s SPC`、`M-s i` 切换对应选项；`M-s M-<` / `M-s M->` 跳至首/末匹配。
+- **退出、取消与未绑定键**：
+  - `RET` / `C-m`：搜索串非空时留在当前匹配退出，将非空搜索串写入历史环；若点位离开起点且当前无活动 region，则保存非活动 mark 于起点并回显 `Mark saved where search started`（已有活动 region 时保留，支持 `C-t C-s ... RET C-w`）。搜索串为空时进入 minibuffer 非增量搜索。
+  - `C-g`：两段式取消——当前处于失败或正则错误状态时回退到最近一次成功状态并留在 `isearch`；当前成功时返回起点、重新折叠全部临时展开的 section、退出并回显 `Quit`（不入历史环）。`ESC ESC ESC` 始终直接完全取消。
+  - 任意未在 `isearch` 绑定的按键（如 `C-f`、`M-x`、`C-x o`）先正常结束 `isearch`，再立即按普通流程执行该键序列。
+- **隐藏 section 策略（diff / status / log / tree / `*rg*`）**：匹配落入折叠 section 正文时临时展开所需祖先 section；匹配离开后立即重新折叠（`isearch-hide-immediately`）；正常退出停留在某临时展开 section 内时保留其展开状态，否则重新折叠；取消返回起点时全部恢复折叠。`M-s i` 切换为跳过隐藏 section 时先折叠已临时展开的 section 并只在可见文本中搜索。
+- **高亮与 IME**：使用独立颜色样式 `isearch`（当前匹配）与 `isearch.lazy`（视口内其余匹配，滚动与跳屏后动态刷新，不触发全文重排或 wrap index 失效）；`isearch` 期间允许在只读 buffer（diff / `*rg*` / tree）直接走平台 IME 输入中文搜索，不修改正文并遵循 D17 组合期间命令屏障。切窗、切 buffer、kill buffer、关闭窗口、配置重载完成与鼠标点击均会先收尾清理 `isearch`。
+
+### 首版不提供的上游能力
+
+以下 `isearch.el` 能力在首版不实现：`M-%` / `C-M-%`（`isearch-query-replace`）、`M-s o`（`isearch-occur`）、`M-s h r/l`（`hi-lock` 持久高亮）、`M-s '`（`char-fold`）、`isearch-lazy-count` 计数前缀、`isearch-allow-scroll` / `isearch-allow-motion`、`M-y`（`isearch-yank-pop-only`）、`M-TAB` 历史补全、`C-x 8` / `C-\` Emacs 内置输入法及 `C-h` isearch 帮助子菜单。

@@ -8,6 +8,8 @@ pub enum StyleRole {
     Default,
     Cursor,
     Region,
+    IsearchMatch,
+    IsearchLazy,
     ModeLine,
     ModeLineInactive,
     MinibufferPrompt,
@@ -63,6 +65,8 @@ impl StyleRole {
         Self::Default,
         Self::Cursor,
         Self::Region,
+        Self::IsearchMatch,
+        Self::IsearchLazy,
         Self::ModeLine,
         Self::ModeLineInactive,
         Self::MinibufferPrompt,
@@ -117,6 +121,8 @@ impl StyleRole {
             Self::Default => "default",
             Self::Cursor => "cursor",
             Self::Region => "region",
+            Self::IsearchMatch => "isearch",
+            Self::IsearchLazy => "isearch.lazy",
             Self::ModeLine => "mode-line",
             Self::ModeLineInactive => "mode-line-inactive",
             Self::MinibufferPrompt => "minibuffer-prompt",
@@ -225,6 +231,8 @@ impl StyleRole {
                 Self::Default
                     | Self::Cursor
                     | Self::Region
+                    | Self::IsearchMatch
+                    | Self::IsearchLazy
                     | Self::SectionCurrent
                     | Self::ModeLine
                     | Self::ModeLineInactive
@@ -583,6 +591,20 @@ fn builtin_colors(mode: ThemeMode) -> [StyleColors; StyleRole::COUNT] {
         | StyleRole::DiffContextHighlight => pair(foreground, background),
         StyleRole::Cursor => pair(background, foreground),
         StyleRole::Region => pair(foreground, selection),
+        StyleRole::IsearchMatch => {
+            if mode == ThemeMode::Dark {
+                pair(0x202124, 0xffcc66)
+            } else {
+                pair(0xffffff, 0xb0006d)
+            }
+        }
+        StyleRole::IsearchLazy => {
+            if mode == ThemeMode::Dark {
+                pair(0xe6e6e6, 0x3b4d6b)
+            } else {
+                pair(0x202124, 0xd8ecff)
+            }
+        }
         StyleRole::ModeLine | StyleRole::CompletionSelected => pair(foreground, active_bg),
         StyleRole::ModeLineInactive => pair(muted, inactive_bg),
         StyleRole::MinibufferPrompt | StyleRole::CompletionMatch => pair(accent, background),

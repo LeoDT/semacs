@@ -43,6 +43,7 @@ mod git;
 mod git_test_support;
 mod history;
 mod index_write;
+mod isearch;
 pub use git::records::{GitWritePhase, GitWriteRecord};
 pub use index_write::StatusWriteTarget;
 mod messages;
@@ -67,6 +68,7 @@ pub fn init(cx: &mut App) {
     cx.default_global::<crate::command_history::CommandHistory>();
     cx.default_global::<crate::file_history::FileHistory>();
     cx.default_global::<crate::project::ProjectList>();
+    cx.default_global::<crate::isearch::IsearchRing>();
 }
 
 struct MinibufferMount {
@@ -94,6 +96,7 @@ pub struct AppShell {
     project_scan_task: Option<project::ProjectScanWork>,
     search_work: Option<search::SearchWork>,
     last_search_buffer: Option<crate::buffer::BufferId>,
+    isearch: Option<isearch::IsearchSession>,
     body_keymap: Keymap,
     mode_keymaps: HashMap<crate::mode::ModeId, Keymap>,
     commands: CommandRegistry,
@@ -210,6 +213,7 @@ impl AppShell {
             project_scan_task: None,
             search_work: None,
             last_search_buffer: None,
+            isearch: None,
             body_keymap: configuration.body_keymap,
             mode_keymaps: configuration.mode_keymaps,
             commands: configuration.commands,
@@ -286,6 +290,13 @@ impl AppShell {
         cx: &mut Context<Self>,
     ) -> bool {
         self.tree_input_activity(window, cx);
+        if self.session.is_none()
+            && self.minibuffer.is_none()
+            && let Some(consumed) =
+                self.route_isearch_keystroke(stroke, prefer_character_input, window, cx)
+        {
+            return consumed;
+        }
         if let Some(mount) = &mut self.minibuffer {
             mount.pending_candidate_action = None;
         }
@@ -401,6 +412,15 @@ impl AppShell {
             | Command::ProjectForgetZombieProjects
             | Command::ProjectRememberProjectsUnder => {
                 self.project_command(command, origin, window, cx);
+            }
+            Command::IsearchForward
+            | Command::IsearchBackward
+            | Command::IsearchForwardRegexp
+            | Command::IsearchBackwardRegexp
+            | Command::IsearchForwardWord
+            | Command::IsearchForwardSymbol
+            | Command::IsearchForwardSymbolAtPoint => {
+                self.isearch_command(command, origin, window, cx);
             }
             Command::ProjectFindRegexp
             | Command::Rg
@@ -645,6 +665,14 @@ impl AppShell {
             .as_ref()
             .map(|(_, text)| text.to_string())
             .unwrap_or_default()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn echo_text(&self) -> &str {
+        self.echo
+            .as_ref()
+            .map(|(_, text)| text.as_ref())
+            .unwrap_or("")
     }
 }
 

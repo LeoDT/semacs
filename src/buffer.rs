@@ -468,6 +468,20 @@ impl Buffer {
         doc.touch();
         Ok(())
     }
+    /// Sets mark at `point` without activating the region when no region is
+    /// already active (Emacs `push-mark` on `isearch-done`).
+    pub(crate) fn save_mark(&mut self, point: ByteOffset) -> bool {
+        if !self.text().is_char_boundary(point.0) {
+            return false;
+        }
+        let mut doc = self.document.borrow_mut();
+        if doc.mark.is_active() {
+            return false;
+        }
+        doc.mark.set(Some(point), false);
+        doc.touch();
+        true
+    }
     pub(crate) fn set_pointer_mark(&mut self, point: ByteOffset) -> Result<(), EditError> {
         if !self.text().is_char_boundary(point.0) {
             return Err(EditError::InvalidRange);

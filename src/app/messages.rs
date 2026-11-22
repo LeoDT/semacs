@@ -16,6 +16,25 @@ impl AppShell {
         feedback: &Feedback,
         cx: &mut Context<Self>,
     ) {
+        match feedback {
+            Feedback::PointerDown => {
+                self.handle_isearch_pointer_down(cx);
+                return;
+            }
+            Feedback::IsearchPreedit(preedit) => {
+                self.handle_isearch_preedit(source.entity_id(), preedit.clone(), cx);
+                return;
+            }
+            Feedback::IsearchCommit(text) => {
+                self.handle_isearch_commit(source.entity_id(), text.clone(), cx);
+                return;
+            }
+            Feedback::IsearchViewport(range) => {
+                self.refresh_isearch_viewport_range(source.entity_id(), range.clone(), cx);
+                return;
+            }
+            _ => {}
+        }
         if let Feedback::Message(text) = feedback {
             let id = self.messages.buffer.snapshot_id().buffer;
             let end = self.messages.buffer.text().len();
@@ -43,6 +62,9 @@ impl AppShell {
             .unwrap_or_else(|| self.active_view());
         match feedback {
             Feedback::Clear => {
+                if self.is_isearch_active() {
+                    return;
+                }
                 if self
                     .echo
                     .as_ref()

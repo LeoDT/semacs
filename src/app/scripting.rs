@@ -86,6 +86,9 @@ impl AppShell {
             self.show_message(origin, "Configuration reload is already running", cx);
             return;
         }
+        if self.isearch.is_some() {
+            self.finish_isearch(false, false, true, Some(window), cx);
+        }
         let path = self
             .config_path
             .clone()
@@ -107,9 +110,15 @@ impl AppShell {
                 let origin = origin.upgrade().unwrap_or_else(|| shell.active_view().clone());
                 match result {
                     Ok(loaded) => {
-                        if shell.focused_editor(window, cx).read(cx).display_snapshot().marked_range().is_some() {
+                        let focused = shell.focused_editor(window, cx);
+                        if focused.read(cx).display_snapshot().marked_range().is_some()
+                            || focused.read(cx).is_isearch_composing()
+                        {
                             shell.show_message(&origin, "Configuration unchanged: finish input method composition and reload again", cx);
                             return;
+                        }
+                        if shell.isearch.is_some() {
+                            shell.finish_isearch(false, false, true, Some(window), cx);
                         }
                         shell.apply_configuration(loaded, window, cx);
                         shell.show_message(&origin, "Configuration reloaded", cx);

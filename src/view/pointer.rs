@@ -37,7 +37,7 @@ impl BufferView {
         if !self.accepting_input {
             return;
         }
-        if self.target.input().is_composing() {
+        if self.target.input().is_composing() || self.is_isearch_composing() {
             self.set_message("Input method composition is active; finish it first", cx);
             return;
         }
@@ -57,6 +57,7 @@ impl BufferView {
         self.scroll_anchor = None;
         self.pending_scroll = None;
         self.set_message("Mark set", cx);
+        cx.emit(Feedback::PointerDown);
         window.focus(&self.focus, cx);
         window.notify_text_selection_changed(&self.focus);
         cx.notify();

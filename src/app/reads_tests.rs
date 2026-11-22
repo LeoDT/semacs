@@ -31,7 +31,13 @@ fn candidate_height_only_grows_until_the_read_ends(cx: &mut TestAppContext) {
         visual.update(|window, cx| {
             shell.update(cx, |shell, cx| {
                 let origin = shell.active_view().clone();
-                shell.begin_read(ReadKind::Command, &origin, "forward-word", window, cx);
+                shell.begin_read(
+                    ReadKind::Command,
+                    &origin,
+                    "recenter-top-bottom",
+                    window,
+                    cx,
+                );
             });
         });
         draw(visual);
@@ -49,7 +55,7 @@ fn candidate_height_only_grows_until_the_read_ends(cx: &mut TestAppContext) {
     assert!(visual.debug_bounds("candidate-row-7").is_some());
     assert!(visual.debug_bounds("candidate-row-8").is_none());
 
-    visual.simulate_input("forward-word");
+    visual.simulate_input("recenter-top-bottom");
     draw(&mut visual);
     assert_eq!(bounds(&mut visual), expanded);
     assert!(visual.debug_bounds("candidate-row-1").is_none());

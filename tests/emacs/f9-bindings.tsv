@@ -1,0 +1,12 @@
+# emacs-version: 31.1
+# major-mode: fundamental-mode
+# driving: emacs -Q --batch, key-binding lookup (not a command loop)
+#
+C-s	isearch-forward
+C-r	isearch-backward
+C-M-s	isearch-forward-regexp
+C-M-r	isearch-backward-regexp
+M-s	PREFIX
+M-s w	isearch-forward-word
+M-s _	isearch-forward-symbol
+M-s .	isearch-forward-symbol-at-point

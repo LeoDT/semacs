@@ -19,6 +19,7 @@ pub mod frame;
 mod git;
 pub mod history;
 pub mod input;
+pub mod isearch;
 pub mod keymap;
 mod messages;
 pub mod minibuffer;

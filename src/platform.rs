@@ -81,6 +81,13 @@ impl InputHandler for BufferInputHandler {
     }
 
     fn marked_text_range(&mut self, window: &mut Window, cx: &mut App) -> Option<Range<usize>> {
+        if let Some(view) = self.view.upgrade()
+            && let Some(range) = view
+                .read(cx)
+                .isearch_marked_utf16(self.registration, window)
+        {
+            return Some(range);
+        }
         self.snapshot(window, cx)?.marked_range_utf16().map(units)
     }
 
@@ -124,9 +131,14 @@ impl InputHandler for BufferInputHandler {
         cx: &mut App,
     ) -> Option<Bounds<Pixels>> {
         let snapshot = self.snapshot(window, cx)?;
-        let range = clip_utf16_range(snapshot.text(), utf16(range))?;
         let view = self.view.upgrade()?;
         let view = view.read(cx);
+        let range = if view.is_isearch_capturing(self.registration, window) {
+            let caret = snapshot.selected_range().end;
+            caret..caret
+        } else {
+            clip_utf16_range(snapshot.text(), utf16(range))?
+        };
         view.viewport_layout()?
             .bounds_for_range(range, view.wrap_index()?)
     }

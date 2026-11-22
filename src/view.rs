@@ -393,6 +393,16 @@ enum PendingScroll {
     Hunk(Range<ByteOffset>),
 }
 
+struct IsearchHighlight {
+    current: Option<Range<ByteOffset>>,
+    lazy: Vec<Range<ByteOffset>>,
+}
+
+struct IsearchCapture {
+    preedit: String,
+    allow_text_input: bool,
+}
+
 pub struct BufferView {
     target: EditTarget,
     observed_snapshot: BufferSnapshot,
@@ -430,6 +440,9 @@ pub struct BufferView {
     message_task: Option<Task<()>>,
     annotate_message: bool,
     annotation_cache: std::cell::RefCell<Option<feedback::AnnotationLayout>>,
+    isearch_highlight: Option<IsearchHighlight>,
+    isearch_capture: Option<IsearchCapture>,
+    last_reported_isearch_range: Option<Range<usize>>,
     _input_subscriptions: Vec<Subscription>,
     _font_subscription: Subscription,
     #[cfg(test)]
@@ -500,6 +513,9 @@ impl BufferView {
             message_task: None,
             annotate_message: false,
             annotation_cache: std::cell::RefCell::new(None),
+            isearch_highlight: None,
+            isearch_capture: None,
+            last_reported_isearch_range: None,
             _input_subscriptions: Vec::new(),
             _font_subscription: font_subscription,
             #[cfg(test)]
@@ -735,6 +751,12 @@ impl BufferView {
     }
 
     pub(crate) fn end_input(&mut self, cx: &mut Context<Self>) {
+        if let Some(capture) = &mut self.isearch_capture
+            && !capture.preedit.is_empty()
+        {
+            capture.preedit.clear();
+            cx.emit(Feedback::IsearchPreedit(SharedString::default()));
+        }
         if self.target.snapshot_for(self.target.token()).is_err() {
             return;
         }
@@ -798,9 +820,121 @@ impl BufferView {
         token: SessionToken,
         window: &Window,
     ) -> bool {
-        self.platform_snapshot(registration, token, window)
-            .is_some()
-            && self.target.allows_text_input(token)
+        if self
+            .platform_snapshot(registration, token, window)
+            .is_none()
+        {
+            return false;
+        }
+        if let Some(capture) = &self.isearch_capture {
+            return capture.allow_text_input;
+        }
+        self.target.allows_text_input(token)
+    }
+
+    pub(crate) fn is_isearch_capturing(&self, registration: u64, window: &Window) -> bool {
+        self.accepting_input
+            && registration == self.registration
+            && self.focus.is_focused(window)
+            && self.isearch_capture.is_some()
+    }
+
+    pub(crate) fn isearch_marked_utf16(
+        &self,
+        registration: u64,
+        window: &Window,
+    ) -> Option<Range<usize>> {
+        if !self.is_isearch_capturing(registration, window) {
+            return None;
+        }
+        let capture = self.isearch_capture.as_ref()?;
+        let utf16_len = capture.preedit.encode_utf16().count();
+        (utf16_len > 0).then_some(0..utf16_len)
+    }
+
+    pub(crate) fn is_isearch_composing(&self) -> bool {
+        self.isearch_capture
+            .as_ref()
+            .is_some_and(|capture| !capture.preedit.is_empty())
+    }
+
+    pub(crate) fn set_isearch_active(&mut self, active: bool, cx: &mut Context<Self>) {
+        if active {
+            self.isearch_capture = Some(IsearchCapture {
+                preedit: String::new(),
+                allow_text_input: true,
+            });
+        } else {
+            self.isearch_capture = None;
+        }
+        self.invalidate_input_registration();
+        cx.notify();
+    }
+
+    pub(crate) fn set_isearch_allow_text_input(&mut self, allow: bool) {
+        if let Some(capture) = &mut self.isearch_capture {
+            capture.allow_text_input = allow;
+        }
+    }
+
+    pub(crate) fn set_isearch_highlight(
+        &mut self,
+        current: Option<Range<ByteOffset>>,
+        lazy: Vec<Range<ByteOffset>>,
+        cx: &mut Context<Self>,
+    ) {
+        self.isearch_highlight = Some(IsearchHighlight { current, lazy });
+        cx.notify();
+    }
+
+    pub(crate) fn clear_isearch(&mut self, cx: &mut Context<Self>) {
+        self.isearch_highlight = None;
+        self.isearch_capture = None;
+        self.last_reported_isearch_range = None;
+        self.invalidate_input_registration();
+        cx.notify();
+    }
+
+    pub(crate) fn visible_byte_range(&self) -> Option<Range<usize>> {
+        let layout = self.paint_layout()?;
+        let first = layout.rows.first()?.source.start.0;
+        let last = layout.rows.last()?;
+        let end = last.source.start.0 + last.source.row.byte_len;
+        Some(first..end)
+    }
+
+    pub(crate) fn save_mark(&mut self, point: ByteOffset, cx: &mut Context<Self>) -> bool {
+        let saved = self.target.save_mark(point);
+        if saved {
+            cx.notify();
+        }
+        saved
+    }
+
+    pub(crate) fn isearch_temp_open(
+        &mut self,
+        range: Range<ByteOffset>,
+        opened: &mut Vec<String>,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let changed = self.target.isearch_temp_open(range, opened);
+        if changed {
+            cx.notify();
+        }
+        changed
+    }
+
+    pub(crate) fn isearch_finalize_opened(
+        &mut self,
+        keep_range: Option<Range<ByteOffset>>,
+        opened: &mut Vec<String>,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let changed = self.target.isearch_finalize_opened(keep_range, opened);
+        if changed {
+            cx.notify();
+        }
+        changed
     }
 
     pub(crate) fn platform_update(
@@ -812,6 +946,29 @@ impl BufferView {
         cx: &mut Context<Self>,
     ) -> Option<SessionToken> {
         self.platform_snapshot(registration, token, window)?;
+        if let Some(capture) = &mut self.isearch_capture {
+            if !capture.allow_text_input {
+                return None;
+            }
+            match operation {
+                InputOperation::Replace(_, text) => {
+                    capture.preedit.clear();
+                    cx.emit(Feedback::IsearchCommit(SharedString::from(text.to_owned())));
+                }
+                InputOperation::Mark(_, text, _) => {
+                    capture.preedit = text.to_owned();
+                    cx.emit(Feedback::IsearchPreedit(SharedString::from(
+                        capture.preedit.clone(),
+                    )));
+                }
+                InputOperation::Unmark => {
+                    let committed = std::mem::take(&mut capture.preedit);
+                    cx.emit(Feedback::IsearchCommit(SharedString::from(committed)));
+                }
+            }
+            cx.notify();
+            return Some(self.target.token());
+        }
         let result = match operation {
             InputOperation::Replace(range, text) => {
                 self.target.replace_text(token, range, text).map(Some)
@@ -847,6 +1004,15 @@ impl BufferView {
 
     fn bind_input(&mut self, cx: &mut Context<Self>) -> BufferInputHandler {
         self.invalidate_input_registration();
+        BufferInputHandler {
+            view: cx.weak_entity(),
+            token: self.target.token(),
+            registration: self.registration,
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn test_input_handler(&self, cx: &mut Context<Self>) -> BufferInputHandler {
         BufferInputHandler {
             view: cx.weak_entity(),
             token: self.target.token(),
@@ -1532,6 +1698,13 @@ impl BufferView {
             retained.view_bounds = view_bounds;
         }
         self.sync_pointer_edge(window, cx);
+        if self.isearch_highlight.is_some()
+            && let Some(visible) = self.visible_byte_range()
+            && self.last_reported_isearch_range.as_ref() != Some(&visible)
+        {
+            self.last_reported_isearch_range = Some(visible.clone());
+            cx.emit(Feedback::IsearchViewport(visible));
+        }
     }
 
     fn finish_command(
@@ -1949,7 +2122,7 @@ impl Element for TextCanvas {
                 view.buffer().text(),
             )
         };
-        let (named_styles, current_section, collapsed_headings) = {
+        let (named_styles, current_section, collapsed_headings, isearch_current, isearch_lazy) = {
             let view = self.view.read(cx);
             let sections = view.buffer().sections();
             let current = view.current_section();
@@ -1963,8 +2136,27 @@ impl Element for TextCanvas {
                         .map(|node| node.range.start)
                 })
                 .collect();
-            (view.buffer().named_styles(), current, headings)
+            let (isearch_current, isearch_lazy) = match &view.isearch_highlight {
+                Some(highlight) => (highlight.current.clone(), highlight.lazy.clone()),
+                None => (None, Vec::new()),
+            };
+            (
+                view.buffer().named_styles(),
+                current,
+                headings,
+                isearch_current,
+                isearch_lazy,
+            )
         };
+        let isearch_lazy_bounds = if !isearch_lazy.is_empty() {
+            layout.region_bounds(isearch_lazy.iter().cloned())
+        } else {
+            Vec::new()
+        };
+        let isearch_current_bounds = isearch_current
+            .as_ref()
+            .map(|range| layout.region_bounds(std::iter::once(range.clone())))
+            .unwrap_or_default();
         let style = decoration::TextStyle::new(
             ThemeSettings::global(cx),
             syntax.as_ref().map(|syntax| &***syntax),
@@ -1973,7 +2165,8 @@ impl Element for TextCanvas {
         )
         .with_annotations(annotations.as_deref())
         .with_named_ranges(&named_styles)
-        .with_current_section(current_section.clone());
+        .with_current_section(current_section.clone())
+        .with_isearch(isearch_current.clone(), &isearch_lazy);
         let cursor_colors = ThemeSettings::global(cx).style(StyleRole::Cursor);
         window.with_content_mask(
             Some(ContentMask {
@@ -2025,6 +2218,22 @@ impl Element for TextCanvas {
                         bounds,
                         ThemeSettings::global(cx)
                             .style(StyleRole::Region)
+                            .background,
+                    ));
+                }
+                for bounds in isearch_lazy_bounds {
+                    window.paint_quad(fill(
+                        bounds,
+                        ThemeSettings::global(cx)
+                            .style(StyleRole::IsearchLazy)
+                            .background,
+                    ));
+                }
+                for bounds in isearch_current_bounds {
+                    window.paint_quad(fill(
+                        bounds,
+                        ThemeSettings::global(cx)
+                            .style(StyleRole::IsearchMatch)
                             .background,
                     ));
                 }

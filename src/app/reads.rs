@@ -24,6 +24,9 @@ impl AppShell {
         if self.session.is_some() {
             return None;
         }
+        if !matches!(kind, ReadKind::IsearchEdit { .. }) && self.isearch.is_some() {
+            self.finish_isearch(false, false, true, Some(window), cx);
+        }
         if kind == ReadKind::WriteFile
             && let Some(reason) = target.read(cx).buffer().edit_inhibition()
         {
@@ -175,6 +178,21 @@ impl AppShell {
             }
             Command::MinibufferComplete => {}
             Command::MinibufferCompleteAndExit => self.confirm_session(window, cx),
+            Command::IsearchEditForward | Command::IsearchEditBackward => {
+                if let Some(session) = &self.session
+                    && let ReadKind::IsearchEdit { nonincremental, .. } = session.kind()
+                {
+                    let (id, nonincremental) = (session.id(), *nonincremental);
+                    self.confirm_isearch_edit(
+                        id,
+                        command == Command::IsearchEditForward,
+                        nonincremental,
+                        true,
+                        window,
+                        cx,
+                    );
+                }
+            }
             Command::AbortMinibuffers => self.cancel_session(window, cx),
             _ => debug_assert!(false, "{} is not a session command", command.name()),
         }
@@ -395,6 +413,11 @@ impl AppShell {
             ReadKind::SearchPattern { .. }
             | ReadKind::SearchDirectory { .. }
             | ReadKind::SearchFiles { .. } => self.confirm_search_read(kind, id, window, cx),
+            ReadKind::IsearchEdit {
+                forward,
+                nonincremental,
+                ..
+            } => self.confirm_isearch_edit(id, forward, nonincremental, false, window, cx),
             ReadKind::FindFile => self.confirm_find_file(id, window, cx),
             ReadKind::WriteFile => self.confirm_write_file(id, window, cx),
             ReadKind::SwitchToBuffer { default } => {
@@ -639,6 +662,10 @@ impl AppShell {
             return;
         };
         let id = session.id();
+        let isearch_edit = match session.kind() {
+            ReadKind::IsearchEdit { nonincremental, .. } => Some(*nonincremental),
+            _ => None,
+        };
         #[cfg(unix)]
         let process = match session.kind() {
             ReadKind::CommitYesNo { operation, .. }
@@ -647,6 +674,10 @@ impl AppShell {
         };
         self.cancel_save_confirmation(cx);
         if let Some(target) = self.end_session(id, window, cx) {
+            if let Some(nonincremental) = isearch_edit {
+                self.cancel_isearch_edit(nonincremental, window, cx);
+                return;
+            }
             #[cfg(unix)]
             if let Some(operation) = process {
                 if let Some(session) = self
@@ -660,6 +691,8 @@ impl AppShell {
             }
             self.cancel_closing();
             self.show_message(&target, "Quit", cx);
+        } else if isearch_edit.is_some() {
+            self.finish_isearch(true, false, true, Some(window), cx);
         }
     }
 }

@@ -96,6 +96,7 @@ impl AppShell {
             let id = source.read(cx).buffer().snapshot_id().buffer;
             self.refresh_buffer(id, cx);
         } else {
+            self.refresh_isearch_viewport(source.entity_id(), cx);
             cx.notify();
         }
     }
@@ -133,6 +134,9 @@ impl AppShell {
         {
             return;
         }
+        if self.isearch.is_some() {
+            self.finish_isearch(false, false, true, Some(window), cx);
+        }
         let old = self.active_view().clone();
         old.update(cx, |view, cx| view.suspend_input(cx));
         if !self.panes.select(&pane) {
@@ -155,6 +159,9 @@ impl AppShell {
     ) {
         if self.minibuffer.is_some() {
             return;
+        }
+        if self.isearch.is_some() {
+            self.finish_isearch(false, false, true, Some(window), cx);
         }
         match command {
             Command::SplitWindowBelow | Command::SplitWindowRight => {

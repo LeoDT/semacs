@@ -87,4 +87,62 @@ impl Buffer {
             doc.touch();
         }
     }
+
+    pub(crate) fn is_range_hidden(&self, range: Range<ByteOffset>) -> bool {
+        self.document
+            .borrow()
+            .sections
+            .as_ref()
+            .is_some_and(|sections| sections.is_range_hidden(range))
+    }
+
+    pub(crate) fn isearch_temp_open(
+        &mut self,
+        range: Range<ByteOffset>,
+        opened: &mut Vec<String>,
+    ) -> bool {
+        let mut doc = self.document.borrow_mut();
+        let Some(sections) = &mut doc.sections else {
+            return false;
+        };
+        let changed = Arc::make_mut(sections).temp_open_for_range(range, opened);
+        if changed {
+            let sections = doc.sections.as_ref().unwrap().clone();
+            for point in doc.points.iter().filter_map(|point| point.upgrade()) {
+                if !std::rc::Rc::ptr_eq(&point, &self.point) {
+                    point.set(sections.collapse_point(ByteOffset(point.get())).0);
+                }
+            }
+            doc.touch();
+        }
+        changed
+    }
+
+    pub(crate) fn isearch_finalize_opened(
+        &mut self,
+        keep_range: Option<Range<ByteOffset>>,
+        opened: &mut Vec<String>,
+    ) -> bool {
+        let mut doc = self.document.borrow_mut();
+        let Some(sections) = &mut doc.sections else {
+            opened.clear();
+            return false;
+        };
+        let changed = Arc::make_mut(sections).finalize_temp_opened(keep_range, opened);
+        if changed {
+            let sections = doc.sections.as_ref().unwrap().clone();
+            for point in doc.points.iter().filter_map(|point| point.upgrade()) {
+                point.set(sections.collapse_point(ByteOffset(point.get())).0);
+            }
+            doc.touch();
+        }
+        changed
+    }
+
+    #[cfg(test)]
+    pub(crate) fn install_test_sections(&mut self, sections: Sections) {
+        let mut doc = self.document.borrow_mut();
+        doc.sections = Some(Arc::new(sections));
+        doc.touch();
+    }
 }

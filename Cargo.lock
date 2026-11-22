@@ -6143,6 +6143,7 @@ dependencies = [
  "proptest",
  "rand 0.9.5",
  "rayon",
+ "regex",
  "rquickjs",
  "smallvec",
  "tree-sitter",

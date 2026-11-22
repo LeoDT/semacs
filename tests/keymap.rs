@@ -51,6 +51,7 @@ fn default_bindings_match_the_emacs_reference_or_approved_contracts() {
     let messages_reference = reference_table(include_str!("emacs/d1-bindings.tsv"));
     let project_reference = reference_table(include_str!("emacs/f7-bindings.tsv"));
     let search_reference = reference_table(include_str!("emacs/f8-bindings.tsv"));
+    let isearch_reference = reference_table(include_str!("emacs/f9-bindings.tsv"));
     let application = Keymap::for_scope(Scope::Application);
     let edit = Keymap::for_scope(Scope::Edit);
     let session = Keymap::for_scope(Scope::ReadSession);
@@ -73,6 +74,7 @@ fn default_bindings_match_the_emacs_reference_or_approved_contracts() {
                 "C-h e" => messages_reference.get("C-h e").copied(),
                 key if project_reference.contains_key(key) => project_reference.get(key).copied(),
                 key if search_reference.contains_key(key) => search_reference.get(key).copied(),
+                key if isearch_reference.contains_key(key) => isearch_reference.get(key).copied(),
                 key => reference.get(key).copied(),
             };
             assert_eq!(expected, Some(spec.name));
@@ -88,6 +90,7 @@ fn default_bindings_match_the_emacs_reference_or_approved_contracts() {
         "ctrl-x",
         "ctrl-x p",
         "alt-g",
+        "alt-s",
         "ctrl-h",
         "escape",
         "escape escape",

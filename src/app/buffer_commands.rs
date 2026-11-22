@@ -206,6 +206,9 @@ impl AppShell {
         {
             return false;
         }
+        if self.isearch.is_some() {
+            self.finish_isearch(false, false, true, Some(window), cx);
+        }
         self.cancel_file_open();
         let id = self.buffers[index].id();
         if !self.body_panes[&pane_id].editors.contains_key(&id) {
@@ -247,6 +250,9 @@ impl AppShell {
         if index >= self.buffers.len() || self.minibuffer.is_some() {
             return false;
         }
+        if self.isearch.is_some() {
+            self.finish_isearch(false, false, true, Some(window), cx);
+        }
         if self.panes.side() == Some(self.panes.selected())
             && self.active_buffer_id() != self.buffers[index].id()
         {
@@ -282,6 +288,7 @@ impl AppShell {
         cx: &mut Context<Self>,
     ) {
         let id = self.buffers[index].id();
+        self.finish_isearch_if_buffer(id, Some(window), cx);
         #[cfg(unix)]
         if self.commit_editors.contains_key(&id) {
             let target = self.buffer_target(index, window, cx);

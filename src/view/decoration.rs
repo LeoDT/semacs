@@ -17,6 +17,8 @@ pub(super) struct TextStyle<'a> {
     annotations: Option<&'a crate::buffer::Annotations>,
     named: &'a [(Range<crate::text::ByteOffset>, StyleRole)],
     current_section: Option<Range<crate::text::ByteOffset>>,
+    isearch_current: Option<Range<usize>>,
+    isearch_lazy: &'a [Range<crate::text::ByteOffset>],
 }
 
 impl<'a> TextStyle<'a> {
@@ -35,6 +37,8 @@ impl<'a> TextStyle<'a> {
             annotations: None,
             named: &[],
             current_section: None,
+            isearch_current: None,
+            isearch_lazy: &[],
         }
     }
 
@@ -59,6 +63,16 @@ impl<'a> TextStyle<'a> {
         current: Option<Range<crate::text::ByteOffset>>,
     ) -> Self {
         self.current_section = current;
+        self
+    }
+
+    pub(super) fn with_isearch(
+        mut self,
+        current: Option<Range<crate::text::ByteOffset>>,
+        lazy: &'a [Range<crate::text::ByteOffset>],
+    ) -> Self {
+        self.isearch_current = current.map(|range| range.start.0..range.end.0);
+        self.isearch_lazy = lazy;
         self
     }
 
@@ -178,6 +192,29 @@ impl<'a> TextStyle<'a> {
                 attributes.background = None;
                 attributes.merge(self.styles[StyleRole::MinibufferPrompt as usize]);
                 end = end.min(self.prompt_end);
+            }
+            if !self.isearch_lazy.is_empty() {
+                let index = self
+                    .isearch_lazy
+                    .partition_point(|range| range.end.0 <= position);
+                if let Some(lazy) = self.isearch_lazy.get(index) {
+                    if lazy.start.0 <= position {
+                        attributes.foreground =
+                            self.styles[StyleRole::IsearchLazy as usize].foreground;
+                        end = end.min(lazy.end.0);
+                    } else {
+                        end = end.min(lazy.start.0);
+                    }
+                }
+            }
+            if let Some(current) = &self.isearch_current {
+                if position < current.start {
+                    end = end.min(current.start);
+                } else if position < current.end {
+                    attributes.foreground =
+                        self.styles[StyleRole::IsearchMatch as usize].foreground;
+                    end = end.min(current.end);
+                }
             }
             if let Some(cursor) = &cursor {
                 if position < cursor.start {
