@@ -20,6 +20,7 @@ mod generated;
 mod history;
 mod process;
 mod repository_history;
+mod search;
 mod selection;
 mod status;
 pub(crate) mod tree;
@@ -131,6 +132,7 @@ struct Document {
     status: Option<status::StatusSession>,
     process: Option<process::ProcessSession>,
     repository_history: Option<repository_history::HistorySession>,
+    search: Option<search::SearchSession>,
     tree: Option<tree::TreeSession>,
 }
 
@@ -213,6 +215,7 @@ impl Buffer {
             status: None,
             process: None,
             repository_history: None,
+            search: None,
             tree: None,
             revision: 0,
             last_edit: None,

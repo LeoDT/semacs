@@ -17,10 +17,20 @@ use crate::view::BufferView;
 pub enum ProjectAction {
     SwitchMenu,
     FindFile,
+    FindRegexp,
     SwitchToBuffer,
     KillBuffers,
     Remember,
     Forget,
+}
+
+/// Destination of a confirmed search pattern read.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum SearchReadTarget {
+    Project(crate::project::Project),
+    Directory,
+    RerunRegexp(crate::buffer::BufferId),
+    RerunLiteral(crate::buffer::BufferId),
 }
 
 /// What a confirmed session does with the text read in the minibuffer.
@@ -54,6 +64,19 @@ pub enum ReadKind {
     ProjectKillBuffersConfirm {
         project_name: String,
         buffers: Vec<crate::buffer::BufferId>,
+    },
+    SearchPattern {
+        target: SearchReadTarget,
+        default: Option<String>,
+        prompt: String,
+    },
+    SearchDirectory {
+        query: crate::search::SearchQuery,
+        rerun_buffer: Option<crate::buffer::BufferId>,
+    },
+    SearchFiles {
+        buffer: crate::buffer::BufferId,
+        query: crate::search::SearchQuery,
     },
     HistoryFileVersion {
         versions: Vec<crate::history::FileVersion>,
@@ -173,6 +196,7 @@ impl ReadKind {
                 | Self::ProjectScanDirectory
                 | Self::ProjectFindFile { .. }
                 | Self::ProjectSwitchToBuffer { .. }
+                | Self::SearchDirectory { .. }
                 | Self::FindFile
                 | Self::TreeRoot
                 | Self::TreeFile
@@ -215,7 +239,9 @@ impl ReadKind {
         match self {
             Self::KillBufferConfirm { .. } => "Please answer y, n, or s",
             Self::CommitMenu => "Choose c, a, w, f, s; C-g cancels",
-            Self::ProjectSwitchMenu { .. } => "Unrecognized input; choose f, b, v, t; C-g cancels",
+            Self::ProjectSwitchMenu { .. } => {
+                "Unrecognized input; choose f, g, b, v, t; C-g cancels"
+            }
             #[cfg(unix)]
             Self::CommitTargetMerges { .. } => "Choose c (continue), s (select other), a (abort)",
             _ if self.is_single_key() => "Please answer y or n",
@@ -233,7 +259,7 @@ impl ReadKind {
             ReadKind::ProjectDirectory { .. } => "Select directory: ".to_owned(),
             ReadKind::ProjectScanDirectory => "Directory: ".to_owned(),
             ReadKind::ProjectSwitchMenu { project } => format!(
-                "Command in `{}': [f] Find file  [b] Switch buffer  [v] Magit status  [t] Treemacs ",
+                "Command in `{}': [f] Find file  [g] Find regexp  [b] Switch buffer  [v] Magit status  [t] Treemacs ",
                 crate::files::directory_input(&project.root)
             ),
             ReadKind::ProjectFindFile { project } => format!(
@@ -252,6 +278,11 @@ impl ReadKind {
                 buffers.len(),
                 project_name
             ),
+            ReadKind::SearchPattern { prompt, .. } => prompt.clone(),
+            ReadKind::SearchDirectory { .. } => "Search in directory: ".to_owned(),
+            ReadKind::SearchFiles { .. } => {
+                "Files glob (empty for all, e.g. *.rs !target/*): ".to_owned()
+            }
             ReadKind::HistoryFileVersion { .. } => "Visit file version: ".into(),
             #[cfg(unix)]
             ReadKind::CommitPublished { branches, amending, .. } => format!("{} already been published to {}. Do you really want to modify {}? (y or n) ", if *amending { "This commit has" } else { "Some of these commits have" }, branches.join(", "), if *amending { "it" } else { "them" }),
@@ -327,7 +358,7 @@ impl ReadSession {
             let mut keymap = Keymap::default();
             let keys: &[&str] = match &kind {
                 ReadKind::CommitMenu => &["c", "a", "w", "f", "s"],
-                ReadKind::ProjectSwitchMenu { .. } => &["f", "b", "v", "t"],
+                ReadKind::ProjectSwitchMenu { .. } => &["f", "g", "b", "v", "t"],
                 #[cfg(unix)]
                 ReadKind::CommitTargetMerges { .. } => &["c", "s", "a"],
                 _ => &["y", "shift-y", "n", "shift-n", "enter", "ctrl-m"],

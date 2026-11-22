@@ -17,7 +17,8 @@ type SemacsStyleName =
     | "diff.file-highlight" | "diff.hunk-highlight" | "diff.added-highlight"
     | "diff.removed-highlight" | "diff.context-highlight"
     | "diffstat.added" | "diffstat.removed" | "section.current" | "section.heading"
-    | "magit.branch" | "magit.hash";
+    | "magit.branch" | "magit.hash"
+    | "search.file" | "search.line-number" | "search.match";
 
 interface SemacsTextStyle {
     foreground?: string;
@@ -30,7 +31,7 @@ interface SemacsTextStyle {
 
 type SemacsStyleColors<N extends SemacsStyleName> =
     N extends "region" | "section.current" ? { background?: string } :
-    N extends "default" | "minibuffer-prompt" | "section.heading" | `syntax.${string}` | `markup.${string}` | `diff.${string}` | `diffstat.${string}` | `magit.${string}` ? SemacsTextStyle :
+    N extends "default" | "minibuffer-prompt" | "section.heading" | `syntax.${string}` | `markup.${string}` | `diff.${string}` | `diffstat.${string}` | `magit.${string}` | `search.${string}` ? SemacsTextStyle :
     N extends "completion-match" | "completion-annotation" | "separator" ? { foreground?: string } :
     { foreground?: string; background?: string };
 
@@ -41,7 +42,7 @@ interface SemacsThemeDefinition {
     styles: SemacsThemeStyles;
 }
 
-type SemacsMode = "fundamental" | "treemacs" | "magit-diff" | "magit-status" | "git-commit" | "magit-process" | "magit-log" | "magit-log-select" | "magit-revision";
+type SemacsMode = "fundamental" | "treemacs" | "magit-diff" | "magit-status" | "git-commit" | "magit-process" | "magit-log" | "magit-log-select" | "magit-revision" | "rg";
 
 interface SemacsStatusSelection {
     readonly group: "untracked" | "unstaged" | "staged" | "unmerged";

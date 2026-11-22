@@ -13,6 +13,7 @@ impl ModeId {
     pub const MAGIT_LOG: Self = Self("magit-log");
     pub const MAGIT_LOG_SELECT: Self = Self("magit-log-select");
     pub const MAGIT_REVISION: Self = Self("magit-revision");
+    pub const RG: Self = Self("rg");
 
     pub fn name(self) -> &'static str {
         self.0
@@ -46,6 +47,7 @@ pub const MODES: &[ModeId] = &[
     ModeId::MAGIT_LOG,
     ModeId::MAGIT_LOG_SELECT,
     ModeId::MAGIT_REVISION,
+    ModeId::RG,
 ];
 
 const MODE_BINDINGS: &[(ModeId, &str, crate::command::Command)] = &[
@@ -240,4 +242,13 @@ const MODE_BINDINGS: &[(ModeId, &str, crate::command::Command)] = &[
         "shift-space",
         crate::command::Command::ScrollDown,
     ),
+    (ModeId::RG, "space", crate::command::Command::ScrollUp),
+    (ModeId::RG, "backspace", crate::command::Command::ScrollDown),
+    (
+        ModeId::RG,
+        "shift-space",
+        crate::command::Command::ScrollDown,
+    ),
+    (ModeId::RG, "<", crate::command::Command::BeginningOfBuffer),
+    (ModeId::RG, ">", crate::command::Command::EndOfBuffer),
 ];

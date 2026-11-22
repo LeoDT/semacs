@@ -49,6 +49,7 @@
 | `diffstat.added` / `diffstat.removed` | 前景 / 背景及全部文字属性，diffstat 的增删计数 |
 | `section.heading` | 前景 / 背景及全部文字属性，status 分组名及 diff 总览标题；不把 status 数量、路径或文件头混用为分组标题 |
 | `magit.branch` / `magit.hash` | 前景 / 背景及全部文字属性，status 中的本地分支名与 HEAD OID |
+| `search.file` / `search.line-number` / `search.match` | 前景 / 背景及全部文字属性，`*rg*` 搜索结果中的文件名 heading、行列号及命中子串高亮 |
 | `section.current` | 仅 `background`，当前 section 整行背景；该反馈独立于 region |
 
 当前 section 按各 view 的 point 分别合成，不改写共享样式范围；颜色变化仅重绘，当前字体变化参与该 view 的布局身份。逻辑行背景按行首对应角色决定，背景铺至视图右缘，文字 / region / 光标仍保留既有合成优先级。高亮角色到普通角色的回退是上述固定对应关系，不提供任意继承。配色由 semacs 主题直接控制，不运行 Delta；保留 `+` / `-`，不提供逐词差异高亮。
@@ -82,7 +83,7 @@ semacs.setStyle("syntax.comment", { italic: true });
 
 `run(context)` 收到调用开始时深度冻结的值快照，不含路径、Git 参数、可变核心对象或可伪造目标句柄：
 
-- `mode`：`"fundamental" | "magit-diff" | "magit-status" | "git-commit" | "magit-process" | "magit-log" | "magit-log-select" | "magit-revision"`。
+- `mode`：`"fundamental" | "treemacs" | "magit-diff" | "magit-status" | "git-commit" | "magit-process" | "magit-log" | "magit-log-select" | "magit-revision" | "rg"`。
 - `status`：非 status 为 `null`，否则为 `{ selection }`。
 - `selection`：无可见文件 / hunk 目标时为 `null`，否则含 `group: "untracked" | "unstaged" | "staged" | "unmerged"` 及布尔值 `canStage` / `canUnstage`。能力只是提示；region、过时清单或不支持的目标不授予写入权，核心仍重新校验。
 
@@ -112,7 +113,7 @@ semacs.bindKey("ctrl-c g", "status-or-refresh");
 
 ### `semacs.bindKey(keys, commandName | null, options?)`
 
-绑定或取消一个正文键序列；可多次绑定不同键到同一命令。不传 `options` 保持正文通用绑定；传 `{ mode: "magit-diff" }`、`{ mode: "magit-status" }`、`{ mode: "git-commit" }`、`{ mode: "magit-process" }`、`{ mode: "magit-log" }`、`{ mode: "magit-log-select" }`、`{ mode: "magit-revision" }`、`{ mode: "treemacs" }` 或 `{ mode: "fundamental" }` 仅配置对应 mode 的局部层。未知 mode / 选项拒绝整份配置，当前没有 JS mode 注册 API。局部层优先于通用层；局部 `null` 屏蔽该 mode 内的低层回落，删除声明恢复默认。跨层前缀与上下文规则见 [F1 契约](emacs-fidelity.md#mode-与键位)。
+绑定或取消一个正文键序列；可多次绑定不同键到同一命令。不传 `options` 保持正文通用绑定；传 `{ mode: "magit-diff" }`、`{ mode: "magit-status" }`、`{ mode: "git-commit" }`、`{ mode: "magit-process" }`、`{ mode: "magit-log" }`、`{ mode: "magit-log-select" }`、`{ mode: "magit-revision" }`、`{ mode: "treemacs" }`、`{ mode: "rg" }` 或 `{ mode: "fundamental" }` 仅配置对应 mode 的局部层。未知 mode / 选项拒绝整份配置，当前没有 JS mode 注册 API。局部层优先于通用层；局部 `null` 屏蔽该 mode 内的低层回落，删除声明恢复默认。跨层前缀与上下文规则见 [F1 契约](emacs-fidelity.md#mode-与键位)。
 
 ```js
 semacs.bindKey("tab", "section-toggle", { mode: "magit-diff" });

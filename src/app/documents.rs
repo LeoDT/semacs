@@ -19,10 +19,23 @@ pub(super) struct Opening {
     options: VisitOptions,
 }
 
-#[derive(Clone, Copy, Default)]
+#[derive(Clone, Copy)]
 pub(super) struct VisitOptions {
     pub location: Option<(usize, usize)>,
     pub tree: Option<super::tree::Visit>,
+    pub pane: Option<u64>,
+    pub select_pane: bool,
+}
+
+impl Default for VisitOptions {
+    fn default() -> Self {
+        Self {
+            location: None,
+            tree: None,
+            pane: None,
+            select_pane: true,
+        }
+    }
 }
 
 impl AppShell {
@@ -96,7 +109,13 @@ impl AppShell {
                     }
                     view.update(cx, |view, cx| view.install_input_lifecycle(window, cx));
                     let options = opening.options;
-                    let index = shell.insert_view(view, cx);
+                    let target_pane = options.pane.filter(|pane| {
+                        shell.body_panes.contains_key(pane) && shell.panes.side() != Some(pane)
+                    });
+                    let index = match target_pane {
+                        Some(pane) => shell.insert_view_in(pane, view, cx),
+                        None => shell.insert_view(view, cx),
+                    };
                     shell.activate_visited(index, options, window, cx);
                 })
                 .ok();
@@ -147,13 +166,30 @@ impl AppShell {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if !self.activate(index, window, cx) {
-            return;
-        }
-        if let Some((line, column)) = options.location {
-            self.active_view().clone().update(cx, |view, cx| {
-                view.show_line_column(line, column, window, cx)
-            });
+        let target_pane = options
+            .pane
+            .filter(|pane| self.body_panes.contains_key(pane) && self.panes.side() != Some(pane));
+        if let Some(pane_id) = target_pane {
+            if !self.show_buffer_in_pane(pane_id, index, options.select_pane, window, cx) {
+                return;
+            }
+            if let Some((line, column)) = options.location {
+                self.body_panes[&pane_id]
+                    .active_view()
+                    .clone()
+                    .update(cx, |view, cx| {
+                        view.show_line_column(line, column, window, cx)
+                    });
+            }
+        } else {
+            if !self.activate(index, window, cx) {
+                return;
+            }
+            if let Some((line, column)) = options.location {
+                self.active_view().clone().update(cx, |view, cx| {
+                    view.show_line_column(line, column, window, cx)
+                });
+            }
         }
         if let Some(visit) = options.tree {
             self.finish_tree_visit(visit, window, cx);
@@ -439,7 +475,8 @@ impl AppShell {
                     let boundary = (update_path
                         && (buffer.status_repository().is_some()
                             || buffer.process_repository().is_some()
-                            || buffer.history_query().is_some()))
+                            || buffer.history_query().is_some()
+                            || buffer.is_search_buffer()))
                     .then(|| buffer.save_point());
                     if update_path {
                         buffer.set_path(path.clone());
@@ -450,6 +487,7 @@ impl AppShell {
                         buffer.detach_status();
                         buffer.detach_process();
                         buffer.detach_history();
+                        buffer.detach_search();
                     }
                     if update_path && buffer.is_message_log() {
                         buffer.detach_message_log();
@@ -459,6 +497,7 @@ impl AppShell {
                 self.refresh_buffer(self.buffers[index].id(), cx);
                 if update_path {
                     self.reset_message_log(buffer);
+                    self.discard_search_buffer(buffer);
                     #[cfg(unix)]
                     self.discard_commit_selection(buffer, window, cx);
                     self.rename_buffer(index, cx);

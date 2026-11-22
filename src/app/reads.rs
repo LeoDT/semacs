@@ -392,6 +392,9 @@ impl AppShell {
             | ReadKind::ProjectSwitchToBuffer { .. } => {
                 self.confirm_project_read(kind, id, window, cx)
             }
+            ReadKind::SearchPattern { .. }
+            | ReadKind::SearchDirectory { .. }
+            | ReadKind::SearchFiles { .. } => self.confirm_search_read(kind, id, window, cx),
             ReadKind::FindFile => self.confirm_find_file(id, window, cx),
             ReadKind::WriteFile => self.confirm_write_file(id, window, cx),
             ReadKind::SwitchToBuffer { default } => {

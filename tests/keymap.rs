@@ -50,6 +50,7 @@ fn default_bindings_match_the_emacs_reference_or_approved_contracts() {
     let session_reference = reference_table(include_str!("emacs/m2-minibuffer-bindings.tsv"));
     let messages_reference = reference_table(include_str!("emacs/d1-bindings.tsv"));
     let project_reference = reference_table(include_str!("emacs/f7-bindings.tsv"));
+    let search_reference = reference_table(include_str!("emacs/f8-bindings.tsv"));
     let application = Keymap::for_scope(Scope::Application);
     let edit = Keymap::for_scope(Scope::Edit);
     let session = Keymap::for_scope(Scope::ReadSession);
@@ -71,6 +72,7 @@ fn default_bindings_match_the_emacs_reference_or_approved_contracts() {
                 "C-x C-k" => Some("kill-current-buffer"),
                 "C-h e" => messages_reference.get("C-h e").copied(),
                 key if project_reference.contains_key(key) => project_reference.get(key).copied(),
+                key if search_reference.contains_key(key) => search_reference.get(key).copied(),
                 key => reference.get(key).copied(),
             };
             assert_eq!(expected, Some(spec.name));
@@ -85,6 +87,7 @@ fn default_bindings_match_the_emacs_reference_or_approved_contracts() {
     for sequence in [
         "ctrl-x",
         "ctrl-x p",
+        "alt-g",
         "ctrl-h",
         "escape",
         "escape escape",

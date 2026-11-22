@@ -524,9 +524,51 @@ F2 仅提供 status 与单文件整文件级 index 操作，不包含 hunk / 批
 
 ### 已批准差异与联动
 
-- **`project-switch-project` 单键分派菜单**：上游默认菜单包含依赖 dired / eshell / vc-dir / grep 的项；用户批准本阶段菜单固定为 `[f] Find file`、`[b] Switch buffer`、`[v] Magit status`、`[t] Treemacs`（接替上游 `v` 的 VCS 槽位并接入文件树）。
+- **`project-switch-project` 单键分派菜单**：上游默认菜单包含依赖 dired / eshell / vc-dir / grep 的项；菜单固定为 `[f] Find file`、`[g] Find regexp`、`[b] Switch buffer`、`[v] Magit status`、`[t] Treemacs`（接替上游 `v` 的 VCS 槽位并接入文件树与 F8 项目内搜索）。
 - **Treemacs 联动**：通过 `C-x p p` 选择 `[t]` 时把左侧树切换到目标项目根并显示；通过 `C-x p p` 选择 `[f]` 打开另一项目的文件时保持已打开的 treemacs 树根不变。从 treemacs 侧窗触发 `project-find-file` 或 `project-switch-to-buffer` 时，切到普通 pane 打开/切换目标，不因侧窗 dedicated 失败。
 
 ### 首版不提供的上游能力
 
-以下 `project.el` 能力在首版不实现，对应键位不绑定：`project-find-regexp` / `project-or-external-find-regexp`（留待项目内搜索阶段）、`project-find-dir` / `project-dired`、`project-vc-dir`、`project-shell` / `project-eshell` / `project-compile` / `project-shell-command` / `project-async-shell-command`、`project-query-replace-regexp`、`project-list-buffers`、`project-save-some-buffers`、`project-or-external-find-file`、`project-any-command` / `project-execute-extended-command`、`project-mode-line`、`.dir-locals.el` / `project-vc-extra-root-markers`、`C-u C-x p f`、非 Git VCS、TRAMP / 远程、多根 workspace 与 JS 配置 `project-switch-commands` 扩展。
+以下 `project.el` 能力在首版不实现，对应键位不绑定：`project-or-external-find-regexp`、`project-find-dir` / `project-dired`、`project-vc-dir`、`project-shell` / `project-eshell` / `project-compile` / `project-shell-command` / `project-async-shell-command`、`project-query-replace-regexp`、`project-list-buffers`、`project-save-some-buffers`、`project-or-external-find-file`、`project-any-command` / `project-execute-extended-command`、`project-mode-line`、`.dir-locals.el` / `project-vc-extra-root-markers`、`C-u C-x p f`、非 Git VCS、TRAMP / 远程、多根 workspace 与 JS 配置 `project-switch-commands` 扩展。
+
+## 阶段 F8：ripgrep 搜索（项目与文件夹）
+
+本节定义已确认的项目与文件夹内容搜索行为，以 GNU Emacs 31.1 内置 `grep-mode` / `compile.el` / `project.el` 与 `rg.el` 为交互参照（全局默认键位参照见 [f8-bindings.tsv](../tests/emacs/f8-bindings.tsv)）；需要系统已安装 `rg`（ripgrep）。
+
+### 入口与输入流程
+
+- **项目内搜索**：`C-x p g`（`project-find-regexp`）与 `M-x rg-project` 复用 F7 项目识别（在 Git 项目内直接确定根并记入已知项目列表，否则弹出项目选择器含 `... (choose a dir)`），同时接入 `C-x p p` 单键分派菜单的 `[g] Find regexp`。只询问搜索词；光标位于标识符上时提供 `(default <sym>)`，空回车使用默认词，无默认词时拒绝空搜索并保留会话。
+- **文件夹搜索**：`M-x rg` 先询问搜索词（同样支持光标处默认标识符），再询问搜索目录（预填当前 buffer 关联目录——含 treemacs 当前节点目录、Magit 仓库根或 `*rg*` 自身搜索目录——并复用既有目录候选补全，只接受已存在目录）。
+- **默认匹配语义**：按 `rg --smart-case`（全小写忽略大小写，含大写区分大小写）执行正则搜索，遵循 `.gitignore` 等忽略规则；不经由 shell，参数数组以 `--` 分隔搜索词，防止 `-` 开头的搜索词被误判为选项。
+
+### `*rg*` 结果 buffer 与导航
+
+- 新增 buffer mode `rg`（只读、复用单结果 buffer `*rg*`），按文件分组投影为可折叠 section 树，展示头部元信息（目录、命令摘要、模式 / 大小写 / 文件过滤 / ignore 状态）、文件名与匹配计数、`行:列:` 与截断后的单行内容、以及精确子串高亮（使用命名样式 `search.file`、`search.line-number`、`search.match`）。长行不软换行，可用 `M-<right>` / `M-<left>` 水平查看。
+- 启动搜索后立即通过 F3 临时分屏策略弹出 `*rg*` 并展示 `Searching...`，后台线程通过 `rg --json` 流式读取并节流刷新投影，结束后显示匹配统计、耗时或错误诊断（`rg` 退出码 1 表示正常无匹配，不视为错误；退出码 2 无输出时展示 stderr 诊断，有部分匹配时保留结果并附加警告）。受最大 20,000 条匹配 / 12 MiB 投影字节与 64 KiB stderr 展示上限保护（超限温和停止并标记截断，stderr 保持排空不触发 `EPIPE`）。
+- 匹配跳转优先在另一个非 side、非 `*rg*` 的普通窗口打开目标文件并定位到精确的 1-based 行与 0-based UTF-8 字节列（保留已打开文件的未保存编辑，行列超界夹紧）；若 `*rg*` 为唯一普通窗口则尝试分屏保留 `*rg*` 可见；目标处于折叠文件组时自动展开。
+- **`rg` mode 局部键位**：
+
+  | 键位 | 命令 | 行为 |
+  |---|---|---|
+  | `RET` / `C-m` | `compile-goto-error` | 在另一普通窗口打开当前匹配（文件 heading 上打开首条匹配）并选中该窗口 |
+  | `C-o` | `compilation-display-error` | 在另一普通窗口显示当前匹配，焦点留在 `*rg*` |
+  | `n` / `p` | `next-error-no-select` / `previous-error-no-select` | 移到下 / 上一条匹配并在另一普通窗口联动显示，焦点留在 `*rg*` |
+  | `M-n` / `M-p` | `compilation-next-error` / `compilation-previous-error` | 仅在 `*rg*` 内移到下 / 上一条匹配，不打开文件 |
+  | `{` / `M-{`、`}` / `M-}` | `compilation-previous-file` / `compilation-next-file` | 在 `*rg*` 内跳到上 / 下一个文件的第一条匹配 |
+  | `TAB` / `C-i`、`S-TAB` / `<backtab>` | `section-toggle` / `magit-section-cycle-global` | 折叠 / 展开当前文件组或全局所有文件组 |
+  | `g` | `recompile` | 以相同条件重新搜索并保留折叠状态 |
+  | `r` / `t` | `rg-rerun-change-regexp` / `rg-rerun-change-literal` | 预填当前搜索词，改为正则 / 固定字符串（`-F`）重搜 |
+  | `d` | `rg-rerun-change-dir` | 预填当前目录走目录补全，切换目录重搜 |
+  | `f` | `rg-rerun-change-files` | 预填当前文件 glob（支持 `{a,b}` 花括号与逗号/空白多 glob，空输入清除）重搜 |
+  | `c` / `i` | `rg-rerun-toggle-case` / `rg-rerun-toggle-ignore` | 循环切换大小写（`smart` → `sensitive` → `insensitive`）或切换 `--no-ignore` 并立即重搜 |
+  | `C-c C-k` | `kill-compilation` | 终止正在运行的 `rg` 进程组（未运行时提示 `No active search process`） |
+  | `q` | `quit-window` | bury `*rg*` 并按 F3 局部临时 window 语义恢复布局与焦点 |
+  | `SPC` / `DEL` / `S-SPC`、`<` / `>` | `scroll-up-command` / `scroll-down-command`、`beginning-of-buffer` / `end-of-buffer` | 可见行翻页与跳至首尾 |
+  | `M-<right>` / `M-<left>` | `scroll-left` / `scroll-right` | 水平查看长行 |
+
+- **全局跳转键位**：`M-g n` / `M-g M-n` / `C-x \``（`next-error`）与 `M-g p` / `M-g M-p`（`previous-error`）可在任意窗口顺序访问最近活跃 `*rg*` 的下 / 上一条匹配，同步推进所有 `*rg*` 视图的点位并在普通代码窗口打开选中目标（即使当前焦点在 Treemacs 侧窗也不因 dedicated 失败）。
+- **生命周期**：发起新搜索、kill `*rg*`、或确认退出窗口时取消并回收活动 `rg` 进程组（取消退出确认不提前杀死运行中的搜索）；`*rg*` 另存为文件（`C-x C-w`）成功后脱离 `rg` mode、清空 section 与搜索会话成为普通可编辑 buffer；配置热重载保留当前结果与折叠状态。
+
+### 首版不提供的上游能力
+
+以下 `grep-mode` / `rg.el` 能力在首版不实现：`wgrep` / `grep-edit-mode`（`e` 就地编辑写回多文件）、`rg-menu` transient 弹窗（`m`）、`rg-dwim`、多 `*rg*` 命名保存与搜索历史列表（`L` / `S`）、`next-error-follow-minor-mode`（`C-c C-f`）、上下文行（`-A`/`-B`/`-C`）、自定义原始 CLI flags 编辑（`C-u`）、结果内正则过滤与跨重启持久化。

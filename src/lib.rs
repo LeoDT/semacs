@@ -31,6 +31,7 @@ pub mod preparation_trace;
 pub mod project;
 mod saves;
 pub mod scripting;
+pub mod search;
 pub mod section;
 pub mod session;
 pub mod status;

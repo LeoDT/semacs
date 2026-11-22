@@ -293,11 +293,31 @@ fn mx_unknown_names_stay_open_and_empty_input_accepts_the_first_command(cx: &mut
     });
 
     let _editor = mx(&mut visual, &shell);
+    visual.read(|cx| {
+        let first = &shell
+            .read(cx)
+            .session()
+            .unwrap()
+            .candidates()
+            .unwrap()
+            .items[0]
+            .candidate
+            .label;
+        assert_eq!(first, "rg");
+    });
     visual.simulate_keystrokes("enter");
     redraw(&mut visual);
     visual.read(|cx| {
+        assert!(matches!(
+            shell.read(cx).session().map(|session| session.kind()),
+            Some(semacs::session::ReadKind::SearchPattern { .. })
+        ));
+    });
+    visual.simulate_keystrokes("ctrl-g");
+    redraw(&mut visual);
+    visual.read(|cx| {
         assert!(shell.read(cx).session().is_none());
-        assert_eq!(body.read(cx).message(), Some("No further undo information"));
+        assert_eq!(body.read(cx).message(), Some("Quit"));
         assert_eq!(body.read(cx).buffer().text().to_string(), "body");
     });
     assert_focused(&mut visual, &body);

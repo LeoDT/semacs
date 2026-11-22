@@ -52,10 +52,13 @@ pub enum StyleRole {
     DiffAddedHighlight,
     DiffRemovedHighlight,
     DiffContextHighlight,
+    SearchFile,
+    SearchLineNumber,
+    SearchMatch,
 }
 
 impl StyleRole {
-    pub const COUNT: usize = Self::DiffContextHighlight as usize + 1;
+    pub const COUNT: usize = Self::SearchMatch as usize + 1;
     pub const ALL: [Self; Self::COUNT] = [
         Self::Default,
         Self::Cursor,
@@ -104,6 +107,9 @@ impl StyleRole {
         Self::DiffAddedHighlight,
         Self::DiffRemovedHighlight,
         Self::DiffContextHighlight,
+        Self::SearchFile,
+        Self::SearchLineNumber,
+        Self::SearchMatch,
     ];
 
     pub fn name(self) -> &'static str {
@@ -155,6 +161,9 @@ impl StyleRole {
             Self::DiffAddedHighlight => "diff.added-highlight",
             Self::DiffRemovedHighlight => "diff.removed-highlight",
             Self::DiffContextHighlight => "diff.context-highlight",
+            Self::SearchFile => "search.file",
+            Self::SearchLineNumber => "search.line-number",
+            Self::SearchMatch => "search.match",
         }
     }
 
@@ -588,13 +597,22 @@ fn builtin_colors(mode: ThemeMode) -> [StyleColors; StyleRole::COUNT] {
         | StyleRole::MarkupRaw
         | StyleRole::MarkupLinkUrl
         | StyleRole::DiffStatAdded => pair(string, background),
-        StyleRole::SyntaxNumber => pair(number, background),
+        StyleRole::SyntaxNumber | StyleRole::SearchLineNumber => pair(number, background),
         StyleRole::SyntaxType
         | StyleRole::MarkupHeading
         | StyleRole::MarkupStrong
         | StyleRole::DiffFile
         | StyleRole::DiffFileHighlight
-        | StyleRole::MagitBranch => pair(type_color, background),
+        | StyleRole::MagitBranch
+        | StyleRole::SearchFile => pair(type_color, background),
+        StyleRole::SearchMatch => pair(
+            accent,
+            if mode == ThemeMode::Dark {
+                0x3a3d1e
+            } else {
+                0xfff2a8
+            },
+        ),
         StyleRole::SyntaxFunction | StyleRole::SyntaxFunctionBuiltin => pair(function, background),
         StyleRole::SyntaxConstant | StyleRole::DiffStatRemoved => pair(constant, background),
         StyleRole::DiffHunk | StyleRole::DiffHunkHighlight => pair(function, inactive_bg),
@@ -632,10 +650,13 @@ fn builtin_attributes(mode: ThemeMode) -> [StyleOverride; StyleRole::COUNT] {
     attributes[StyleRole::DiffFile as usize].bold = Some(true);
     attributes[StyleRole::DiffHunk as usize].bold = Some(true);
     attributes[StyleRole::SectionHeading as usize].bold = Some(true);
+    attributes[StyleRole::SearchFile as usize].bold = Some(true);
+    attributes[StyleRole::SearchMatch as usize].bold = Some(true);
     for role in [
         StyleRole::DiffAdded,
         StyleRole::DiffRemoved,
         StyleRole::DiffHunk,
+        StyleRole::SearchMatch,
     ] {
         attributes[role as usize].background = Some(builtin_colors(mode)[role as usize].background);
     }

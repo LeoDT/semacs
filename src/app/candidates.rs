@@ -215,12 +215,14 @@ impl AppShell {
                 | ReadKind::TreeFile
                 | ReadKind::ProjectDirectory { .. }
                 | ReadKind::ProjectScanDirectory
+                | ReadKind::SearchDirectory { .. }
         ) {
             let directories_only = matches!(
                 kind,
                 ReadKind::TreeRoot
                     | ReadKind::ProjectDirectory { .. }
                     | ReadKind::ProjectScanDirectory
+                    | ReadKind::SearchDirectory { .. }
             );
             let directory = self.file_read_directory(&origin, cx);
             let history = cx

@@ -26,10 +26,19 @@ impl AppShell {
         view: Entity<BufferView>,
         cx: &mut Context<Self>,
     ) -> usize {
+        self.insert_view_in(*self.panes.selected(), view, cx)
+    }
+
+    pub(super) fn insert_view_in(
+        &mut self,
+        pane: u64,
+        view: Entity<BufferView>,
+        cx: &mut Context<Self>,
+    ) -> usize {
         let buffer = view.read(cx).buffer().new_view();
         let id = buffer.snapshot_id().buffer;
         let index = self.buffers.push(BufferSlot::new(buffer));
-        self.cache_view(*self.panes.selected(), id, view, cx);
+        self.cache_view(pane, id, view, cx);
         self.rename_buffer(index, cx);
         index
     }
@@ -128,6 +137,9 @@ impl AppShell {
         if let Some(repository) = buffer.repository() {
             return repository.root;
         }
+        if let Some(directory) = buffer.search_directory() {
+            return directory;
+        }
         buffer
             .path()
             .and_then(|path| path.parent().map(Path::to_path_buf))
@@ -177,6 +189,58 @@ impl AppShell {
         } else {
             self.remove_buffer(index, window, cx);
         }
+    }
+
+    pub(super) fn show_buffer_in_pane(
+        &mut self,
+        pane_id: u64,
+        index: usize,
+        select: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if index >= self.buffers.len()
+            || self.minibuffer.is_some()
+            || !self.body_panes.contains_key(&pane_id)
+            || self.panes.side() == Some(&pane_id)
+        {
+            return false;
+        }
+        self.cancel_file_open();
+        let id = self.buffers[index].id();
+        if !self.body_panes[&pane_id].editors.contains_key(&id) {
+            let buffer = self.buffers[index].buffer.new_view();
+            let view = Self::create_view(buffer, window, cx);
+            view.update(cx, |view, cx| view.suspend_input(cx));
+            self.cache_view(pane_id, id, view, cx);
+        }
+        let selected = *self.panes.selected();
+        if select && selected != pane_id {
+            self.active_view()
+                .clone()
+                .update(cx, |view, cx| view.suspend_input(cx));
+            self.panes.select(&pane_id);
+        } else if self.body_panes[&pane_id].current != id {
+            self.body_panes[&pane_id]
+                .active_view()
+                .clone()
+                .update(cx, |view, cx| view.suspend_input(cx));
+        }
+        self.body_panes.get_mut(&pane_id).unwrap().show_buffer(id);
+        self.buffers.touch(id);
+        self.update_selected_views(window, cx);
+        let view = self.body_panes[&pane_id].active_view().clone();
+        if select || *self.panes.selected() == pane_id {
+            self.echo = None;
+            view.update(cx, |view, cx| {
+                view.invalidate_split_geometry();
+                view.restore_input(window, cx);
+            });
+        } else {
+            view.update(cx, |view, _| view.invalidate_split_geometry());
+        }
+        cx.notify();
+        true
     }
 
     pub fn activate(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) -> bool {
@@ -246,6 +310,7 @@ impl AppShell {
             }
         }
         self.reset_message_log(id);
+        self.discard_search_buffer(id);
         self.discard_tree_window(id, window, cx);
         #[cfg(unix)]
         self.discard_commit_selection(id, window, cx);

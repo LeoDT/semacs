@@ -1,0 +1,11 @@
+# emacs-version: 31.1
+# major-mode: fundamental-mode
+# driving: emacs -Q --batch, key-binding lookup (not a command loop)
+#
+C-x p g	project-find-regexp
+M-g	PREFIX
+M-g n	next-error
+M-g M-n	next-error
+C-x `	next-error
+M-g p	previous-error
+M-g M-p	previous-error

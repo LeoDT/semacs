@@ -256,6 +256,7 @@ impl AppShell {
             && !self.git_writes.uncertain()
             && !self.active_commits()
         {
+            self.search_work = None;
             return true;
         }
         self.closing = Some(Closing::Exit(ExitFlow::new(remaining)));
@@ -359,6 +360,7 @@ impl AppShell {
         if !self.prepare_commit_exit(window, cx) {
             return;
         }
+        self.search_work = None;
         self.cancel_closing();
         window.remove_window();
         cx.notify();

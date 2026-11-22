@@ -12,7 +12,7 @@ pub(super) struct QuitRestore {
     pub buffer: BufferId,
     owner: Option<BufferId>,
     previous: Option<BufferId>,
-    source: u64,
+    pub(super) source: u64,
 }
 
 impl AppShell {

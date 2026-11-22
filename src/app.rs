@@ -51,6 +51,7 @@ mod reads;
 mod scripting;
 #[cfg(test)]
 mod scripting_tests;
+mod search;
 mod status;
 mod temporary;
 mod tree;
@@ -91,6 +92,8 @@ pub struct AppShell {
     tree_window: tree::TreeWindow,
     tree_work: Option<tree::TreeWork>,
     project_scan_task: Option<project::ProjectScanWork>,
+    search_work: Option<search::SearchWork>,
+    last_search_buffer: Option<crate::buffer::BufferId>,
     body_keymap: Keymap,
     mode_keymaps: HashMap<crate::mode::ModeId, Keymap>,
     commands: CommandRegistry,
@@ -205,6 +208,8 @@ impl AppShell {
             tree_window: tree::TreeWindow::default(),
             tree_work: None,
             project_scan_task: None,
+            search_work: None,
+            last_search_buffer: None,
             body_keymap: configuration.body_keymap,
             mode_keymaps: configuration.mode_keymaps,
             commands: configuration.commands,
@@ -396,6 +401,30 @@ impl AppShell {
             | Command::ProjectForgetZombieProjects
             | Command::ProjectRememberProjectsUnder => {
                 self.project_command(command, origin, window, cx);
+            }
+            Command::ProjectFindRegexp
+            | Command::Rg
+            | Command::RgProject
+            | Command::NextError
+            | Command::PreviousError
+            | Command::CompileGotoError
+            | Command::CompilationDisplayError
+            | Command::NextErrorNoSelect
+            | Command::PreviousErrorNoSelect
+            | Command::CompilationNextError
+            | Command::CompilationPreviousError
+            | Command::CompilationNextFile
+            | Command::CompilationPreviousFile
+            | Command::Recompile
+            | Command::RgRerunChangeRegexp
+            | Command::RgRerunChangeLiteral
+            | Command::RgRerunChangeDir
+            | Command::RgRerunChangeFiles
+            | Command::RgRerunToggleCase
+            | Command::RgRerunToggleIgnore
+            | Command::KillCompilation
+            | Command::QuitWindow => {
+                self.search_command(command, origin, window, cx);
             }
             Command::TreemacsToggle
             | Command::TreemacsRefresh

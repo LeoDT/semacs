@@ -2,9 +2,9 @@
 
 本文是当前工作和跨会话待办的唯一入口；维护与归档规则见 [文档说明](README.md#维护规则)。范围与当前方向见 [需求](requirements.md#当前方向v1-后)，行为见 [保真度契约](emacs-fidelity.md)。里程碑按可验收行为划分，不按工期估算。
 
-## 当前状态：F7 已完成，后续方向待确认
+## 当前状态：F8 已完成，后续方向待确认
 
-R0–F7、日常编辑增强及 F5 后插入项均已完成，交付摘要见 [R0–F1 归档](archive/completed-through-f1.md)、[F2 归档](archive/f2-status.md)、[F3 归档](archive/f3-window-commit.md)、[F4 归档](archive/f4-status-hunks.md)、[F5 归档](archive/f5-history-commit.md)、[F5 后插入项归档](archive/post-f5-insertions.md)、[F6 归档](archive/f6-tree-viewer.md) 与 [F7 归档](archive/f7-project.md)。固定源码 / 环境、结果和未测边界见[冻结记录索引](records/README.md)。
+R0–F8、日常编辑增强及 F5 后插入项均已完成，交付摘要见 [R0–F1 归档](archive/completed-through-f1.md)、[F2 归档](archive/f2-status.md)、[F3 归档](archive/f3-window-commit.md)、[F4 归档](archive/f4-status-hunks.md)、[F5 归档](archive/f5-history-commit.md)、[F5 后插入项归档](archive/post-f5-insertions.md)、[F6 归档](archive/f6-tree-viewer.md)、[F7 归档](archive/f7-project.md) 与 [F8 归档](archive/f8-search-rg.md)。固定源码 / 环境、结果和未测边界见[冻结记录索引](records/README.md)。
 
 没有已知阻塞性遗留；已接受的性能观察、字体 / 中文输入差异和未测边界保持原结论，不因功能收尾或方向调整视为预算通过。
 
@@ -28,13 +28,17 @@ R0–F7、日常编辑增强及 F5 后插入项均已完成，交付摘要见 [R
 
 按 GNU Emacs 31.1 内置 `project.el` 语义完成了项目识别、已知项目列表持久化（`$XDG_STATE_HOME/semacs/projects`）、`C-x p` 前缀与 `project-switch-project` / `project-find-file` / `project-switch-to-buffer` / `project-kill-buffers` 及管理命令，交付摘要与未测边界见 [F7 归档](archive/f7-project.md)，有效行为见 [F7 契约](emacs-fidelity.md#阶段-f7基础-project)。
 
-阶段收尾后停下汇报，不自动进入下一阶段。下一候选方向（项目内搜索 `C-x p g` / `isearch` / diff range）待用户确认。
+## F8 ripgrep 搜索（已完成）
+
+参照 GNU Emacs 31.1 `grep-mode` / `compile.el` / `project.el` 与 `rg.el`，完成了项目内搜索（`C-x p g` / `M-x rg-project` / `C-x p p` `[g]`）与任意文件夹搜索（`M-x rg`）、流式 `*rg*` 结果 buffer（`rg` mode）、按文件分组折叠、精确命中高亮、结果内导航与改条件重搜（`r`/`t`/`d`/`f`/`c`/`i`/`g`/`C-c C-k`/`q`）以及全局 `M-g n` / `M-g p` / `C-x \`` 跳转，交付摘要与未测边界见 [F8 归档](archive/f8-search-rg.md)，有效行为见 [F8 契约](emacs-fidelity.md#阶段-f8ripgrep-搜索项目与文件夹)。
+
+阶段收尾后停下汇报，不自动进入下一阶段。下一候选方向（`isearch` 当前 buffer / diff 内搜索、diff range / revision、结构导航等）待用户确认。
 
 ## 后续方向（顺序与依赖，尚未排期）
 
-### 1. 搜索（项目内搜索 `C-x p g` / `isearch`）
+### 1. 当前 buffer / diff 内搜索（`isearch`）
 
-- 项目内内容搜索（基于 `rg` 或匹配行结果 buffer 与跳转，复用 F7 项目根与有界后台进程）与当前 buffer / diff `isearch`；具体范围与交互待用户确认。
+- 当前 buffer 增量搜索（`C-s` / `C-r`）与匹配高亮；diff / section 隐藏内容的展开 / 恢复策略待确认。
 
 ### 2. diff range / revision
 

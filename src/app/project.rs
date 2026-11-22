@@ -101,6 +101,9 @@ impl AppShell {
         if let Some(root) = buffer.tree_root() {
             return root;
         }
+        if let Some(dir) = buffer.search_directory() {
+            return dir;
+        }
         buffer
             .path()
             .and_then(|path| path.parent().map(Path::to_path_buf))
@@ -143,7 +146,7 @@ impl AppShell {
             .collect()
     }
 
-    fn with_current_project(
+    pub(super) fn with_current_project(
         &mut self,
         action: ProjectAction,
         origin: &Entity<BufferView>,
@@ -373,6 +376,9 @@ impl AppShell {
                     cx,
                 );
             }
+            ProjectAction::FindRegexp => {
+                self.begin_project_find_regexp(project, origin, window, cx);
+            }
             ProjectAction::SwitchToBuffer => {
                 self.begin_project_switch_to_buffer(project, origin, window, cx);
             }
@@ -415,6 +421,7 @@ impl AppShell {
         let id = session.id();
         let choice = match stroke.key.as_str() {
             "f" => Some('f'),
+            "g" => Some('g'),
             "b" => Some('b'),
             "v" => Some('v'),
             "t" => Some('t'),
@@ -437,6 +444,7 @@ impl AppShell {
                     cx,
                 );
             }
+            'g' => self.begin_project_find_regexp(project, &target, window, cx),
             'b' => self.begin_project_switch_to_buffer(project, &target, window, cx),
             'v' => self.open_status_in(&target, Some(project.root), window, cx),
             't' => self.open_tree_for_project(project.root, &target, window, cx),
