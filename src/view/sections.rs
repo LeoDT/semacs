@@ -95,4 +95,11 @@ impl BufferView {
             cx.notify();
         }
     }
+
+    pub(crate) fn reset_section_scroll(&mut self, cx: &mut Context<Self>) {
+        self.pending_scroll = None;
+        self.scroll_anchor = Some((ByteOffset(0), px(0.)));
+        self.reveal_caret = false;
+        cx.notify();
+    }
 }

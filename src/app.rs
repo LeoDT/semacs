@@ -372,6 +372,9 @@ impl AppShell {
                         if self.answer_project_switch_menu(stroke, window, cx) {
                             return true;
                         }
+                        if self.answer_diff_menu(stroke, window, cx) {
+                            return true;
+                        }
                         #[cfg(unix)]
                         if self.answer_commit_choice(stroke, window, cx) {
                             return true;
@@ -506,7 +509,14 @@ impl AppShell {
             | Command::CommitNextMessage => {
                 self.commit_editor_command(command, origin, window, cx);
             }
-            Command::MagitDiffStaged
+            Command::MagitDiff
+            | Command::MagitDiffDwim
+            | Command::MagitDiffRange
+            | Command::MagitDiffWorkingTree
+            | Command::MagitDiffRefreshMenu
+            | Command::MagitDiffSwitchRangeType
+            | Command::MagitDiffFlipRevs
+            | Command::MagitDiffStaged
             | Command::MagitDiffUnstaged
             | Command::SectionToggle
             | Command::SectionCycleGlobal

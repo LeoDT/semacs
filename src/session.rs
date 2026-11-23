@@ -41,6 +41,20 @@ pub enum ReadKind {
     FontFamily,
     Theme,
     CommitMenu,
+    DiffMenu,
+    DiffRefreshMenu,
+    MagitDiffRange {
+        repository: crate::git::Repository,
+        environment: crate::git::ReadEnvironment,
+        refs: Vec<String>,
+        default: Option<String>,
+    },
+    MagitShowCommit {
+        repository: crate::git::Repository,
+        environment: crate::git::ReadEnvironment,
+        refs: Vec<String>,
+        default: Option<String>,
+    },
     ProjectSelect {
         action: ProjectAction,
         prompt: String,
@@ -195,6 +209,8 @@ impl ReadKind {
             self,
             Self::Command
                 | Self::HistoryFileVersion { .. }
+                | Self::MagitDiffRange { .. }
+                | Self::MagitShowCommit { .. }
                 | Self::Theme
                 | Self::ProjectSelect { .. }
                 | Self::ProjectDirectory { .. }
@@ -215,7 +231,9 @@ impl ReadKind {
         match self {
             Self::SwitchToBuffer { default }
             | Self::ProjectSwitchToBuffer { default, .. }
-            | Self::ProjectSelect { default, .. } => default.as_deref(),
+            | Self::ProjectSelect { default, .. }
+            | Self::MagitDiffRange { default, .. }
+            | Self::MagitShowCommit { default, .. } => default.as_deref(),
             Self::KillBuffer { default } => Some(default),
             _ => None,
         }
@@ -232,6 +250,8 @@ impl ReadKind {
                 | Self::CommitMerge { .. }
                 | Self::CommitInterrupt { .. }
                 | Self::CommitMenu
+                | Self::DiffMenu
+                | Self::DiffRefreshMenu
                 | Self::ProjectSwitchMenu { .. }
         ) || match self {
             #[cfg(unix)]
@@ -244,6 +264,8 @@ impl ReadKind {
         match self {
             Self::KillBufferConfirm { .. } => "Please answer y, n, or s",
             Self::CommitMenu => "Choose c, a, w, f, s; C-g cancels",
+            Self::DiffMenu => "Choose d, r, u, s, w, c; C-g cancels",
+            Self::DiffRefreshMenu => "Choose r, f, g; C-g cancels",
             Self::ProjectSwitchMenu { .. } => {
                 "Unrecognized input; choose f, g, b, v, t; C-g cancels"
             }
@@ -260,6 +282,16 @@ impl ReadKind {
             ReadKind::FontFamily => "Font family: ".to_owned(),
             ReadKind::Theme => "Load theme: ".to_owned(),
             ReadKind::CommitMenu => "Commit: [c] create  [a] amend  [w] reword  [f] fixup  [s] squash; C-g cancels: ".into(),
+            ReadKind::DiffMenu => "Diff: [d] dwim  [r] range  [u] unstaged  [s] staged  [w] worktree  [c] show commit; C-g cancels: ".into(),
+            ReadKind::DiffRefreshMenu => "Diff refresh: [r] switch range type  [f] flip revisions  [g] refresh; C-g cancels: ".into(),
+            ReadKind::MagitDiffRange { default, .. } => match default {
+                Some(name) => format!("Diff for range (default {name}): "),
+                None => "Diff for range: ".to_owned(),
+            },
+            ReadKind::MagitShowCommit { default, .. } => match default {
+                Some(name) => format!("Show commit (default {name}): "),
+                None => "Show commit: ".to_owned(),
+            },
             ReadKind::ProjectSelect { prompt, .. } => prompt.clone(),
             ReadKind::ProjectDirectory { .. } => "Select directory: ".to_owned(),
             ReadKind::ProjectScanDirectory => "Directory: ".to_owned(),
@@ -364,6 +396,8 @@ impl ReadSession {
             let mut keymap = Keymap::default();
             let keys: &[&str] = match &kind {
                 ReadKind::CommitMenu => &["c", "a", "w", "f", "s"],
+                ReadKind::DiffMenu => &["d", "r", "u", "s", "w", "c"],
+                ReadKind::DiffRefreshMenu => &["r", "f", "g"],
                 ReadKind::ProjectSwitchMenu { .. } => &["f", "g", "b", "v", "t"],
                 #[cfg(unix)]
                 ReadKind::CommitTargetMerges { .. } => &["c", "s", "a"],
@@ -379,7 +413,10 @@ impl ReadSession {
             }
             let extra: &[&str] = match &kind {
                 ReadKind::KillBufferConfirm { .. } => &["s", "shift-s"],
-                ReadKind::CommitMenu | ReadKind::ProjectSwitchMenu { .. } => &[],
+                ReadKind::CommitMenu
+                | ReadKind::DiffMenu
+                | ReadKind::DiffRefreshMenu
+                | ReadKind::ProjectSwitchMenu { .. } => &[],
                 #[cfg(unix)]
                 ReadKind::CommitTargetMerges { .. } => &[],
                 _ => &["space", "backspace", "delete"],

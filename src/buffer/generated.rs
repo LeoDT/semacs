@@ -18,6 +18,28 @@ impl Buffer {
         self.replace_projection(text, sections, styles);
     }
 
+    pub(super) fn reset_projection(
+        &mut self,
+        text: &str,
+        sections: Sections,
+        styles: Vec<(Range<ByteOffset>, StyleRole)>,
+    ) {
+        self.apply_validated_edit(Edit {
+            snapshot: self.snapshot_id(),
+            range: ByteOffset(0)..ByteOffset(self.text().len()),
+            text,
+            source: EditSource::Command,
+        });
+        let mut doc = self.document.borrow_mut();
+        for point in doc.points.iter().filter_map(|point| point.upgrade()) {
+            point.set(0);
+        }
+        doc.modified = false;
+        doc.history = Default::default();
+        doc.sections = Some(Arc::new(sections));
+        doc.named_styles = styles.into();
+    }
+
     pub(super) fn replace_projection(
         &mut self,
         text: &str,

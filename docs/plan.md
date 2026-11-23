@@ -2,9 +2,9 @@
 
 本文是当前工作和跨会话待办的唯一入口；维护与归档规则见 [文档说明](README.md#维护规则)。范围与当前方向见 [需求](requirements.md#当前方向v1-后)，行为见 [保真度契约](emacs-fidelity.md)。里程碑按可验收行为划分，不按工期估算。
 
-## 当前状态：F10 已完成，下一步待确认进入 diff range / revision
+## 当前状态：F11 已完成，下一步待确认后续方向
 
-R0–F10、日常编辑增强及 F5 后插入项均已完成，交付摘要见 [R0–F1 归档](archive/completed-through-f1.md)、[F2 归档](archive/f2-status.md)、[F3 归档](archive/f3-window-commit.md)、[F4 归档](archive/f4-status-hunks.md)、[F5 归档](archive/f5-history-commit.md)、[F5 后插入项归档](archive/post-f5-insertions.md)、[F6 归档](archive/f6-tree-viewer.md)、[F7 归档](archive/f7-project.md)、[F8 归档](archive/f8-search-rg.md)、[F9 归档](archive/f9-isearch.md) 与 [F10 归档](archive/f10-multiple-cursors.md)。固定源码 / 环境、结果和未测边界见[冻结记录索引](records/README.md)。
+R0–F11、日常编辑增强及 F5 后插入项均已完成，交付摘要见 [R0–F1 归档](archive/completed-through-f1.md)、[F2 归档](archive/f2-status.md)、[F3 归档](archive/f3-window-commit.md)、[F4 归档](archive/f4-status-hunks.md)、[F5 归档](archive/f5-history-commit.md)、[F5 后插入项归档](archive/post-f5-insertions.md)、[F6 归档](archive/f6-tree-viewer.md)、[F7 归档](archive/f7-project.md)、[F8 归档](archive/f8-search-rg.md)、[F9 归档](archive/f9-isearch.md)、[F10 归档](archive/f10-multiple-cursors.md) 与 [F11 归档](archive/f11-diff-range.md)。固定源码 / 环境、结果和未测边界见[冻结记录索引](records/README.md)。
 
 没有已知阻塞性遗留；已接受的性能观察、字体 / 中文输入差异和未测边界保持原结论，不因功能收尾或方向调整视为预算通过。
 
@@ -40,17 +40,15 @@ R0–F10、日常编辑增强及 F5 后插入项均已完成，交付摘要见 [
 
 参照 Emacs `multiple-cursors.el` 完成了多光标管理命令与绑定（`C->`、`C-<`、`C-c C-<`、`C-S-c C-S-c`、`mc/skip-to-*`、`mc/unmark-*` 及 `C-S-<mouse-1>`，保留内置 `C-d`）、Emacs 风格同步编辑（无 `delete-selection-mode`、每光标独立 `kill-ring`、`RET` 退出 / `C-j` 换行 / `C-g` 两段式、IME 同步提交）、多处原子单一 undo 组与连续合并、重合光标去重、同行多光标反色渲染及 mode line `mc:<数量>` 指示。交付摘要与未测边界见 [F10 归档](archive/f10-multiple-cursors.md)，有效行为见 [F10 契约](emacs-fidelity.md#阶段-f10多选区同步编辑multiple-cursors)。
 
+## F11 diff range / revision（已完成）
+
+参照上游 Magit（`942d61d5`）在现有 status / diff / log / revision 查看器上完成了任意 revision 与 range 查看：`d`（`magit-diff`）与 `D`（`magit-diff-refresh`）单键菜单、`magit-diff-dwim` / `magit-diff-range` / `magit-diff-working-tree` / `magit-diff-switch-range-type` / `magit-diff-flip-revs` 及全局 `magit-show-commit`；支持 `A..B`、`A...B`（含省略侧默认 `HEAD`）、单 rev 对比 working tree、ref 候选与 `..` / `...` 右侧补全、以及从 `magit-log` / `magit-log-select` 用多 commit region 直接打开 `<older>..<newer>`；比较身份固定到解析后的完整 OID，读取失败保留旧投影，不自动保存编辑 buffer，不扩展 Git 写工作流。交付摘要与未测边界见 [F11 归档](archive/f11-diff-range.md)，有效行为见 [F11 契约](emacs-fidelity.md#阶段-f11diff-range--revision)。
+
 阶段收尾后停下汇报，不自动进入下一阶段。
 
 ## 后续方向（顺序与依赖，尚未排期）
 
-### 1. diff range / revision
-
-- 在现有 status / diff / log / revision 查看器上增加任意 revision 与 range 的查看；命令名、输入格式与从 log 选择 range 的交互待定。
-- 比较身份固定到解析后的 OID / range，读取失败保留旧投影；不自动保存编辑 buffer。
-- 不扩展 Git 写工作流；已交付的 stage / commit / amend / reword 维持现有契约。
-
-### 2. 自动 / 智能缩进（仅记录）
+### 1. 自动 / 智能缩进（仅记录）
 
 - 需求保留；触发时机、语言范围、tree-sitter 规则与是否包含格式化均未定，不排期。
 - 复用 [D24](decisions.md#d24-缩进边界) 的缩进 / 编辑分离和唯一 Edit 入口；不引入 major-mode 插件框架。

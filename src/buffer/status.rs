@@ -107,6 +107,27 @@ impl Buffer {
             .map(|location| (location, session.request))
     }
 
+    pub(crate) fn status_group_at_point(&self) -> Option<crate::status::Group> {
+        let doc = self.document.borrow();
+        doc.status.as_ref()?;
+        let sections = doc.sections.as_ref()?;
+        let nodes = sections.nodes();
+        let mut index = sections.current(self.point());
+        while let Some(parent) = nodes[index].parent {
+            if parent == 0 {
+                return match nodes[index].key.as_str() {
+                    "untracked" => Some(crate::status::Group::Untracked),
+                    "unstaged" => Some(crate::status::Group::Unstaged),
+                    "staged" => Some(crate::status::Group::Staged),
+                    "unmerged" => Some(crate::status::Group::Unmerged),
+                    _ => None,
+                };
+            }
+            index = parent;
+        }
+        None
+    }
+
     pub fn git_is_stale(&self) -> bool {
         let doc = self.document.borrow();
         doc.status.as_ref().is_some_and(|session| session.stale)
@@ -122,7 +143,9 @@ impl Buffer {
         if let Some(session) = &mut doc.status {
             session.stale = true;
         }
-        if let Some(session) = &mut doc.diff {
+        if let Some(session) = &mut doc.diff
+            && !matches!(session.comparison.kind, crate::diff::DiffKind::Range { .. })
+        {
             session.stale = true;
         }
         if let Some(session) = &mut doc.repository_history

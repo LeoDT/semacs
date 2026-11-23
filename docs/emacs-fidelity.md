@@ -635,3 +635,36 @@ F2 仅提供 status 与单文件整文件级 index 操作，不包含 hunk / 批
 ### 首版不提供的上游能力
 
 以下 `multiple-cursors.el` 能力在首版不实现：自定义交互式 `mc/cmds-to-run-for-all` / `mc/cmds-to-run-once` 列表持久化、`mc/mark-all-dwim`、`mc/insert-numbers` / `mc/insert-letters`、`mc/sort-regions` / `mc/reverse-regions`、`mc-hide-unmatched-lines-mode`（`C-'`）以及独立 minor-mode keymap 的 JS 配置 API。
+
+## 阶段 F11：diff range / revision
+
+本节在 F1–F5 的只读 diff、status、log 与 revision 查看器之上扩展任意 revision 与 range 的查看行为，参照上游 Magit（`942d61d5`）的 `magit-diff.el`、`magit-git.el`、`magit-section.el` 与 `magit-mode.el`，不扩展 Git 写工作流。
+
+### 菜单、命令与默认绑定
+
+| 键位 | 命令 | 适用范围与行为 |
+|---|---|---|
+| `d` | `magit-diff` | Magit mode（`magit-status` / `magit-diff` / `magit-log` / `magit-log-select` / `magit-revision` / `magit-process`）中打开单键菜单：`d` dwim、`r` range、`u` unstaged、`s` staged、`w` worktree、`c` show commit；`C-g` 取消 |
+| `D` | `magit-diff-refresh` | `magit-diff` mode 中打开单键菜单：`r` `magit-diff-switch-range-type`（切换 `..` ↔ `...`）、`f` `magit-diff-flip-revs`（交换两侧）、`g` 刷新；`C-g` 取消 |
+| `M-x` / `d d` | `magit-diff-dwim` | log 多 commit 活动 region → 直接打开 `<底部较旧>..<顶部较新>` 并停用 mark；log 单 commit → `<oid>^..<oid>`（root commit 按上游报错）；revision → `<oid>^..<oid>`；status 的 `Unstaged`/`Staged` 组内 → unstaged/staged diff；diff → 刷新当前比较；其余情况 → 进入 `magit-diff-range` 读入 |
+| `M-x` / `d r` | `magit-diff-range` | log 多 commit 活动 region → 直接停用 mark 并打开 `<底部较旧>..<顶部较新>`；否则提示 `Diff for range:` 读入区间或单个 revision |
+| `M-x` / `d w` | `magit-diff-working-tree` | 查看 `HEAD` → working tree 差异（unborn 仓库对比空 tree） |
+| `M-x` / `d c` | `magit-show-commit` | 全局可用；光标直接在 log commit 行或 revision `Parent N:` 行上时直接打开该提交，其余位置提示 `Show commit:` 读入任意 revision |
+| `M-x` / `D r` | `magit-diff-switch-range-type` | 在 range diff buffer 中切换 `..` 与 `...`；非 range diff 报错 `No range to change` |
+| `M-x` / `D f` | `magit-diff-flip-revs` | 在 range diff buffer 中交换左右 revision；非 range diff 报错 `No range to swap` |
+
+### 输入格式、候选补全与比较身份
+
+- **区间与单 rev 语义**：
+  - `A..B` / `A...B`（任一侧可省略，省略侧默认 `HEAD`，如 `main..` 等价 `main..HEAD`、`..main` 等价 `HEAD..main`）：`..` 对比 `A` 与 `B`，`...` 对比 `merge-base(A, B)` 与 `B`；`RET` 删除行与新增 / 上下文行均访问固定只读 blob。无共同祖先的 `...` 明确报错并保留旧投影。
+  - 单 revision（不含 `..`/`...`，支持 `:/<text>`、tag、分支、相对表达式及短 / 完整 OID）：按上游显示该 commit 到当前 working tree 的变更（`git diff <oid> --`）；`RET` 删除行访问固定 blob，新增 / 上下文行访问 worktree 文件。
+  - 两侧均通过 `rev-parse --verify --quiet --end-of-options <rev>^{commit}` 解析（annotated tag 自动解引用到 commit）；无法解引用为 commit 时报告 `<rev> cannot be dereferenced as a commit`，不创建或覆写已有 buffer。
+- **候选补全**：按上游 `refs/heads` → `refs/remotes` → `refs/tags`（`--sort=-version:refname`、排除 symref 如 `origin/HEAD`）顺序提供 ref 候选，并附加存在的特殊 ref（`HEAD`、`ORIG_HEAD`、`FETCH_HEAD`、`MERGE_HEAD`、`CHERRY_PICK_HEAD`）。`magit-diff-range` 支持在 `..` / `...` 之后对右侧继续补全（右侧为空时预选输入行，使 `main..` 后直接 `RET` 接受省略 `HEAD` 的区间，`TAB` / `C-n` 补全右侧 ref）；允许手输任意表达式与 `M-RET` 原始输入。
+- **log 选区规则**：对齐上游 `magit-region-values` + `magit-diff--region-range`，仅当活动 region 的起止位置分别落在不同 commit 兄弟行标题内且中间全为 commit 行时生效；操作就绪启动后才停用 mark。
+- **固定 OID 与 buffer 复用**：`staged` / `unstaged` / `worktree` 沿用独立 buffer；range 与单 rev diff 每仓库 / 读取环境复用同一 `*magit-diff range: <root>*` buffer。输入解析后比较身份立即固定为完整 OID，`g` 刷新保留同一比较的折叠、point 与滚动；切换到不同比较（含 `D r` / `D f`）时重置默认折叠（如删除文件折叠、新增文件展开）与起始位置，读取失败保留旧投影与旧比较身份。不可变 `Range` 不被 Git 写入标为 stale 也不被提交终态队列覆写；`RevisionToWorktree` 仍随仓库变更标为 stale。不自动保存任何已修改编辑 buffer。
+
+### 已批准差异与首版裁剪
+
+- 沿用 F5 单键菜单边界，`d` / `D` 不提供完整 transient / infix 参数（`-U`、`-b`、`--` 文件过滤等）、`d p`（`--no-index` 两文件对比）、`d t`（stash）与 `C-u` 前缀变体。
+- 因尚无 `C-u` 前缀参数，`magit-show-commit` 在 `magit-revision` 正文（非 `Parent N:` 行）弹出 `Show commit:` 读入（默认当前 revision OID）以便直接切换其他提交，而非像上游无前缀时直接重开当前提交。
+- `magit-diff-range` 固定解析后的 OID，后续 `g` 刷新不随分支 ref 移动而重解析（与上游差异，已按计划确认）；同时遵循 semacs 不自动保存编辑 buffer 的既有契约。

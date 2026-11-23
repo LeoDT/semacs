@@ -124,6 +124,28 @@ const MODE_BINDINGS: &[(ModeId, &str, crate::command::Command)] = &[
     ),
     (
         ModeId::MAGIT_STATUS,
+        "d",
+        crate::command::Command::MagitDiff,
+    ),
+    (ModeId::MAGIT_DIFF, "d", crate::command::Command::MagitDiff),
+    (
+        ModeId::MAGIT_PROCESS,
+        "d",
+        crate::command::Command::MagitDiff,
+    ),
+    (ModeId::MAGIT_LOG, "d", crate::command::Command::MagitDiff),
+    (
+        ModeId::MAGIT_REVISION,
+        "d",
+        crate::command::Command::MagitDiff,
+    ),
+    (
+        ModeId::MAGIT_LOG_SELECT,
+        "d",
+        crate::command::Command::MagitDiff,
+    ),
+    (
+        ModeId::MAGIT_STATUS,
         "l l",
         crate::command::Command::MagitLogCurrent,
     ),

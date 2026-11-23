@@ -14,7 +14,7 @@ pub struct WorkflowContext {
     pub selection: Option<StatusSelection>,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum WorkflowRequest {
     StatusOpen,
     StatusRefresh,

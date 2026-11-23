@@ -143,6 +143,52 @@ impl Buffer {
         }
     }
 
+    /// Returns the commit OID only when point is directly on a commit line
+    /// (in log buffers) or parent line (in revision buffers).
+    pub(crate) fn history_commit_at_point(&self) -> Option<String> {
+        match self.history_action().ok() {
+            Some(Action::Commit(oid)) => Some(oid),
+            _ => None,
+        }
+    }
+
+    /// Mirrors upstream `magit-region-values '(commit) t` + `magit-diff--region-range`:
+    /// when the active region starts and ends in headings of two distinct sibling
+    /// commit sections in a log buffer, returns `(older_oid, newer_oid)`.
+    pub(crate) fn history_region_commits(&self) -> Option<(String, String)> {
+        let region = self.region()?;
+        let doc = self.document.borrow();
+        let session = doc.repository_history.as_ref()?;
+        if !matches!(session.query, Query::Log { .. }) {
+            return None;
+        }
+        let sections = doc.sections.as_ref()?;
+        let nodes = sections.nodes();
+        let start = sections.current(region.start);
+        let end = sections.current(region.end);
+        if start == 0 || end == 0 || start >= end {
+            return None;
+        }
+        let sbeg = &nodes[start];
+        let send = &nodes[end];
+        if sbeg.parent != Some(0) || send.parent != Some(0) {
+            return None;
+        }
+        if !(region.start >= sbeg.range.start && region.start < sbeg.body)
+            || !(region.end >= send.range.start && region.end < send.body)
+        {
+            return None;
+        }
+        for node in &nodes[start..=end] {
+            if node.parent == Some(0) && !node.key.starts_with("commit/") {
+                return None;
+            }
+        }
+        let newer = sbeg.key.strip_prefix("commit/")?.to_owned();
+        let older = send.key.strip_prefix("commit/")?.to_owned();
+        Some((older, newer))
+    }
+
     pub(crate) fn history_commit_point(
         &self,
         oid: Option<&str>,

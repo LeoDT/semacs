@@ -73,10 +73,10 @@ impl AppShell {
                 _ => self.show_message(origin, "No supported file versions here", cx),
             },
             Command::MagitShowCommit => {
-                if let Some(oid) = origin.read(cx).buffer().history_commit() {
+                if let Some(oid) = origin.read(cx).buffer().history_commit_at_point() {
                     self.show_history_commit(oid, origin, window, cx);
                 } else {
-                    self.show_message(origin, "No commit here", cx);
+                    self.prompt_show_commit(origin, window, cx);
                 }
             }
             Command::MagitVisitThing | Command::MagitDiffVisit => {
@@ -121,6 +121,210 @@ impl AppShell {
             window,
             cx,
         );
+    }
+
+    fn prompt_show_commit(
+        &mut self,
+        origin: &Entity<BufferView>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if !self.git_available(origin, cx)
+            || !origin.read(cx).git_open_ready()
+            || self.minibuffer.is_some()
+        {
+            return;
+        }
+        let default_from_context = match origin.read(cx).buffer().history_query() {
+            Some(Query::Revision { oid, .. }) => Some(oid),
+            _ => None,
+        };
+        let repository = origin.read(cx).buffer().repository();
+        let environment = origin
+            .read(cx)
+            .buffer()
+            .history_query()
+            .map(|query| query.environment())
+            .or_else(|| {
+                origin
+                    .read(cx)
+                    .buffer()
+                    .comparison()
+                    .map(|comparison| comparison.environment)
+            })
+            .unwrap_or(crate::git::ReadEnvironment::Projection);
+        let directory = self.default_directory_for(origin, cx);
+        let source = origin.read(cx).display_snapshot().id();
+        let origin = origin.clone();
+        let operation = operation_id();
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let worker_cancelled = cancelled.clone();
+        let task = cx.spawn_in(window, async move |shell, cx| {
+            let result = cx
+                .background_executor()
+                .spawn(async move {
+                    let repository = match repository {
+                        Some(repository) => repository,
+                        None => environment.discover(&directory, &worker_cancelled)?,
+                    };
+                    let refs = crate::git::list_refnames(
+                        &repository,
+                        true,
+                        environment,
+                        &worker_cancelled,
+                    )?;
+                    let default = match default_from_context {
+                        Some(default) => Some(default),
+                        None => {
+                            crate::git::current_branch(&repository, environment, &worker_cancelled)?
+                                .or_else(|| {
+                                    refs.iter()
+                                        .any(|name| name == "HEAD")
+                                        .then(|| "HEAD".into())
+                                })
+                        }
+                    };
+                    Ok::<_, String>((repository, refs, default))
+                })
+                .await;
+            shell
+                .update_in(cx, |shell, window, cx| {
+                    if !shell.finish_git_read(operation, window, cx)
+                        || !shell.history_open_current(&origin, source, cx)
+                    {
+                        return;
+                    }
+                    match result {
+                        Ok((repository, refs, default)) => {
+                            shell.begin_read(
+                                ReadKind::MagitShowCommit {
+                                    repository,
+                                    environment,
+                                    refs,
+                                    default,
+                                },
+                                &origin,
+                                "",
+                                window,
+                                cx,
+                            );
+                        }
+                        Err(error) => shell.show_message(&origin, error, cx),
+                    }
+                })
+                .ok();
+        });
+        self.git_task = Some(GitTask::Read(GitRead {
+            operation,
+            cancelled,
+            _task: task,
+        }));
+    }
+
+    pub(super) fn confirm_show_commit(
+        &mut self,
+        id: u64,
+        repository: Repository,
+        environment: crate::git::ReadEnvironment,
+        default: Option<String>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let input = self.session_input(cx).unwrap_or_default();
+        let rev = input.trim();
+        let rev = if rev.is_empty() {
+            match default {
+                Some(default) => default,
+                None => {
+                    self.message_minibuffer("No revision", cx);
+                    return;
+                }
+            }
+        } else {
+            rev.to_owned()
+        };
+        if let Some(target) = self.end_session(id, window, cx) {
+            self.resolve_and_open_revision(repository, environment, rev, &target, window, cx);
+        }
+    }
+
+    fn resolve_and_open_revision(
+        &mut self,
+        repository: Repository,
+        environment: crate::git::ReadEnvironment,
+        rev: String,
+        origin: &Entity<BufferView>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if !self.git_available(origin, cx)
+            || self.minibuffer.is_some()
+            || !origin.read(cx).git_open_ready()
+        {
+            return;
+        }
+        let source = origin.read(cx).display_snapshot().id();
+        let origin = origin.clone();
+        let operation = operation_id();
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let worker_cancelled = cancelled.clone();
+        let task = cx.spawn_in(window, async move |shell, cx| {
+            let result = cx
+                .background_executor()
+                .spawn(async move {
+                    let oid = crate::git::resolve_commit(
+                        &repository,
+                        &rev,
+                        environment,
+                        &worker_cancelled,
+                    )?;
+                    let query = Query::Revision {
+                        repository,
+                        oid,
+                        environment,
+                    };
+                    let data = query.load(&worker_cancelled)?;
+                    let rendered = data.render(&query)?;
+                    Ok::<_, String>((query, data, rendered))
+                })
+                .await;
+            shell
+                .update_in(cx, |shell, window, cx| {
+                    if !shell.finish_git_read(operation, window, cx)
+                        || !shell.history_open_current(&origin, source, cx)
+                    {
+                        return;
+                    }
+                    match result {
+                        Ok((query, data, rendered)) => {
+                            let existing = shell.buffers.iter().position(|slot| {
+                                slot.buffer
+                                    .history_query()
+                                    .is_some_and(|current| current.same_buffer(&query))
+                            });
+                            let index = existing.unwrap_or_else(|| {
+                                shell.create_buffer(Buffer::history(query.clone()), window, cx)
+                            });
+                            let request = shell.buffers[index]
+                                .buffer
+                                .begin_history_request(query.clone())
+                                .unwrap();
+                            if shell
+                                .install_history_result(index, &query, request, data, rendered, cx)
+                            {
+                                shell.display_temporary(index, window, cx);
+                            }
+                        }
+                        Err(error) => shell.show_message(&origin, error, cx),
+                    }
+                })
+                .ok();
+        });
+        self.git_task = Some(GitTask::Read(GitRead {
+            operation,
+            cancelled,
+            _task: task,
+        }));
     }
 
     pub(super) fn open_log(

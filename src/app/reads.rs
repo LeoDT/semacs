@@ -400,6 +400,22 @@ impl AppShell {
                     self.visit_git_location(version.visit, &target, window, cx);
                 }
             }
+            ReadKind::MagitDiffRange {
+                repository,
+                environment,
+                default,
+                ..
+            } => {
+                self.confirm_diff_range(id, repository, environment, default, window, cx);
+            }
+            ReadKind::MagitShowCommit {
+                repository,
+                environment,
+                default,
+                ..
+            } => {
+                self.confirm_show_commit(id, repository, environment, default, window, cx);
+            }
             ReadKind::TreeRoot | ReadKind::TreeFile | ReadKind::TreeWidth => {
                 self.confirm_tree_read(kind, id, window, cx)
             }

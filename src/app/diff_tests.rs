@@ -6,6 +6,8 @@ use gpui_kit as gpui;
 use gpui_kit::{TestAppContext, VisualTestContext, px, size};
 use std::time::{Duration, Instant};
 
+#[path = "diff_range_tests.rs"]
+mod range;
 #[path = "diff_review_tests.rs"]
 mod review;
 #[path = "diff_state_tests.rs"]

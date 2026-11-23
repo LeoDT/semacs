@@ -55,14 +55,52 @@ fn label(path: &std::path::Path) -> String {
 }
 
 pub(super) fn render(diff: &Diff) -> Result<RenderedDiff, String> {
-    render_files(
-        &format!(
+    let heading = match &diff.comparison.kind {
+        crate::diff::DiffKind::RevisionToWorktree { spec, base_oid } => {
+            let short = &base_oid[..12.min(base_oid.len())];
+            if base_oid.starts_with(spec.as_str()) {
+                format!(
+                    "Changes from {short} to working tree: {}",
+                    label(&diff.comparison.repository.root)
+                )
+            } else {
+                format!(
+                    "Changes from {} ({short}) to working tree: {}",
+                    spec.escape_debug(),
+                    label(&diff.comparison.repository.root)
+                )
+            }
+        }
+        crate::diff::DiffKind::Range {
+            spec,
+            left_oid,
+            right_oid,
+            three_dot,
+        } => {
+            let sep = if *three_dot { "..." } else { ".." };
+            let left_short = &left_oid[..12.min(left_oid.len())];
+            let right_short = &right_oid[..12.min(right_oid.len())];
+            let oids = format!("{left_short}{sep}{right_short}");
+            if spec == &oids || spec == &format!("{left_oid}{sep}{right_oid}") {
+                format!(
+                    "Changes in {oids}: {}",
+                    label(&diff.comparison.repository.root)
+                )
+            } else {
+                format!(
+                    "Changes in {} ({oids}): {}",
+                    spec.escape_debug(),
+                    label(&diff.comparison.repository.root)
+                )
+            }
+        }
+        kind => format!(
             "{}: {}",
-            diff.comparison.kind.name(),
+            kind.name(),
             label(&diff.comparison.repository.root)
         ),
-        &diff.files,
-    )
+    };
+    render_files(&heading, &diff.files)
 }
 
 pub(crate) fn render_files(title: &str, files: &[FileDiff]) -> Result<RenderedDiff, String> {

@@ -204,7 +204,7 @@ commands! {
     MagitCommitFixup => "magit-commit-fixup", Application, [];
     MagitCommitSquash => "magit-commit-squash", Application, [];
     MagitLogCurrent => "magit-log-current", Application, [];
-    MagitShowCommit => "magit-show-commit", Application("magit-log", "magit-log-select", "magit-revision"), [];
+    MagitShowCommit => "magit-show-commit", Application, [];
     MagitVisitThing => "magit-visit-thing", Application("magit-log", "magit-log-select", "magit-revision"), [];
     MagitLogMore => "magit-log-double-commit-limit", Application("magit-log", "magit-log-select"), ["+" => "+"];
     MagitLogLess => "magit-log-half-commit-limit", Application("magit-log", "magit-log-select"), ["-" => "-"];
@@ -218,6 +218,13 @@ commands! {
     CommitSaveMessage => "git-commit-save-message", Application("git-commit"), ["ctrl-c alt-s" => "C-c M-s"];
     CommitPreviousMessage => "git-commit-prev-message", Application("git-commit"), ["alt-p" => "M-p"];
     CommitNextMessage => "git-commit-next-message", Application("git-commit"), ["alt-n" => "M-n"];
+    MagitDiff => "magit-diff", Application, [];
+    MagitDiffDwim => "magit-diff-dwim", Application, [];
+    MagitDiffRange => "magit-diff-range", Application, [];
+    MagitDiffWorkingTree => "magit-diff-working-tree", Application, [];
+    MagitDiffRefreshMenu => "magit-diff-refresh", Application("magit-diff"), ["D" => "D"];
+    MagitDiffSwitchRangeType => "magit-diff-switch-range-type", Application("magit-diff"), [];
+    MagitDiffFlipRevs => "magit-diff-flip-revs", Application("magit-diff"), [];
     MagitDiffUnstaged => "magit-diff-unstaged", Application, [];
     MagitDiffStaged => "magit-diff-staged", Application, [];
     SectionCycleGlobal => "magit-section-cycle-global", Application("magit-diff", "magit-status", "magit-process", "magit-log", "magit-log-select", "magit-revision", "rg"), ["shift-tab" => "<backtab>"];

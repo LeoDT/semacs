@@ -81,7 +81,10 @@ impl AppShell {
             }
             let projection = if let Ok((repository, request)) = slot.buffer.begin_status_request() {
                 Some((Projection::Status(repository), request))
-            } else if let Ok((comparison, request)) = slot.buffer.begin_diff_request() {
+            } else if slot.buffer.comparison().is_some_and(|comparison| {
+                !matches!(comparison.kind, crate::diff::DiffKind::Range { .. })
+            }) && let Ok((comparison, request)) = slot.buffer.begin_diff_request()
+            {
                 (slot.id() == command_buffer).then_some((Projection::Diff(comparison), request))
             } else if let Some(query @ crate::history::Query::Log { .. }) =
                 slot.buffer.requested_history_query()

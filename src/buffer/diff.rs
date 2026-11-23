@@ -4,6 +4,7 @@ use std::sync::Arc;
 
 pub(super) struct DiffSession {
     pub(super) comparison: Comparison,
+    requested: Comparison,
     request: u64,
     data: Option<Arc<Diff>>,
     rendered: Option<DiffNavigation>,
@@ -27,6 +28,7 @@ impl Buffer {
             let mut doc = buffer.document.borrow_mut();
             doc.read_only = true;
             doc.diff = Some(DiffSession {
+                requested: comparison.clone(),
                 comparison,
                 request: 0,
                 data: None,
@@ -61,13 +63,23 @@ impl Buffer {
     }
 
     pub(crate) fn begin_diff_request(&mut self) -> Result<(Comparison, u64), String> {
+        let comparison = self.comparison().ok_or("Not a diff buffer")?;
+        let request = self.begin_diff_request_for(comparison.clone())?;
+        Ok((comparison, request))
+    }
+
+    pub(crate) fn begin_diff_request_for(&mut self, comparison: Comparison) -> Result<u64, String> {
         let mut doc = self.document.borrow_mut();
         let session = doc.diff.as_mut().ok_or("Not a diff buffer")?;
+        if !session.comparison.same_buffer(&comparison) {
+            return Err("Wrong diff target".into());
+        }
+        session.requested = comparison;
         session.request = session
             .request
             .checked_add(1)
             .expect("diff request identity exhausted");
-        Ok((session.comparison.clone(), session.request))
+        Ok(session.request)
     }
 
     pub(crate) fn diff_request_matches(&self, request: u64, comparison: &Comparison) -> bool {
@@ -75,7 +87,7 @@ impl Buffer {
             .borrow()
             .diff
             .as_ref()
-            .is_some_and(|session| session.request == request && &session.comparison == comparison)
+            .is_some_and(|session| session.request == request && &session.requested == comparison)
     }
 
     pub(crate) fn install_diff(
@@ -87,11 +99,21 @@ impl Buffer {
         if !self.diff_request_matches(request, &data.comparison) {
             return Ok(false);
         }
-        self.install_projection(&rendered.text, rendered.sections, rendered.styles);
+        let same_comparison =
+            self.document.borrow().diff.as_ref().is_some_and(|session| {
+                session.data.is_some() && session.comparison == data.comparison
+            });
+        if same_comparison {
+            self.install_projection(&rendered.text, rendered.sections, rendered.styles);
+        } else {
+            self.reset_projection(&rendered.text, rendered.sections, rendered.styles);
+        }
         let mut doc = self.document.borrow_mut();
-        doc.diff.as_mut().unwrap().data = Some(Arc::new(data));
-        doc.diff.as_mut().unwrap().rendered = Some(rendered.navigation);
-        doc.diff.as_mut().unwrap().stale = false;
+        let session = doc.diff.as_mut().unwrap();
+        session.comparison = data.comparison.clone();
+        session.data = Some(Arc::new(data));
+        session.rendered = Some(rendered.navigation);
+        session.stale = false;
         Ok(true)
     }
 

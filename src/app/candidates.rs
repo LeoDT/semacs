@@ -311,6 +311,81 @@ impl AppShell {
                 false,
             ));
             self.publish_candidates(cx);
+        } else if let ReadKind::MagitDiffRange { refs, default, .. } = &kind {
+            let range_split = if !input.starts_with(":/") {
+                input.find("..").and_then(|pos| {
+                    let sep_len = if input[pos..].starts_with("...") {
+                        3
+                    } else {
+                        2
+                    };
+                    let right = &input[pos + sep_len..];
+                    (!right.contains("..") && !right.starts_with('.'))
+                        .then_some((&input[..pos + sep_len], right))
+                })
+            } else {
+                None
+            };
+            let list = if let Some((prefix, query)) = range_split {
+                let candidates = refs
+                    .iter()
+                    .map(|name| Candidate {
+                        value: format!("{prefix}{name}"),
+                        label: name.clone(),
+                        annotation: String::new(),
+                        directory: false,
+                    })
+                    .collect();
+                let items = if query.is_empty() {
+                    completion::filter_unranked(candidates, query, &AtomicBool::new(false))
+                } else {
+                    completion::filter(candidates, query, &AtomicBool::new(false))
+                };
+                let mut list = CandidateList::ready(items, &input, None, query.is_empty());
+                list.directory_input = false;
+                list.raw_directory = false;
+                list
+            } else {
+                let candidates = refs
+                    .iter()
+                    .map(|name| Candidate::named(name.clone(), String::new()))
+                    .collect();
+                let items = if input.is_empty() {
+                    completion::filter_unranked(candidates, &input, &AtomicBool::new(false))
+                } else {
+                    completion::filter(candidates, &input, &AtomicBool::new(false))
+                };
+                let select_input = input.is_empty()
+                    && default
+                        .as_deref()
+                        .is_some_and(|def| !items.iter().any(|item| item.candidate.value == def));
+                let mut list =
+                    CandidateList::ready(items, &input, default.as_deref(), select_input);
+                list.directory_input = false;
+                list.raw_directory = false;
+                list
+            };
+            self.session.as_mut().unwrap().candidates = Some(list);
+            self.publish_candidates(cx);
+        } else if let ReadKind::MagitShowCommit { refs, default, .. } = &kind {
+            let candidates = refs
+                .iter()
+                .map(|name| Candidate::named(name.clone(), String::new()))
+                .collect();
+            let items = if input.is_empty() {
+                completion::filter_unranked(candidates, &input, &AtomicBool::new(false))
+            } else {
+                completion::filter(candidates, &input, &AtomicBool::new(false))
+            };
+            let select_input = input.is_empty()
+                && default
+                    .as_deref()
+                    .is_some_and(|def| !items.iter().any(|item| item.candidate.value == def));
+            let mut list = CandidateList::ready(items, &input, default.as_deref(), select_input);
+            list.directory_input = false;
+            list.raw_directory = false;
+            self.session.as_mut().unwrap().candidates = Some(list);
+            self.publish_candidates(cx);
         } else {
             let candidates = match &kind {
                 ReadKind::HistoryFileVersion { versions } => versions

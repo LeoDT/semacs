@@ -44,7 +44,7 @@ impl Status {
                 let (diff, bytes) = Diff::load_status(
                     Comparison {
                         repository: self.repository.clone(),
-                        kind,
+                        kind: kind.clone(),
                         environment: ReadEnvironment::Projection,
                     },
                     &paths,

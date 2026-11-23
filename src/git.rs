@@ -196,6 +196,124 @@ pub(crate) fn valid_oid(oid: &str) -> bool {
     matches!(oid.len(), 40 | 64) && oid.bytes().all(|byte| byte.is_ascii_hexdigit())
 }
 
+pub(crate) fn current_branch(
+    repository: &Repository,
+    environment: ReadEnvironment,
+    cancelled: &AtomicBool,
+) -> Result<Option<String>, String> {
+    let branch = environment.execute(
+        repository,
+        &[
+            "symbolic-ref".as_ref(),
+            "--quiet".as_ref(),
+            "--short".as_ref(),
+            "HEAD".as_ref(),
+        ],
+        cancelled,
+    )?;
+    match branch.status.code() {
+        Some(0) => Ok(String::from_utf8(branch.bytes)
+            .ok()
+            .map(|name| name.trim_end_matches('\n').to_owned())
+            .filter(|name| !name.is_empty())),
+        Some(1) => Ok(None),
+        _ => Err(format!("Cannot read current branch: {}", branch.diagnostic)),
+    }
+}
+
+pub(crate) fn resolve_commit(
+    repository: &Repository,
+    rev: &str,
+    environment: ReadEnvironment,
+    cancelled: &AtomicBool,
+) -> Result<String, String> {
+    if rev.is_empty() {
+        return Err("Empty revision".into());
+    }
+    let deref = if rev.starts_with(":/") {
+        rev.to_owned()
+    } else {
+        format!("{rev}^{{commit}}")
+    };
+    let output = environment.execute(
+        repository,
+        &[
+            "rev-parse".as_ref(),
+            "--verify".as_ref(),
+            "--quiet".as_ref(),
+            "--end-of-options".as_ref(),
+            deref.as_ref(),
+        ],
+        cancelled,
+    )?;
+    if !output.status.success() {
+        return Err(format!("{rev} cannot be dereferenced as a commit"));
+    }
+    let oid = String::from_utf8(output.bytes)
+        .map_err(|_| "Git commit identity is not UTF-8")?
+        .trim_end_matches('\n')
+        .to_owned();
+    if !valid_oid(&oid) {
+        return Err(format!("{rev} cannot be dereferenced as a commit"));
+    }
+    Ok(oid)
+}
+
+const SPECIAL_REFNAMES: &[&str] = &[
+    "HEAD",
+    "ORIG_HEAD",
+    "FETCH_HEAD",
+    "MERGE_HEAD",
+    "CHERRY_PICK_HEAD",
+];
+
+pub(crate) fn list_refnames(
+    repository: &Repository,
+    include_special: bool,
+    environment: ReadEnvironment,
+    cancelled: &AtomicBool,
+) -> Result<Vec<String>, String> {
+    let mut refs = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    for namespace in ["refs/heads", "refs/remotes", "refs/tags"] {
+        let mut args: Vec<&std::ffi::OsStr> = vec![
+            "for-each-ref".as_ref(),
+            "--format=%(symref)%00%(refname:short)".as_ref(),
+        ];
+        if namespace == "refs/tags" {
+            args.push("--sort=-version:refname".as_ref());
+        }
+        args.push(namespace.as_ref());
+        let bytes = environment.read(repository, &args, cancelled)?;
+        for line in bytes.split(|byte| *byte == b'\n') {
+            if line.is_empty() {
+                continue;
+            }
+            let Some(sep) = line.iter().position(|byte| *byte == 0) else {
+                continue;
+            };
+            if sep > 0 {
+                // Skip symbolic refs (e.g. origin/HEAD), matching upstream `magit-list-refs`.
+                continue;
+            }
+            if let Ok(name) = std::str::from_utf8(&line[sep + 1..])
+                && !name.is_empty()
+                && seen.insert(name.to_owned())
+            {
+                refs.push(name.to_owned());
+            }
+        }
+    }
+    if include_special {
+        for &name in SPECIAL_REFNAMES {
+            if repository.git_dir.join(name).exists() && seen.insert(name.to_owned()) {
+                refs.push(name.to_owned());
+            }
+        }
+    }
+    Ok(refs)
+}
+
 #[cfg(all(test, unix))]
 #[path = "git_process_tests.rs"]
 mod process_tests;

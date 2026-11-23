@@ -531,3 +531,289 @@ fn only_hunk_headings_are_marked_for_magit_window_start() {
     }
     assert_eq!(hunks, 1);
 }
+
+#[test]
+fn parse_range_matches_magit_range_syntax() {
+    assert_eq!(parse_range("HEAD").unwrap(), ParsedRange::Single("HEAD"));
+    assert_eq!(
+        parse_range(":/fix bug").unwrap(),
+        ParsedRange::Single(":/fix bug")
+    );
+    assert_eq!(
+        parse_range("main..feature").unwrap(),
+        ParsedRange::Range {
+            left: Some("main"),
+            right: Some("feature"),
+            three_dot: false,
+        }
+    );
+    assert_eq!(
+        parse_range("main...feature").unwrap(),
+        ParsedRange::Range {
+            left: Some("main"),
+            right: Some("feature"),
+            three_dot: true,
+        }
+    );
+    assert_eq!(
+        parse_range("main..").unwrap(),
+        ParsedRange::Range {
+            left: Some("main"),
+            right: None,
+            three_dot: false,
+        }
+    );
+    assert_eq!(
+        parse_range("..feature").unwrap(),
+        ParsedRange::Range {
+            left: None,
+            right: Some("feature"),
+            three_dot: false,
+        }
+    );
+    assert_eq!(
+        parse_range("main...").unwrap(),
+        ParsedRange::Range {
+            left: Some("main"),
+            right: None,
+            three_dot: true,
+        }
+    );
+    assert_eq!(
+        parse_range("...feature").unwrap(),
+        ParsedRange::Range {
+            left: None,
+            right: Some("feature"),
+            three_dot: true,
+        }
+    );
+    for invalid in ["", "..", "...", "a....b", "a..b..c", "a ..b", "a.. b"] {
+        assert!(
+            parse_range(invalid).is_err(),
+            "expected error for {invalid:?}"
+        );
+    }
+}
+
+#[test]
+fn range_and_single_revision_diffs_resolve_fixed_oids_and_visit_sides() {
+    let repo = Repository::new();
+    repo.write("a", "base\n");
+    repo.commit();
+    let base_oid = String::from_utf8(repo.git(&["rev-parse", "HEAD"]))
+        .unwrap()
+        .trim()
+        .to_owned();
+    repo.git(&["tag", "-a", "v1.0", "-m", "release v1.0"]);
+    repo.git(&["checkout", "-b", "feature"]);
+    repo.write("b", "feature\n");
+    repo.commit();
+    let feat_oid = String::from_utf8(repo.git(&["rev-parse", "HEAD"]))
+        .unwrap()
+        .trim()
+        .to_owned();
+    repo.git(&["checkout", "-"]);
+    repo.write("a", "main-change\n");
+    repo.commit();
+    let main_branch = String::from_utf8(repo.git(&["symbolic-ref", "--short", "HEAD"]))
+        .unwrap()
+        .trim()
+        .to_owned();
+    let main_oid = String::from_utf8(repo.git(&["rev-parse", "HEAD"]))
+        .unwrap()
+        .trim()
+        .to_owned();
+    let git_repo = crate::git::Repository {
+        root: repo.0.canonicalize().unwrap(),
+        git_dir: repo.0.join(".git").canonicalize().unwrap(),
+    };
+    let cancelled = AtomicBool::new(false);
+
+    // Two-dot range main..feature sees both a reverted and b added.
+    let two_dot = DiffKind::resolve_range(
+        &git_repo,
+        &format!("{main_branch}..feature"),
+        ReadEnvironment::Projection,
+        &cancelled,
+    )
+    .unwrap();
+    assert_eq!(
+        two_dot,
+        DiffKind::Range {
+            spec: format!("{main_branch}..feature"),
+            left_oid: main_oid.clone(),
+            right_oid: feat_oid.clone(),
+            three_dot: false,
+        }
+    );
+    let diff = Diff::load(
+        Comparison {
+            repository: git_repo.clone(),
+            kind: two_dot.clone(),
+            environment: ReadEnvironment::Projection,
+        },
+        &cancelled,
+    )
+    .unwrap();
+    assert_eq!(diff.files.len(), 2);
+    // Visiting both sides of a committed range returns blobs, never worktree.
+    assert!(matches!(
+        diff.visit(0, Some(1), None, 0).unwrap(),
+        Visit::Blob { .. }
+    ));
+    assert!(matches!(
+        diff.visit(0, None, Some(1), 0).unwrap(),
+        Visit::Blob { .. }
+    ));
+
+    // Three-dot range main...feature compares merge-base (base_oid) -> feature: only b added!
+    let three_dot = two_dot.switch_range_type().unwrap();
+    assert_eq!(
+        three_dot,
+        DiffKind::Range {
+            spec: format!("{main_branch}...feature"),
+            left_oid: main_oid.clone(),
+            right_oid: feat_oid.clone(),
+            three_dot: true,
+        }
+    );
+    let diff3 = Diff::load(
+        Comparison {
+            repository: git_repo.clone(),
+            kind: three_dot.clone(),
+            environment: ReadEnvironment::Projection,
+        },
+        &cancelled,
+    )
+    .unwrap();
+    assert_eq!(diff3.files.len(), 1);
+    assert_eq!(diff3.files[0].new_path, Path::new("b"));
+
+    // Flip revs swaps sides: feature...main compares base_oid -> main: only a modified!
+    let flipped = three_dot.flip_revs().unwrap();
+    assert_eq!(
+        flipped,
+        DiffKind::Range {
+            spec: format!("feature...{main_branch}"),
+            left_oid: feat_oid.clone(),
+            right_oid: main_oid.clone(),
+            three_dot: true,
+        }
+    );
+    let diff_flipped = Diff::load(
+        Comparison {
+            repository: git_repo.clone(),
+            kind: flipped,
+            environment: ReadEnvironment::Projection,
+        },
+        &cancelled,
+    )
+    .unwrap();
+    assert_eq!(diff_flipped.files.len(), 1);
+    assert_eq!(diff_flipped.files[0].new_path, Path::new("a"));
+
+    // Omitted side defaults to HEAD: v1.0.. == base_oid..main_oid
+    let omitted =
+        DiffKind::resolve_range(&git_repo, "v1.0..", ReadEnvironment::Projection, &cancelled)
+            .unwrap();
+    assert_eq!(
+        omitted,
+        DiffKind::Range {
+            spec: "v1.0..HEAD".into(),
+            left_oid: base_oid.clone(),
+            right_oid: main_oid.clone(),
+            three_dot: false,
+        }
+    );
+
+    // Single revision (annotated tag v1.0) compares fixed commit OID -> working tree.
+    repo.write("a", "worktree-edit\n");
+    let single =
+        DiffKind::resolve_range(&git_repo, "v1.0", ReadEnvironment::Projection, &cancelled)
+            .unwrap();
+    assert_eq!(
+        single,
+        DiffKind::RevisionToWorktree {
+            spec: "v1.0".into(),
+            base_oid: base_oid.clone(),
+        }
+    );
+    assert_eq!(
+        single.switch_range_type().unwrap_err(),
+        "No range to change"
+    );
+    assert_eq!(single.flip_revs().unwrap_err(), "No range to swap");
+    let diff_wt = Diff::load(
+        Comparison {
+            repository: git_repo.clone(),
+            kind: single,
+            environment: ReadEnvironment::Projection,
+        },
+        &cancelled,
+    )
+    .unwrap();
+    assert!(matches!(
+        diff_wt.visit(0, Some(1), None, 0).unwrap(),
+        Visit::Blob { .. }
+    ));
+    assert!(matches!(
+        diff_wt.visit(0, None, Some(1), 0).unwrap(),
+        Visit::Worktree { .. }
+    ));
+
+    // Advancing main does not alter the already-resolved fixed-OID comparison.
+    repo.write("a", "later-main\n");
+    repo.commit();
+    let fixed_reload = Diff::load(
+        Comparison {
+            repository: git_repo.clone(),
+            kind: two_dot,
+            environment: ReadEnvironment::Projection,
+        },
+        &cancelled,
+    )
+    .unwrap();
+    assert!(
+        fixed_reload.render().unwrap().text.contains("-main-change"),
+        "pinned OID must not follow moved branch ref"
+    );
+
+    // Non-commit (blob OID / invalid ref) fails with upstream message.
+    let blob_oid = String::from_utf8(repo.git(&["rev-parse", "HEAD:a"]))
+        .unwrap()
+        .trim()
+        .to_owned();
+    assert_eq!(
+        crate::git::resolve_commit(
+            &git_repo,
+            &blob_oid,
+            ReadEnvironment::Projection,
+            &cancelled
+        )
+        .unwrap_err(),
+        format!("{blob_oid} cannot be dereferenced as a commit")
+    );
+    assert_eq!(
+        crate::git::resolve_commit(
+            &git_repo,
+            "no-such-ref",
+            ReadEnvironment::Projection,
+            &cancelled
+        )
+        .unwrap_err(),
+        "no-such-ref cannot be dereferenced as a commit"
+    );
+
+    // list_refnames returns branches + tags, excludes symrefs, and includes HEAD when requested.
+    repo.git(&[
+        "symbolic-ref",
+        "refs/remotes/origin/HEAD",
+        &format!("refs/heads/{main_branch}"),
+    ]);
+    let refs = crate::git::list_refnames(&git_repo, true, ReadEnvironment::Projection, &cancelled)
+        .unwrap();
+    assert!(refs.iter().any(|name| name == "feature"));
+    assert!(refs.iter().any(|name| name == "v1.0"));
+    assert!(refs.iter().any(|name| name == "HEAD"));
+    assert!(!refs.iter().any(|name| name == "origin/HEAD"));
+}
