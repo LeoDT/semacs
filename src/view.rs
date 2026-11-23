@@ -20,12 +20,12 @@ use crate::display::{
     WrapJob,
 };
 use crate::editing::{
-    CommandOutcome, CommandViewport, EditTarget, InputDisposition, KillRing, RecenterPosition,
-    RouteError, TAB_WIDTH, ViewportRequest,
+    CommandContext, CommandOutcome, CommandViewport, EditTarget, InputDisposition, KillRing,
+    RecenterPosition, RouteError, TAB_WIDTH, ViewportRequest,
 };
 use crate::input::{DisplayChange, DisplayId, DisplaySnapshot, SessionToken};
 use crate::keymap::Keymap;
-use crate::platform::{BufferInputHandler, InputOperation};
+use crate::platform::{BufferInputHandler, GpuiClipboard, InputOperation};
 use crate::text::ByteOffset;
 use crate::theme::{StyleRole, ThemeSettings};
 
@@ -1834,40 +1834,41 @@ impl BufferView {
         );
         let before_point = self.target.buffer().point();
         let token = self.target.token();
+        let clipboard = GpuiClipboard::new(cx);
+        let context = CommandContext {
+            viewport: viewport
+                .as_ref()
+                .map(|viewport| viewport as &dyn CommandViewport),
+            clipboard: Some(&clipboard),
+        };
         let result = match layers {
             KeyLayers::Body { local, global } => self.target.dispatch_keystroke(
                 token,
                 stroke,
                 prefer_character_input,
                 &[local, global, &self.keymap],
-                viewport
-                    .as_ref()
-                    .map(|viewport| viewport as &dyn CommandViewport),
+                context,
             ),
             KeyLayers::Edit(Some(outer)) => self.target.dispatch_keystroke(
                 token,
                 stroke,
                 prefer_character_input,
                 &[outer, &self.keymap],
-                viewport
-                    .as_ref()
-                    .map(|viewport| viewport as &dyn CommandViewport),
+                context,
             ),
             KeyLayers::Edit(None) => self.target.dispatch_keystroke(
                 token,
                 stroke,
                 prefer_character_input,
                 &[&self.keymap],
-                viewport
-                    .as_ref()
-                    .map(|viewport| viewport as &dyn CommandViewport),
+                context,
             ),
             KeyLayers::Exclusive(layer) => self.target.dispatch_keystroke(
                 token,
                 stroke,
                 prefer_character_input,
                 &[layer],
-                None,
+                CommandContext::default(),
             ),
         };
         match result {
@@ -1915,12 +1916,16 @@ impl BufferView {
             display,
         );
         let before_point = self.target.buffer().point();
-        let result = self.target.execute_with_viewport(
+        let clipboard = GpuiClipboard::new(cx);
+        let result = self.target.execute_with_context(
             self.target.token(),
             command,
-            viewport
-                .as_ref()
-                .map(|viewport| viewport as &dyn CommandViewport),
+            CommandContext {
+                viewport: viewport
+                    .as_ref()
+                    .map(|viewport| viewport as &dyn CommandViewport),
+                clipboard: Some(&clipboard),
+            },
         );
         match result {
             Ok(outcome) => {

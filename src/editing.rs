@@ -26,8 +26,15 @@ mod viewport;
 
 pub(crate) use transform::RegionTransform;
 
-pub use kill_ring::KillRing;
+pub use kill_ring::{KillRing, SystemClipboard};
 pub use viewport::{CommandViewport, PageMotion, RecenterPosition, RowMotion, ViewportRequest};
+
+/// Optional host services supplied to an edit command execution.
+#[derive(Clone, Copy, Default)]
+pub struct CommandContext<'a> {
+    pub viewport: Option<&'a dyn CommandViewport>,
+    pub clipboard: Option<&'a dyn SystemClipboard>,
+}
 
 pub(crate) const TAB_WIDTH: u32 = 8;
 
@@ -327,7 +334,10 @@ impl EditTarget {
             &event.keystroke,
             event.prefer_character_input,
             layers,
-            viewport,
+            CommandContext {
+                viewport,
+                clipboard: None,
+            },
         )
     }
 
@@ -337,7 +347,7 @@ impl EditTarget {
         stroke: &Keystroke,
         prefer_character_input: bool,
         layers: &[&Keymap],
-        viewport: Option<&dyn CommandViewport>,
+        context: CommandContext<'_>,
     ) -> Result<Route, RouteError> {
         self.snapshot_for(token)?;
         let composing = self.input.is_composing();
@@ -361,7 +371,7 @@ impl EditTarget {
             }
             Dispatch::Command(command) => match command.scope() {
                 Scope::Edit => self
-                    .execute_with_viewport(token, command, viewport)
+                    .execute_with_context(token, command, context)
                     .map(Route::handled),
                 Scope::Application | Scope::ReadSession => {
                     self.buffer.break_history_group();
@@ -402,7 +412,7 @@ impl EditTarget {
         token: SessionToken,
         command: Command,
     ) -> Result<CommandOutcome, RouteError> {
-        self.execute_with_viewport(token, command, None)
+        self.execute_with_context(token, command, CommandContext::default())
     }
 
     pub fn execute_with_viewport(
@@ -410,6 +420,22 @@ impl EditTarget {
         token: SessionToken,
         command: Command,
         viewport: Option<&dyn CommandViewport>,
+    ) -> Result<CommandOutcome, RouteError> {
+        self.execute_with_context(
+            token,
+            command,
+            CommandContext {
+                viewport,
+                clipboard: None,
+            },
+        )
+    }
+
+    pub fn execute_with_context(
+        &mut self,
+        token: SessionToken,
+        command: Command,
+        context: CommandContext<'_>,
     ) -> Result<CommandOutcome, RouteError> {
         if command.scope() != Scope::Edit || !command.available_in(self.buffer.mode()) {
             return Err(RouteError::Unavailable(command));
@@ -453,9 +479,9 @@ impl EditTarget {
             self.break_all_kill_chains();
             self.execute_mc_management(command)
         } else if self.has_multiple_cursors() {
-            self.execute_mc_command(token, command, viewport, append_kill)
+            self.execute_mc_command(token, command, context, append_kill)
         } else {
-            self.execute_single_command(token, command, viewport, append_kill)
+            self.execute_single_command(token, command, context, append_kill)
         };
         if result.is_err() {
             self.buffer.break_history_group();
@@ -468,7 +494,7 @@ impl EditTarget {
         &mut self,
         token: SessionToken,
         command: Command,
-        viewport: Option<&dyn CommandViewport>,
+        context: CommandContext<'_>,
         append_kill: bool,
     ) -> Result<CommandOutcome, RouteError> {
         if matches!(
@@ -529,7 +555,7 @@ impl EditTarget {
             Command::NextLine | Command::PreviousLine => {
                 let forward = command == Command::NextLine;
                 let Some(destination) =
-                    self.vertical_destination(text, point, forward, viewport)?
+                    self.vertical_destination(text, point, forward, context.viewport)?
                 else {
                     self.buffer
                         .set_point(ByteOffset(if forward { text.len() } else { 0 }))?;
@@ -565,7 +591,8 @@ impl EditTarget {
                 });
             }
             Command::ScrollUp | Command::ScrollDown => {
-                let motion = viewport
+                let motion = context
+                    .viewport
                     .ok_or(RouteError::LayoutNotReady)?
                     .page(point, command == Command::ScrollUp)?;
                 self.buffer.set_point(motion.point)?;
@@ -637,9 +664,9 @@ impl EditTarget {
             | Command::KillLine
             | Command::KillRegion
             | Command::KillRingSave => {
-                return self.kill(token, command, append_kill);
+                return self.kill(token, command, append_kill, context.clipboard);
             }
-            Command::Yank => return self.yank(token),
+            Command::Yank => return self.yank(token, context.clipboard),
             Command::Undo | Command::UndoRedo => {
                 let redo = command == Command::UndoRedo;
                 let update = self

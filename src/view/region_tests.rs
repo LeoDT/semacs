@@ -335,3 +335,59 @@ fn application_ring_is_shared_between_windows_and_survives_repeated_initializati
         );
     });
 }
+
+#[gpui::test]
+fn kill_and_yank_bridge_gpui_system_clipboard_including_crlf_normalization(
+    cx: &mut TestAppContext,
+) {
+    let (mut visual, editor) = open("alpha beta\ngamma", cx);
+
+    // M-w writes the copied region to GPUI's system clipboard.
+    visual.simulate_keystrokes("ctrl-t ctrl-f ctrl-f ctrl-f ctrl-f ctrl-f alt-w");
+    redraw(&mut visual);
+    assert_eq!(
+        cx.read_from_clipboard().and_then(|item| item.text()),
+        Some("alpha".to_owned())
+    );
+
+    // Consecutive C-k appends and publishes the combined string to GPUI's system clipboard.
+    visual.simulate_keystrokes("ctrl-k ctrl-k");
+    redraw(&mut visual);
+    assert_eq!(
+        cx.read_from_clipboard().and_then(|item| item.text()),
+        Some(" beta\n".to_owned())
+    );
+
+    // External clipboard text (with Windows CRLF) is normalized and pulled on C-y.
+    cx.write_to_clipboard(gpui::ClipboardItem::new_string("ext1\r\next2".to_owned()));
+    visual.simulate_keystrokes("ctrl-y");
+    redraw(&mut visual);
+    visual.read(|cx| {
+        let view = editor.read(cx);
+        assert_eq!(view.buffer().text().to_string(), "alphaext1\next2gamma");
+        assert_eq!(
+            view.target.kill_ring().latest().unwrap().to_string(),
+            "ext1\next2"
+        );
+    });
+
+    // Repeating C-y without external changes does not duplicate the ring entry.
+    visual.simulate_keystrokes("ctrl-y");
+    redraw(&mut visual);
+    visual.read(|cx| {
+        let view = editor.read(cx);
+        assert_eq!(
+            view.buffer().text().to_string(),
+            "alphaext1\next2ext1\next2gamma"
+        );
+        assert_eq!(
+            view.target
+                .kill_ring()
+                .entries()
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>(),
+            ["ext1\next2", " beta\n", "alpha"]
+        );
+    });
+}

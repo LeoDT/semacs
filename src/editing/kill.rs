@@ -5,7 +5,7 @@ use crate::command::Command;
 use crate::input::SessionToken;
 use crate::text::{ByteOffset, Point, Rope};
 
-use super::{CommandOutcome, EditTarget, RouteError, motion};
+use super::{CommandOutcome, EditTarget, RouteError, SystemClipboard, motion};
 
 pub(super) fn line_range(
     text: &Rope,
@@ -37,6 +37,7 @@ impl EditTarget {
         token: SessionToken,
         command: Command,
         append: bool,
+        clipboard: Option<&dyn SystemClipboard>,
     ) -> Result<CommandOutcome, RouteError> {
         let point = self.buffer.point();
         let copy = command == Command::KillRingSave;
@@ -67,7 +68,8 @@ impl EditTarget {
             .then(|| self.buffer.check_writable_range(range.clone()).err())
             .flatten();
         if copy || read_only.is_some() {
-            self.kill_ring.record(text, append, prepend, !copy);
+            self.kill_ring
+                .record(text, append, prepend, !copy, clipboard);
             self.buffer.deactivate_mark();
             if let Some(error) = read_only.filter(|_| !copy) {
                 match command {
@@ -80,12 +82,17 @@ impl EditTarget {
             return Ok(CommandOutcome::default());
         }
         let outcome = self.replace_command(token, range, "")?;
-        self.kill_ring.record(text, append, prepend, true);
+        self.kill_ring
+            .record(text, append, prepend, true, clipboard);
         self.buffer.deactivate_mark();
         Ok(outcome)
     }
 
-    pub(super) fn yank(&mut self, token: SessionToken) -> Result<CommandOutcome, RouteError> {
+    pub(super) fn yank(
+        &mut self,
+        token: SessionToken,
+        clipboard: Option<&dyn SystemClipboard>,
+    ) -> Result<CommandOutcome, RouteError> {
         self.buffer.check_editable()?;
         let point = self.buffer.point();
         let active = self.buffer.mark_active();
@@ -93,7 +100,10 @@ impl EditTarget {
         if !active {
             self.buffer.deactivate_mark();
         }
-        let text = self.kill_ring.latest().ok_or(RouteError::EmptyKillRing)?;
+        let text = self
+            .kill_ring
+            .current_kill(clipboard)
+            .ok_or(RouteError::EmptyKillRing)?;
         let mut outcome = self.replace_command(token, point..point, &text.to_string())?;
         outcome.message = Some("Mark set".to_owned());
         Ok(outcome)

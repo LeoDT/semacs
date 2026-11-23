@@ -1,7 +1,11 @@
+use std::cell::RefCell;
+
 use gpui_kit::{KeyDownEvent, Keystroke};
 use semacs::buffer::{Buffer, EditError, EditSource};
 use semacs::command::{Command, Scope};
-use semacs::editing::{CommandOutcome, EditTarget, KillRing, RouteError};
+use semacs::editing::{
+    CommandContext, CommandOutcome, EditTarget, KillRing, RouteError, SystemClipboard,
+};
 use semacs::files::{DecodedFile, FileFormat};
 use semacs::input::InputError;
 use semacs::keymap::Keymap;
@@ -733,4 +737,162 @@ fn region_projection_handles_endpoints_at_and_after_the_preedit_anchor() {
         );
         assert!(target.buffer().mark_active());
     }
+}
+
+#[derive(Default)]
+struct MemoryClipboard {
+    text: RefCell<Option<String>>,
+    writes: RefCell<Vec<String>>,
+}
+
+impl MemoryClipboard {
+    fn set_external(&self, text: impl Into<String>) {
+        *self.text.borrow_mut() = Some(text.into());
+    }
+
+    fn clear_external(&self) {
+        *self.text.borrow_mut() = None;
+    }
+
+    fn current(&self) -> Option<String> {
+        self.text.borrow().clone()
+    }
+
+    fn writes(&self) -> Vec<String> {
+        self.writes.borrow().clone()
+    }
+}
+
+impl SystemClipboard for MemoryClipboard {
+    fn read_text(&self) -> Option<String> {
+        self.text.borrow().clone()
+    }
+
+    fn write_text(&self, text: &str) {
+        *self.text.borrow_mut() = (!text.is_empty()).then(|| text.to_owned());
+        self.writes.borrow_mut().push(text.to_owned());
+    }
+}
+
+fn run_with_clipboard(
+    target: &mut EditTarget,
+    command: Command,
+    clipboard: &MemoryClipboard,
+) -> Result<CommandOutcome, RouteError> {
+    target.execute_with_context(
+        target.token(),
+        command,
+        CommandContext {
+            viewport: None,
+            clipboard: Some(clipboard),
+        },
+    )
+}
+
+#[test]
+fn kill_commands_export_to_system_clipboard_including_appends_and_readonly() {
+    let ring = KillRing::default();
+    let clipboard = MemoryClipboard::default();
+    let mut editor = target("one two\nthree", &ring);
+
+    // Consecutive forward kills export each combined entry.
+    run_with_clipboard(&mut editor, Command::KillWord, &clipboard).unwrap();
+    assert_eq!(clipboard.current().as_deref(), Some("one"));
+    run_with_clipboard(&mut editor, Command::KillWord, &clipboard).unwrap();
+    assert_eq!(clipboard.current().as_deref(), Some("one two"));
+    assert_eq!(entries(&ring), ["one two"]);
+
+    // Backward kill word prepends when continuing a kill chain.
+    editor
+        .set_point_from_pointer(editor.token(), ByteOffset(editor.buffer().text().len()))
+        .unwrap();
+    run_with_clipboard(&mut editor, Command::BackwardKillWord, &clipboard).unwrap();
+    assert_eq!(clipboard.current().as_deref(), Some("three"));
+
+    // Read-only kill still copies to kill ring and system clipboard before failing.
+    let mut ro = target("alpha beta", &ring);
+    ro.set_read_only(true);
+    region(&mut ro, 0, 5);
+    assert_eq!(
+        run_with_clipboard(&mut ro, Command::KillRegion, &clipboard).unwrap_err(),
+        RouteError::Input(InputError::Edit(EditError::ReadOnly))
+    );
+    assert_eq!(clipboard.current().as_deref(), Some("alpha"));
+    assert_eq!(ring.latest().unwrap().to_string(), "alpha");
+
+    // Empty region kill exports empty string so a following yank uses ring top "" rather than stale external text.
+    clipboard.set_external("stale");
+    let mut empty_target = target("xy", &ring);
+    region(&mut empty_target, 1, 1);
+    run_with_clipboard(&mut empty_target, Command::KillRingSave, &clipboard).unwrap();
+    assert_eq!(clipboard.current(), None);
+    run_with_clipboard(&mut empty_target, Command::Yank, &clipboard).unwrap();
+    assert_eq!(empty_target.buffer().text().to_string(), "xy");
+    assert_eq!(ring.latest().unwrap().to_string(), "");
+    assert_eq!(clipboard.writes(), ["one", "one two", "three", "alpha", ""]);
+}
+
+#[test]
+fn yank_imports_new_external_clipboard_without_reexporting_or_duplicating() {
+    let ring = KillRing::default();
+    let clipboard = MemoryClipboard::default();
+    let mut target = target("", &ring);
+
+    // External clipboard text populates kill ring on yank without calling write_text.
+    clipboard.set_external("from-browser");
+    run_with_clipboard(&mut target, Command::Yank, &clipboard).unwrap();
+    assert_eq!(target.buffer().text().to_string(), "from-browser");
+    assert_eq!(entries(&ring), ["from-browser"]);
+    assert!(clipboard.writes().is_empty());
+
+    // Repeating yank with unchanged clipboard reuses ring top without duplicating entries.
+    run_with_clipboard(&mut target, Command::Yank, &clipboard).unwrap();
+    assert_eq!(
+        target.buffer().text().to_string(),
+        "from-browserfrom-browser"
+    );
+    assert_eq!(entries(&ring), ["from-browser"]);
+    assert!(clipboard.writes().is_empty());
+
+    // Clearing the clipboard falls back to the local kill ring; re-copying the same text later counts as new.
+    clipboard.clear_external();
+    run_with_clipboard(&mut target, Command::Yank, &clipboard).unwrap();
+    assert_eq!(entries(&ring), ["from-browser"]);
+
+    clipboard.set_external("from-browser");
+    run_with_clipboard(&mut target, Command::Yank, &clipboard).unwrap();
+    assert_eq!(entries(&ring), ["from-browser", "from-browser"]);
+
+    // Local kill updates clipboard; subsequent yank does not duplicate it.
+    region(&mut target, 0, 4);
+    run_with_clipboard(&mut target, Command::KillRingSave, &clipboard).unwrap();
+    assert_eq!(clipboard.current().as_deref(), Some("from"));
+    assert_eq!(entries(&ring), ["from", "from-browser", "from-browser"]);
+    run_with_clipboard(&mut target, Command::Yank, &clipboard).unwrap();
+    assert_eq!(entries(&ring), ["from", "from-browser", "from-browser"]);
+}
+
+#[test]
+fn multiple_cursors_sync_only_primary_cursor_with_system_clipboard() {
+    let ring = KillRing::default();
+    let clipboard = MemoryClipboard::default();
+    let mut target = target("aa bb\ncc dd", &ring);
+
+    // Select from line 1 to line 2 (point on line 2), so mc/edit-lines keeps
+    // primary on line 2 ("cc dd") and puts the fake cursor on line 1 ("aa bb").
+    region(&mut target, 0, 7);
+    run_with_clipboard(&mut target, Command::McEditLines, &clipboard).unwrap();
+    assert_eq!(target.cursor_count(), 2);
+
+    // Kill first word on both lines: primary kills "cc" (exported), fake kills "aa" (local only).
+    run_with_clipboard(&mut target, Command::MoveBeginningOfLine, &clipboard).unwrap();
+    run_with_clipboard(&mut target, Command::KillWord, &clipboard).unwrap();
+    assert_eq!(clipboard.current().as_deref(), Some("cc"));
+    assert_eq!(clipboard.writes(), ["cc"]);
+
+    // External clipboard changes: primary yanks external text while fake cursor yanks its own "aa".
+    clipboard.set_external("EXT");
+    run_with_clipboard(&mut target, Command::Yank, &clipboard).unwrap();
+    assert_eq!(target.buffer().text().to_string(), "aa bb\nEXT dd");
+    assert_eq!(entries(&ring), ["EXT", "cc"]);
 }

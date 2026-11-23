@@ -602,11 +602,13 @@ impl AppShell {
                 }
             }
             IsearchAction::YankKill => {
-                let killed = cx
-                    .global::<crate::editing::KillRing>()
-                    .latest()
-                    .map(|rope| rope.to_string())
-                    .unwrap_or_default();
+                let killed = {
+                    let clipboard = crate::platform::GpuiClipboard::new(cx);
+                    cx.global::<crate::editing::KillRing>()
+                        .current_kill(Some(&clipboard))
+                        .map(|rope| rope.to_string())
+                        .unwrap_or_default()
+                };
                 if !killed.is_empty()
                     && let Some(session) = &mut self.isearch
                 {

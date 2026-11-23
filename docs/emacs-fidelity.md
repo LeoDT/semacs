@@ -136,7 +136,10 @@
 - `kill-line` 在 EOB 回显 `End of buffer`，不建历史组。
 - 只读 buffer 的 kill 按参照复制到 ring 后报告只读错误，不修改文本 / modified；`C-k` 此时还会把 point 移到被复制范围末端。`M-w` 在只读 buffer 可正常复制；只读 yank 在改变 mark 前拒绝。
 - yank 在插入起点设置 mark，回显 `Mark set`；非空插入停用 region，不替换原 region。空 ring 报错但仍在 point 设置 mark；空字符串 yank 无文本编辑，不主动停用已有 active。
-- 正文与 minibuffer 共用应用内 kill ring，不读写系统剪贴板。默认最多保留 120 条、不去重，与固定 Emacs 31.1 默认值一致；连续追加仍只占一条。
+- 正文与 minibuffer 共用应用内 kill ring，并按 Emacs 31.1 默认剪贴板策略（`select-enable-clipboard = t`、`select-enable-primary = nil`、`save-interprogram-paste-before-kill = nil`）通过 GPUI 与系统 `CLIPBOARD` 双向打通：
+  - 所有写入 kill ring 的命令（`C-w`、`M-w`、`C-k`、`M-d`、`M-DEL`，含连续 kill 追加后的合并文本与只读 buffer 的复制型 kill）均将当前 ring 顶项写入系统剪贴板；多光标模式下仅主光标与系统剪贴板同步，次光标保持各自局部 kill ring。
+  - `C-y`（含正文、minibuffer 与 `isearch` 的 `C-y`）先读取系统剪贴板（输入中的 `\r\n` 规范为 `\n`）：若存在非空且不同于上次写入或拉取记录的新文本，则压入 kill ring 顶部（不回写剪贴板、不构成连续 kill 前驱）并用于本次 yank；若剪贴板为空或未变化，则直接使用本地 kill ring 顶项，不重复压入。
+  - 不经由平台 CUA `paste` 回调绕过 `yank`，不读写 Linux `PRIMARY` 选区（暂未包含中键粘贴）。默认最多保留 120 条、不去重，与固定 Emacs 31.1 默认值一致；连续追加仍只占一条。
 
 ### 只读前缀与 field
 

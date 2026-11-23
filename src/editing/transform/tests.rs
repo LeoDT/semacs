@@ -111,7 +111,7 @@ fn pending_prefix_blocks_capture_and_commit_until_cleared() {
             &Keystroke::parse("ctrl-x").unwrap(),
             false,
             &[&map],
-            None,
+            crate::editing::CommandContext::default(),
         )
         .unwrap();
     assert!(target.capture_region(100).is_err());

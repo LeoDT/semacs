@@ -9,7 +9,8 @@ use crate::input::{InputUpdate, SessionToken};
 use crate::text::{ByteOffset, OffsetUtf16, Point, Rope};
 
 use super::{
-    CommandOutcome, CommandViewport, EditTarget, KillRing, RouteError, column, indent, kill, motion,
+    CommandContext, CommandOutcome, EditTarget, KillRing, RouteError, SystemClipboard, column,
+    indent, kill, motion,
 };
 
 pub(super) struct FakeCursor {
@@ -634,7 +635,7 @@ impl EditTarget {
         &mut self,
         token: SessionToken,
         command: Command,
-        viewport: Option<&dyn CommandViewport>,
+        context: CommandContext<'_>,
         primary_append_kill: bool,
     ) -> Result<CommandOutcome, RouteError> {
         let fake_append_kills: Vec<bool> = self
@@ -760,8 +761,13 @@ impl EditTarget {
                         CursorId::Primary => self.goal_column,
                         CursorId::Fake(i) => self.fake_cursors[i].goal_column,
                     };
-                    let dest =
-                        self.vertical_destination_for(&text, pt, &mut goal, forward, viewport)?;
+                    let dest = self.vertical_destination_for(
+                        &text,
+                        pt,
+                        &mut goal,
+                        forward,
+                        context.viewport,
+                    )?;
                     let target = if let Some(dest) = dest {
                         moved = true;
                         dest
@@ -796,11 +802,11 @@ impl EditTarget {
             }
             Command::BeginningOfBuffer | Command::EndOfBuffer => {
                 self.exit_multiple_cursors();
-                self.execute_single_command(token, command, viewport, primary_append_kill)
+                self.execute_single_command(token, command, context, primary_append_kill)
             }
             Command::ScrollUp | Command::ScrollDown | Command::Recenter => {
                 let outcome =
-                    self.execute_single_command(token, command, viewport, primary_append_kill)?;
+                    self.execute_single_command(token, command, context, primary_append_kill)?;
                 self.dedup_cursors();
                 Ok(outcome)
             }
@@ -846,13 +852,17 @@ impl EditTarget {
             | Command::BackwardKillWord
             | Command::KillLine
             | Command::KillRegion
-            | Command::KillRingSave => {
-                self.execute_mc_kill(token, command, primary_append_kill, &fake_append_kills)
-            }
-            Command::Yank => self.execute_mc_yank(token),
+            | Command::KillRingSave => self.execute_mc_kill(
+                token,
+                command,
+                primary_append_kill,
+                &fake_append_kills,
+                context.clipboard,
+            ),
+            Command::Yank => self.execute_mc_yank(token, context.clipboard),
             Command::Undo | Command::UndoRedo => {
                 let outcome =
-                    self.execute_single_command(token, command, viewport, primary_append_kill)?;
+                    self.execute_single_command(token, command, context, primary_append_kill)?;
                 self.deactivate_all_marks();
                 self.dedup_cursors();
                 Ok(outcome)
@@ -915,6 +925,7 @@ impl EditTarget {
         command: Command,
         primary_append: bool,
         fake_appends: &[bool],
+        clipboard: Option<&dyn SystemClipboard>,
     ) -> Result<CommandOutcome, RouteError> {
         let copy = command == Command::KillRingSave;
         if !copy {
@@ -923,7 +934,7 @@ impl EditTarget {
         let text = self.buffer.text();
         let limit = ByteOffset(text.len());
         let mut raw = Vec::new();
-        let mut records: Vec<(KillRing, Rope, bool, bool)> = Vec::new();
+        let mut records: Vec<(CursorId, KillRing, Rope, bool, bool)> = Vec::new();
         let mut any_valid = false;
 
         for id in self.cursor_ids() {
@@ -957,7 +968,13 @@ impl EditTarget {
             };
             any_valid = true;
             let sliced = text.slice(range.start.0..range.end.0);
-            records.push((self.cursor_kill_ring(id).clone(), sliced, append, prepend));
+            records.push((
+                id,
+                self.cursor_kill_ring(id).clone(),
+                sliced,
+                append,
+                prepend,
+            ));
             if !copy && !range.is_empty() {
                 raw.push((id, range, String::new()));
             }
@@ -966,8 +983,9 @@ impl EditTarget {
             return Err(RouteError::EndOfBuffer);
         }
         if copy {
-            for (ring, sliced, append, prepend) in records {
-                ring.record(sliced, append, prepend, false);
+            for (id, ring, sliced, append, prepend) in records {
+                let clip = (id == CursorId::Primary).then_some(clipboard).flatten();
+                ring.record(sliced, append, prepend, false, clip);
             }
             self.deactivate_all_marks();
             return Ok(CommandOutcome::default());
@@ -981,14 +999,19 @@ impl EditTarget {
         } else {
             self.apply_mc_edits(token, raw, EditGroup::Isolated)?
         };
-        for (ring, sliced, append, prepend) in records {
-            ring.record(sliced, append, prepend, true);
+        for (id, ring, sliced, append, prepend) in records {
+            let clip = (id == CursorId::Primary).then_some(clipboard).flatten();
+            ring.record(sliced, append, prepend, true, clip);
         }
         self.deactivate_all_marks();
         Ok(outcome)
     }
 
-    fn execute_mc_yank(&mut self, token: SessionToken) -> Result<CommandOutcome, RouteError> {
+    fn execute_mc_yank(
+        &mut self,
+        token: SessionToken,
+        clipboard: Option<&dyn SystemClipboard>,
+    ) -> Result<CommandOutcome, RouteError> {
         self.buffer.check_editable()?;
         let mut raw = Vec::new();
         let mut any_entry = false;
@@ -999,7 +1022,8 @@ impl EditTarget {
                 CursorId::Fake(i) => self.fake_cursors[i].mark_active,
             };
             self.set_cursor_mark(id, pt, active)?;
-            if let Some(entry) = self.cursor_kill_ring(id).latest() {
+            let clip = (id == CursorId::Primary).then_some(clipboard).flatten();
+            if let Some(entry) = self.cursor_kill_ring(id).current_kill(clip) {
                 any_entry = true;
                 raw.push((id, pt..pt, entry.to_string()));
             }

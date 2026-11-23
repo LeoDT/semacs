@@ -6,9 +6,32 @@ use gpui_kit::{
     App, Bounds, ClipboardItem, InputHandler, Pixels, Point, UTF16Selection, WeakEntity, Window,
 };
 
+use crate::editing::SystemClipboard;
 use crate::input::{DisplaySnapshot, SessionToken};
 use crate::text::{OffsetUtf16, clip_utf16_range, range_to_utf16};
 use crate::view::BufferView;
+
+/// Cross-platform system clipboard adapter backed by GPUI's `App` clipboard API
+/// (Wayland, X11, macOS, Windows, and headless `TestPlatform`).
+pub(crate) struct GpuiClipboard<'a>(&'a App);
+
+impl<'a> GpuiClipboard<'a> {
+    pub(crate) fn new(cx: &'a App) -> Self {
+        Self(cx)
+    }
+}
+
+impl SystemClipboard for GpuiClipboard<'_> {
+    fn read_text(&self) -> Option<String> {
+        let text = self.0.read_from_clipboard()?.text()?;
+        Some(text.replace("\r\n", "\n"))
+    }
+
+    fn write_text(&self, text: &str) {
+        self.0
+            .write_to_clipboard(ClipboardItem::new_string(text.to_owned()));
+    }
+}
 
 pub(crate) enum InputOperation<'a> {
     Replace(Option<Range<OffsetUtf16>>, &'a str),

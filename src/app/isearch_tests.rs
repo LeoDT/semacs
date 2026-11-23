@@ -576,3 +576,27 @@ fn isearch_quote_and_pending_prefix_handle_prefer_character_input(cx: &mut TestA
     });
     dispatch(&mut visual, &["enter"]);
 }
+
+#[gpui::test]
+fn isearch_yank_kill_pulls_external_system_clipboard(cx: &mut TestAppContext) {
+    let (_window, shell, mut visual) = open_shell(cx, "first target_symbol last");
+    cx.write_to_clipboard(gpui::ClipboardItem::new_string("TARGET_SYMBOL".to_owned()));
+
+    dispatch(&mut visual, &["ctrl-s", "ctrl-y"]);
+    shell.read_with(&visual, |shell, cx| {
+        // `search-upper-case = not-yanks` downcases yanked clipboard text while case-folding.
+        assert_eq!(shell.echo_text(), "I-search: target_symbol");
+        assert_eq!(
+            shell.active_view().read(cx).buffer().point(),
+            ByteOffset(19)
+        );
+        assert_eq!(
+            cx.global::<crate::editing::KillRing>()
+                .latest()
+                .unwrap()
+                .to_string(),
+            "TARGET_SYMBOL"
+        );
+    });
+    dispatch(&mut visual, &["enter"]);
+}
