@@ -7,7 +7,7 @@ use crate::text::{ByteOffset, Point, Rope};
 
 use super::{CommandOutcome, EditTarget, RouteError, motion};
 
-fn line_range(
+pub(super) fn line_range(
     text: &Rope,
     point: ByteOffset,
     limit: ByteOffset,

@@ -66,7 +66,10 @@ impl EditTarget {
         }
         self.interrupt_command_chain();
         self.buffer.break_history_group();
-        self.replace_command(target.token, target.range, output)
-            .map_err(|error| error.to_string())
+        let outcome = self
+            .replace_command(target.token, target.range, output)
+            .map_err(|error| error.to_string())?;
+        self.dedup_cursors();
+        Ok(outcome)
     }
 }

@@ -650,6 +650,18 @@ impl BufferView {
             .or(current)
     }
 
+    pub fn cursor_count(&self) -> usize {
+        self.target.cursor_count()
+    }
+
+    pub(crate) fn exit_multiple_cursors(&mut self, cx: &mut Context<Self>) {
+        if self.target.has_multiple_cursors() {
+            self.target.exit_multiple_cursors();
+            cx.notify();
+        }
+    }
+
+    #[cfg(test)]
     fn cursor(&self) -> Option<cursor::Cursor> {
         let layout = self.viewport_layout()?;
         let index = self.index.as_ref()?;
@@ -661,10 +673,48 @@ impl BufferView {
         layout.cursor(offset, row.index)
     }
 
+    fn cursors(&self) -> Vec<cursor::Cursor> {
+        let Some(layout) = self.viewport_layout() else {
+            return Vec::new();
+        };
+        let Some(index) = self.index.as_ref() else {
+            return Vec::new();
+        };
+        if layout.key != *index.key() {
+            return Vec::new();
+        }
+        let snapshot = self.display_snapshot();
+        let mut offsets = Vec::with_capacity(self.target.cursor_count());
+        offsets.push(snapshot.selected_range().end);
+        for secondary in self.target.secondary_cursors() {
+            offsets.push(snapshot.project_committed_offset(secondary));
+        }
+        let mut cursors: Vec<_> = offsets
+            .into_iter()
+            .filter_map(|offset| {
+                let row = index.row_for_offset(offset)?;
+                layout.cursor(offset, row.index)
+            })
+            .collect();
+        cursors.sort_by_key(|cursor| (cursor.row, cursor.range.start, cursor.range.end));
+        cursors
+    }
+
     pub fn region_bounds(&self) -> Vec<Bounds<Pixels>> {
-        self.paint_layout()
-            .map(|layout| layout.region_bounds(self.display_snapshot().region_ranges()))
-            .unwrap_or_default()
+        let Some(layout) = self.paint_layout() else {
+            return Vec::new();
+        };
+        let snapshot = self.display_snapshot();
+        let mut ranges: Vec<Range<ByteOffset>> = snapshot.region_ranges().collect();
+        for secondary in self.target.secondary_regions() {
+            ranges.extend(
+                snapshot
+                    .project_committed_range(secondary)
+                    .into_iter()
+                    .flatten(),
+            );
+        }
+        layout.region_bounds(ranges)
     }
 
     fn retain_paint_layout(&mut self) {
@@ -2091,21 +2141,21 @@ impl Element for TextCanvas {
         });
         BufferView::register_pointer_listeners(self.view.clone(), window, cx);
         let annotation = self.view.read(cx).annotation_lines(window, cx);
-        let (layout, cursor, marked, region, prompt_end, syntax, annotations, committed_text) = {
+        let (layout, cursors, marked, region, prompt_end, syntax, annotations, committed_text) = {
             let view = self.view.read(cx);
             let Some(layout) = view.paint_layout().cloned() else {
                 return;
             };
             let focus = view.focus.is_focused(window);
             let snapshot = view.display_snapshot();
-            let cursor = focus.then(|| view.cursor()).flatten();
+            let cursors = if focus { view.cursors() } else { Vec::new() };
             let syntax = view
                 .buffer()
                 .syntax_display()
                 .filter(|syntax| syntax.snapshot == layout.key.display.committed);
             (
                 layout,
-                cursor,
+                cursors,
                 snapshot.marked_range(),
                 if view.selected {
                     view.region_bounds()
@@ -2237,19 +2287,23 @@ impl Element for TextCanvas {
                             .background,
                     ));
                 }
-                if let Some(cursor) = &cursor {
+                for cursor in &cursors {
                     window.paint_quad(fill(cursor.bounds, cursor_colors.background));
                 }
+                let mut row_cursors: Vec<Range<usize>> = Vec::new();
                 for row in &layout.rows {
                     let origin = layout.origin(row);
-                    let cursor = cursor
-                        .as_ref()
-                        .filter(|cursor| cursor.row == row.source.index);
+                    row_cursors.clear();
+                    for cursor in &cursors {
+                        if cursor.row == row.source.index {
+                            row_cursors.push(cursor.range.start.0..cursor.range.end.0);
+                        }
+                    }
                     for part in &row.parts {
                         part.paint_text(
                             point(origin.x + part.x, origin.y),
                             layout.key.settings.line_height,
-                            cursor,
+                            &row_cursors,
                             &style,
                             window,
                             cx,
@@ -2286,7 +2340,7 @@ impl Element for TextCanvas {
                                 size((right - left).max(px(1.)), px(1.)),
                             );
                             window.paint_quad(fill(underline, cx.theme().foreground));
-                            if let Some(cursor) = &cursor {
+                            for cursor in &cursors {
                                 let overlap = underline.intersect(&cursor.bounds);
                                 if overlap.size.width > px(0.) && overlap.size.height > px(0.) {
                                     window.paint_quad(fill(overlap, cursor_colors.foreground));
@@ -2310,6 +2364,8 @@ mod history_tests;
 mod hscroll_tests;
 #[cfg(test)]
 pub(crate) mod input_tests;
+#[cfg(test)]
+mod mc_tests;
 #[cfg(test)]
 mod minibuffer_tests;
 #[cfg(test)]

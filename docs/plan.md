@@ -2,9 +2,9 @@
 
 本文是当前工作和跨会话待办的唯一入口；维护与归档规则见 [文档说明](README.md#维护规则)。范围与当前方向见 [需求](requirements.md#当前方向v1-后)，行为见 [保真度契约](emacs-fidelity.md)。里程碑按可验收行为划分，不按工期估算。
 
-## 当前状态：F9 已完成，下一步待确认进入 F10（多选区同步编辑）
+## 当前状态：F10 已完成，下一步待确认进入 diff range / revision
 
-R0–F9、日常编辑增强及 F5 后插入项均已完成，交付摘要见 [R0–F1 归档](archive/completed-through-f1.md)、[F2 归档](archive/f2-status.md)、[F3 归档](archive/f3-window-commit.md)、[F4 归档](archive/f4-status-hunks.md)、[F5 归档](archive/f5-history-commit.md)、[F5 后插入项归档](archive/post-f5-insertions.md)、[F6 归档](archive/f6-tree-viewer.md)、[F7 归档](archive/f7-project.md)、[F8 归档](archive/f8-search-rg.md) 与 [F9 归档](archive/f9-isearch.md)。固定源码 / 环境、结果和未测边界见[冻结记录索引](records/README.md)。
+R0–F10、日常编辑增强及 F5 后插入项均已完成，交付摘要见 [R0–F1 归档](archive/completed-through-f1.md)、[F2 归档](archive/f2-status.md)、[F3 归档](archive/f3-window-commit.md)、[F4 归档](archive/f4-status-hunks.md)、[F5 归档](archive/f5-history-commit.md)、[F5 后插入项归档](archive/post-f5-insertions.md)、[F6 归档](archive/f6-tree-viewer.md)、[F7 归档](archive/f7-project.md)、[F8 归档](archive/f8-search-rg.md)、[F9 归档](archive/f9-isearch.md) 与 [F10 归档](archive/f10-multiple-cursors.md)。固定源码 / 环境、结果和未测边界见[冻结记录索引](records/README.md)。
 
 没有已知阻塞性遗留；已接受的性能观察、字体 / 中文输入差异和未测边界保持原结论，不因功能收尾或方向调整视为预算通过。
 
@@ -36,22 +36,21 @@ R0–F9、日常编辑增强及 F5 后插入项均已完成，交付摘要见 [R
 
 参照 GNU Emacs 31.1 `isearch.el` 完成了当前 buffer 与 diff / section 增量搜索（`C-s` / `C-r`）、增量正则搜索（`C-M-s` / `C-M-r`，Rust `regex` 语法）、词 / 符号 / 光标处符号搜索（`M-s w` / `M-s _` / `M-s .`）、搜索历史环、抓取文本、`M-e` 编辑与非增量搜索、折叠 section 自动临时展开 / 立即复折 / 停留保留（`M-s i` 切换跳过）、`isearch` / `isearch.lazy` 高亮以及只读 buffer 下的 IME 中文搜索。交付摘要与未测边界见 [F9 归档](archive/f9-isearch.md)，有效行为见 [F9 契约](emacs-fidelity.md#阶段-f9当前-buffer--diff-增量搜索isearch)。
 
+## F10 多选区同步编辑（已完成）
+
+参照 Emacs `multiple-cursors.el` 完成了多光标管理命令与绑定（`C->`、`C-<`、`C-c C-<`、`C-S-c C-S-c`、`mc/skip-to-*`、`mc/unmark-*` 及 `C-S-<mouse-1>`，保留内置 `C-d`）、Emacs 风格同步编辑（无 `delete-selection-mode`、每光标独立 `kill-ring`、`RET` 退出 / `C-j` 换行 / `C-g` 两段式、IME 同步提交）、多处原子单一 undo 组与连续合并、重合光标去重、同行多光标反色渲染及 mode line `mc:<数量>` 指示。交付摘要与未测边界见 [F10 归档](archive/f10-multiple-cursors.md)，有效行为见 [F10 契约](emacs-fidelity.md#阶段-f10多选区同步编辑multiple-cursors)。
+
 阶段收尾后停下汇报，不自动进入下一阶段。
 
 ## 后续方向（顺序与依赖，尚未排期）
 
-### 1. F10 多选区同步编辑（`multiple-cursors` 风格，已确认核心约束）
-
-- 用户已确认核心交互边界：默认键位走 Emacs `multiple-cursors` 常见约定（不改内置 `C-d` `delete-char`，可通过 JS 配置自绑）；编辑行为贴合 Emacs（不开启 `delete-selection-mode`，选中后按 `Backspace` / `Delete` 删除全部活动选区再输入，整批编辑打包为单一 undo 组）。
-- 细化命令清单（如 `mc/mark-next-like-this`、`mc/mark-previous-like-this`、`mc/skip-to-next-like-this`、`mc/unmark-next-like-this`、`mc/mark-all-like-this`）及支持同步的编辑/移动命令集合后进入实现。
-
-### 2. diff range / revision
+### 1. diff range / revision
 
 - 在现有 status / diff / log / revision 查看器上增加任意 revision 与 range 的查看；命令名、输入格式与从 log 选择 range 的交互待定。
 - 比较身份固定到解析后的 OID / range，读取失败保留旧投影；不自动保存编辑 buffer。
 - 不扩展 Git 写工作流；已交付的 stage / commit / amend / reword 维持现有契约。
 
-### 3. 自动 / 智能缩进（仅记录）
+### 2. 自动 / 智能缩进（仅记录）
 
 - 需求保留；触发时机、语言范围、tree-sitter 规则与是否包含格式化均未定，不排期。
 - 复用 [D24](decisions.md#d24-缩进边界) 的缩进 / 编辑分离和唯一 Edit 入口；不引入 major-mode 插件框架。

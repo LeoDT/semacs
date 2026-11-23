@@ -16,6 +16,15 @@ struct State {
 pub struct KillRing(Rc<RefCell<State>>);
 
 impl KillRing {
+    /// Creates an independent copy of the current kill ring entries for a
+    /// secondary cursor while leaving the kill-append chain broken.
+    pub(super) fn fork(&self) -> Self {
+        let state = self.0.borrow();
+        Self(Rc::new(RefCell::new(State {
+            entries: state.entries.clone(),
+            last_was_kill: false,
+        })))
+    }
     pub fn latest(&self) -> Option<Rope> {
         self.0.borrow().entries.front().cloned()
     }

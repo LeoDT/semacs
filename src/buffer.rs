@@ -86,6 +86,18 @@ pub struct Edit<'a> {
     pub source: EditSource,
 }
 
+#[derive(Clone, Debug)]
+pub(crate) struct BatchEdit<'a> {
+    pub range: Range<ByteOffset>,
+    pub text: &'a str,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct AppliedBatchEdit {
+    pub summary: AppliedEdit,
+    pub new_ranges: Vec<Range<ByteOffset>>,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AppliedEdit {
     pub before: SnapshotId,
@@ -242,16 +254,39 @@ impl Buffer {
         }
     }
 
-    fn track_point(&self) -> Rc<TrackedPoint> {
-        let point = Rc::new(TrackedPoint::new(self.point().0));
+    fn track_point_at(&self, offset: ByteOffset) -> Rc<TrackedPoint> {
+        let point = Rc::new(TrackedPoint::new(offset.0));
         let mut doc = self.document.borrow_mut();
         doc.points.retain(|point| point.strong_count() > 0);
         doc.points.push(Rc::downgrade(&point));
         point
     }
 
+    fn track_point(&self) -> Rc<TrackedPoint> {
+        self.track_point_at(self.point())
+    }
+
     pub(crate) fn point_marker(&self) -> PointMarker {
         PointMarker(self.track_point())
+    }
+
+    pub(crate) fn point_marker_at(&self, offset: ByteOffset) -> Result<PointMarker, EditError> {
+        if !self.text().is_char_boundary(offset.0) {
+            return Err(EditError::InvalidRange);
+        }
+        Ok(PointMarker(self.track_point_at(offset)))
+    }
+
+    pub(crate) fn set_marker(
+        &self,
+        marker: &PointMarker,
+        offset: ByteOffset,
+    ) -> Result<(), EditError> {
+        if !self.text().is_char_boundary(offset.0) {
+            return Err(EditError::InvalidRange);
+        }
+        marker.0.set(offset.0);
+        Ok(())
     }
 
     pub fn new_view(&self) -> Buffer {
@@ -642,29 +677,89 @@ impl Buffer {
         }
         Ok(())
     }
-    fn validate_edit(&self, edit: &Edit<'_>) -> Result<(), EditError> {
-        self.validate_snapshot(edit.snapshot)?;
-        self.validate_range(&edit.range)?;
-        if !(edit.range.is_empty() && edit.text.is_empty()) {
-            self.check_writable_range(edit.range.clone())?;
+    fn validate_batch(
+        &self,
+        snapshot: SnapshotId,
+        edits: &[BatchEdit<'_>],
+    ) -> Result<(), EditError> {
+        self.validate_snapshot(snapshot)?;
+        let mut previous_end = None;
+        for edit in edits {
+            self.validate_range(&edit.range)?;
+            if let Some(end) = previous_end
+                && edit.range.start < end
+            {
+                return Err(EditError::InvalidRange);
+            }
+            if !(edit.range.is_empty() && edit.text.is_empty()) {
+                self.check_writable_range(edit.range.clone())?;
+            }
+            previous_end = Some(edit.range.end);
         }
         Ok(())
     }
-    fn apply_edit(&mut self, edit: Edit<'_>) -> Result<Option<AppliedEdit>, EditError> {
-        self.validate_edit(&edit)?;
-        if edit.range.is_empty() && edit.text.is_empty() {
+
+    fn apply_batch(
+        &mut self,
+        snapshot: SnapshotId,
+        edits: &[BatchEdit<'_>],
+        source: EditSource,
+        primary_index: Option<usize>,
+    ) -> Result<Option<AppliedBatchEdit>, EditError> {
+        self.validate_batch(snapshot, edits)?;
+        if edits
+            .iter()
+            .all(|edit| edit.range.is_empty() && edit.text.is_empty())
+        {
             return Ok(None);
         }
-        Ok(Some(self.apply_validated_edit(edit)))
+        Ok(Some(self.apply_validated_batch(
+            edits,
+            source,
+            primary_index,
+        )))
     }
 
     fn apply_validated_edit(&mut self, edit: Edit<'_>) -> AppliedEdit {
+        self.apply_validated_batch(
+            &[BatchEdit {
+                range: edit.range,
+                text: edit.text,
+            }],
+            edit.source,
+            Some(0),
+        )
+        .summary
+    }
+
+    fn apply_validated_batch(
+        &mut self,
+        edits: &[BatchEdit<'_>],
+        source: EditSource,
+        primary_index: Option<usize>,
+    ) -> AppliedBatchEdit {
+        let mut delta: isize = 0;
+        let mut new_ranges = Vec::with_capacity(edits.len());
+        let mut first_active = None;
+        let mut last_active = None;
+        for (index, edit) in edits.iter().enumerate() {
+            let new_start = (edit.range.start.0 as isize + delta) as usize;
+            let new_end = new_start + edit.text.len();
+            new_ranges.push(ByteOffset(new_start)..ByteOffset(new_end));
+            let removed = edit.range.end.0 - edit.range.start.0;
+            delta += edit.text.len() as isize - removed as isize;
+            if !edit.range.is_empty() || !edit.text.is_empty() {
+                if first_active.is_none() {
+                    first_active = Some(index);
+                }
+                last_active = Some(index);
+            }
+        }
+        let first_active = first_active.expect("non-empty batch edit");
+        let last_active = last_active.expect("non-empty batch edit");
+
         let mut doc = self.document.borrow_mut();
         let before = doc.snapshot.id;
-        let old_end = edit.range.end.0;
-        let start = edit.range.start.0;
-        let removed = old_end - start;
-        let inserted = edit.text.len();
         let version = TextVersion(
             before
                 .version
@@ -672,51 +767,71 @@ impl Buffer {
                 .checked_add(1)
                 .expect("text version exhausted"),
         );
-        doc.snapshot.text.replace(start..old_end, edit.text);
         doc.snapshot.id.version = version;
         doc.annotations = None;
-        doc.syntax
-            .edited(doc.snapshot.clone(), start..old_end, start + inserted);
+
+        for edit in edits.iter().rev() {
+            if edit.range.is_empty() && edit.text.is_empty() {
+                continue;
+            }
+            let start = edit.range.start.0;
+            let old_end = edit.range.end.0;
+            let inserted = edit.text.len();
+            doc.snapshot.text.replace(start..old_end, edit.text);
+            doc.syntax
+                .edited(doc.snapshot.clone(), start..old_end, start + inserted);
+        }
+        let map_offset = |p: usize| -> usize {
+            let mut delta: isize = 0;
+            for (edit, new_range) in edits.iter().zip(&new_ranges) {
+                if edit.range.is_empty() && edit.text.is_empty() {
+                    continue;
+                }
+                let start = edit.range.start.0;
+                let old_end = edit.range.end.0;
+                if p <= start {
+                    return (p as isize + delta) as usize;
+                }
+                if p <= old_end {
+                    return new_range.start.0;
+                }
+                delta += edit.text.len() as isize - (old_end - start) as isize;
+            }
+            (p as isize + delta) as usize
+        };
         doc.points.retain(|weak| {
             if let Some(point) = weak.upgrade() {
-                if !Rc::ptr_eq(&point, &self.point) {
-                    let p = point.get();
-                    let adjusted = if p <= start {
-                        p
-                    } else if p <= old_end {
-                        start
-                    } else {
-                        p - removed + inserted
-                    };
-                    point.set(adjusted);
+                if primary_index.is_none() || !Rc::ptr_eq(&point, &self.point) {
+                    point.set(map_offset(point.get()));
                 }
                 true
             } else {
                 false
             }
         });
-        self.point.set(start + inserted);
-        let mark = doc.mark.position().map(|mut mark| {
-            if mark.0 > old_end {
-                mark.0 = mark.0 - removed + inserted;
-            } else if mark.0 > start {
-                mark = ByteOffset(start);
-            }
-            mark
-        });
+        let mark = doc
+            .mark
+            .position()
+            .map(|mark| ByteOffset(map_offset(mark.0)));
         doc.mark.set(mark, false);
+        if let Some(index) = primary_index {
+            self.point.set(new_ranges[index].end.0);
+        }
         doc.modified = true;
         let after = doc.snapshot.id;
-        let applied = AppliedEdit {
+        let summary = AppliedEdit {
             before,
             after,
-            new_range: ByteOffset(start)..ByteOffset(start + inserted),
-            old_range: edit.range,
-            source: edit.source,
+            old_range: edits[first_active].range.start..edits[last_active].range.end,
+            new_range: new_ranges[first_active].start..new_ranges[last_active].end,
+            source,
         };
-        doc.last_edit = Some(applied.clone());
+        doc.last_edit = Some(summary.clone());
         doc.touch();
-        applied
+        AppliedBatchEdit {
+            summary,
+            new_ranges,
+        }
     }
 }
 

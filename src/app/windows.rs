@@ -285,6 +285,7 @@ impl AppShell {
                     buffer.format(),
                     buffer.is_modified(),
                     buffer.line_column(),
+                    editor.read(cx).cursor_count(),
                     selected,
                     cx,
                 );

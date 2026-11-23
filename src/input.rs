@@ -4,7 +4,7 @@ use std::ops::Range;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::buffer::{
-    AppliedEdit, Buffer, BufferId, Edit, EditError, EditGroup, EditSource, SnapshotId,
+    AppliedEdit, BatchEdit, Buffer, BufferId, Edit, EditError, EditGroup, EditSource, SnapshotId,
 };
 use crate::text::{ByteOffset, OffsetUtf16, Rope, clip_utf16_range, range_to_utf16};
 
@@ -115,6 +115,32 @@ impl DisplaySnapshot {
         self.marked.clone()
     }
 
+    pub(crate) fn project_committed_offset(&self, offset: ByteOffset) -> ByteOffset {
+        match &self.marked {
+            Some(marked) if offset > marked.start => {
+                ByteOffset(offset.0 + (marked.end.0 - marked.start.0))
+            }
+            _ => offset,
+        }
+    }
+
+    pub(crate) fn project_committed_range(
+        &self,
+        range: Range<ByteOffset>,
+    ) -> [Option<Range<ByteOffset>>; 2] {
+        let projected =
+            self.project_committed_offset(range.start)..self.project_committed_offset(range.end);
+        match &self.marked {
+            Some(marked) => [
+                Some(projected.start..projected.end.min(marked.start))
+                    .filter(|range| !range.is_empty()),
+                Some(projected.start.max(marked.end)..projected.end)
+                    .filter(|range| !range.is_empty()),
+            ],
+            None => [Some(projected).filter(|range| !range.is_empty()), None],
+        }
+    }
+
     pub fn region_ranges(&self) -> impl Iterator<Item = Range<ByteOffset>> {
         let ranges = match (&self.region, &self.marked) {
             (Some(region), Some(marked)) => [
@@ -174,6 +200,11 @@ impl From<EditError> for InputError {
 pub struct InputUpdate {
     pub edit: Option<AppliedEdit>,
     pub change: DisplayChange,
+}
+
+pub(crate) struct BatchInputUpdate {
+    pub update: InputUpdate,
+    pub ranges: Vec<(Option<usize>, Range<ByteOffset>)>,
 }
 
 struct Preedit {
@@ -330,6 +361,59 @@ impl InputSession {
                 new_range: range.start..ByteOffset(range.start.0 + text.len()),
             },
         })
+    }
+
+    pub(crate) fn command_edit_batch_grouped(
+        &mut self,
+        buffer: &mut Buffer,
+        token: SessionToken,
+        edits: &[BatchEdit<'_>],
+        group: EditGroup,
+        primary_index: Option<usize>,
+    ) -> Result<(InputUpdate, Vec<Range<ByteOffset>>), InputError> {
+        self.guard_command(buffer, token)?;
+        let before = self.display_id(buffer);
+        let applied = buffer.edit_batch_grouped(
+            buffer.snapshot_id(),
+            edits,
+            EditSource::Command,
+            group,
+            primary_index,
+        )?;
+        self.base = buffer.snapshot_id();
+        if let Some(applied) = applied {
+            self.invalidate_display();
+            let old_range = applied.summary.old_range.clone();
+            let new_range = applied.summary.new_range.clone();
+            let new_ranges = applied.new_ranges;
+            Ok((
+                InputUpdate {
+                    edit: Some(applied.summary),
+                    change: DisplayChange {
+                        before,
+                        after: self.display_id(buffer),
+                        old_range,
+                        new_range,
+                    },
+                },
+                new_ranges,
+            ))
+        } else {
+            let point = buffer.point();
+            let ranges = edits.iter().map(|edit| edit.range.clone()).collect();
+            Ok((
+                InputUpdate {
+                    edit: None,
+                    change: DisplayChange {
+                        before,
+                        after: self.display_id(buffer),
+                        old_range: point..point,
+                        new_range: point..point,
+                    },
+                },
+                ranges,
+            ))
+        }
     }
 
     pub fn replay_history(
@@ -559,6 +643,238 @@ impl InputSession {
             new_range: replacement.inserted,
         };
         Ok(InputUpdate { edit, change })
+    }
+
+    pub(crate) fn replace_text_batch(
+        &mut self,
+        buffer: &mut Buffer,
+        token: SessionToken,
+        range: Option<Range<OffsetUtf16>>,
+        text: &str,
+        extra_offsets: &[ByteOffset],
+    ) -> Result<BatchInputUpdate, InputError> {
+        if range.is_some() {
+            let update = self.replace_text(buffer, token, range, text)?;
+            return Ok(BatchInputUpdate {
+                update,
+                ranges: Vec::new(),
+            });
+        }
+        self.guard_writable(buffer, token)?;
+        let replacement = self.prepare_replacement(buffer, None, text)?;
+        let end =
+            replacement.display.len() - (buffer.text().len() - replacement.committed_range.end.0);
+        let inserted: String = replacement
+            .display
+            .chunks_in_range(replacement.committed_range.start.0..end)
+            .collect();
+        let group = if !self.is_composing()
+            && replacement.committed_range.is_empty()
+            && !text.contains(['\n', '\r'])
+        {
+            EditGroup::Insert
+        } else {
+            EditGroup::Isolated
+        };
+
+        let mut items: Vec<(Option<usize>, Range<ByteOffset>)> = Vec::new();
+        let mut skipped_to_primary: Vec<usize> = Vec::new();
+        let mut seen_offsets: Vec<ByteOffset> = Vec::new();
+        items.push((None, replacement.committed_range.clone()));
+        for (idx, &offset) in extra_offsets.iter().enumerate() {
+            if offset >= replacement.committed_range.start
+                && offset <= replacement.committed_range.end
+            {
+                skipped_to_primary.push(idx);
+                continue;
+            }
+            if seen_offsets.contains(&offset) {
+                continue;
+            }
+            seen_offsets.push(offset);
+            items.push((Some(idx), offset..offset));
+        }
+        items.sort_by_key(|(_, r)| (r.start, r.end));
+        let primary_pos = items
+            .iter()
+            .position(|(id, _)| id.is_none())
+            .expect("primary edit present");
+        let batch: Vec<BatchEdit<'_>> = items
+            .iter()
+            .map(|(_, r)| BatchEdit {
+                range: r.clone(),
+                text: inserted.as_str(),
+            })
+            .collect();
+
+        let preedit_info = self
+            .preedit
+            .as_ref()
+            .map(|p| (p.anchor, p.marked.end.0 - p.marked.start.0));
+        let applied = buffer.edit_batch_grouped(
+            buffer.snapshot_id(),
+            &batch,
+            EditSource::PlatformInput,
+            group,
+            Some(primary_pos),
+        )?;
+        let (edit, new_ranges) = match applied {
+            Some(applied) => (Some(applied.summary), applied.new_ranges),
+            None => (None, items.iter().map(|(_, r)| r.clone()).collect()),
+        };
+        let primary_new_range = new_ranges[primary_pos].clone();
+        buffer
+            .set_point(primary_new_range.end)
+            .expect("valid projected caret");
+        buffer.deactivate_mark();
+        self.base = buffer.snapshot_id();
+        if self.preedit.take().is_some() {
+            self.token = SessionToken::new(self.token.target);
+        }
+        self.invalidate_display();
+
+        let (old_range, new_range) = if let Some(ref summary) = edit {
+            let old_start = summary.old_range.start.min(replacement.replaced.start);
+            let old_end = match preedit_info {
+                Some((anchor, marked_len)) => {
+                    let projected_end = if summary.old_range.end >= anchor {
+                        ByteOffset(summary.old_range.end.0 + marked_len)
+                    } else {
+                        summary.old_range.end
+                    };
+                    projected_end.max(replacement.replaced.end)
+                }
+                None => summary.old_range.end.max(replacement.replaced.end),
+            };
+            (old_start..old_end, summary.new_range.clone())
+        } else {
+            (replacement.replaced, replacement.inserted)
+        };
+
+        let change = DisplayChange {
+            before: replacement.before,
+            after: DisplayId {
+                committed: buffer.snapshot_id(),
+                session: self.token,
+                revision: self.revision,
+            },
+            old_range,
+            new_range,
+        };
+        let mut mapped: Vec<(Option<usize>, Range<ByteOffset>)> = items
+            .into_iter()
+            .map(|(id, _)| id)
+            .zip(new_ranges)
+            .collect();
+        for idx in skipped_to_primary {
+            mapped.push((Some(idx), primary_new_range.clone()));
+        }
+        Ok(BatchInputUpdate {
+            update: InputUpdate { edit, change },
+            ranges: mapped,
+        })
+    }
+
+    pub(crate) fn commit_preedit_batch(
+        &mut self,
+        buffer: &mut Buffer,
+        extra_offsets: &[ByteOffset],
+    ) -> Result<Option<BatchInputUpdate>, InputError> {
+        self.validate(buffer, self.token)?;
+        let Some(preedit) = self.preedit.as_ref() else {
+            return Ok(None);
+        };
+        self.guard_writable(buffer, self.token)?;
+        let before = self.display_id(buffer);
+        let text: String = preedit
+            .display
+            .chunks_in_range(preedit.marked.start.0..preedit.marked.end.0)
+            .collect();
+        let anchor = preedit.anchor;
+        let marked_len = preedit.marked.end.0 - preedit.marked.start.0;
+        let mut items: Vec<(Option<usize>, Range<ByteOffset>)> = Vec::new();
+        let mut skipped_to_primary: Vec<usize> = Vec::new();
+        let mut seen_offsets: Vec<ByteOffset> = Vec::new();
+        items.push((None, anchor..anchor));
+        for (idx, &offset) in extra_offsets.iter().enumerate() {
+            if offset == anchor {
+                skipped_to_primary.push(idx);
+                continue;
+            }
+            if seen_offsets.contains(&offset) {
+                continue;
+            }
+            seen_offsets.push(offset);
+            items.push((Some(idx), offset..offset));
+        }
+        items.sort_by_key(|(_, r)| r.start);
+        let primary_pos = items
+            .iter()
+            .position(|(id, _)| id.is_none())
+            .expect("primary edit present");
+        let batch: Vec<BatchEdit<'_>> = items
+            .iter()
+            .map(|(_, r)| BatchEdit {
+                range: r.clone(),
+                text: text.as_str(),
+            })
+            .collect();
+        let applied = buffer.edit_batch_grouped(
+            buffer.snapshot_id(),
+            &batch,
+            EditSource::PlatformInput,
+            EditGroup::Isolated,
+            Some(primary_pos),
+        )?;
+        let preedit = self.preedit.take().expect("validated preedit");
+        let (edit, new_ranges) = match applied {
+            Some(applied) => (Some(applied.summary), applied.new_ranges),
+            None => (None, items.iter().map(|(_, r)| r.clone()).collect()),
+        };
+        let primary_new_range = new_ranges[primary_pos].clone();
+        buffer
+            .set_point(primary_new_range.end)
+            .expect("valid committed caret");
+        buffer.deactivate_mark();
+        self.base = buffer.snapshot_id();
+        self.token = SessionToken::new(self.token.target);
+        self.invalidate_display();
+        let (old_range, new_range) = if let Some(ref summary) = edit {
+            let old_start = summary.old_range.start.min(preedit.marked.start);
+            let old_end = if summary.old_range.end >= anchor {
+                ByteOffset(summary.old_range.end.0 + marked_len)
+            } else {
+                summary.old_range.end
+            }
+            .max(preedit.marked.end);
+            (old_start..old_end, summary.new_range.clone())
+        } else {
+            (anchor..anchor, anchor..anchor)
+        };
+        let mut mapped: Vec<(Option<usize>, Range<ByteOffset>)> = items
+            .into_iter()
+            .map(|(id, _)| id)
+            .zip(new_ranges)
+            .collect();
+        for idx in skipped_to_primary {
+            mapped.push((Some(idx), primary_new_range.clone()));
+        }
+        Ok(Some(BatchInputUpdate {
+            update: InputUpdate {
+                edit,
+                change: DisplayChange {
+                    before,
+                    after: DisplayId {
+                        committed: buffer.snapshot_id(),
+                        session: self.token,
+                        revision: self.revision,
+                    },
+                    old_range,
+                    new_range,
+                },
+            },
+            ranges: mapped,
+        }))
     }
 
     /// Finish composition without a platform replacement: commit the visible projection once.

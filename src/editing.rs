@@ -15,6 +15,7 @@ use crate::keymap::{Dispatch, Keymap, KeymapState};
 use crate::text::{ByteOffset, OffsetUtf16, Point, Rope};
 
 mod column;
+mod cursors;
 mod field;
 mod indent;
 mod kill;
@@ -42,6 +43,7 @@ pub enum RouteError {
     EmptyKillRing,
     NoUndoInformation,
     NoRedoInformation,
+    MultipleCursorsUnsupported,
     Unavailable(Command),
 }
 
@@ -81,6 +83,9 @@ impl fmt::Display for RouteError {
             Self::EmptyKillRing => f.write_str("Kill ring is empty"),
             Self::NoUndoInformation => f.write_str("No further undo information"),
             Self::NoRedoInformation => f.write_str("No further redo information"),
+            Self::MultipleCursorsUnsupported => {
+                f.write_str("Multiple cursors are not supported in this buffer")
+            }
             Self::Unavailable(command) => write!(f, "{} is not available yet", command.name()),
             Self::Input(error) => write!(f, "Input rejected: {error:?}"),
         }
@@ -155,6 +160,7 @@ pub struct EditTarget {
     goal_column: Option<usize>,
     recenter_position: RecenterPosition,
     field: Option<field::FieldBoundary>,
+    fake_cursors: Vec<cursors::FakeCursor>,
 }
 
 impl EditTarget {
@@ -172,6 +178,7 @@ impl EditTarget {
             goal_column: None,
             recenter_position: RecenterPosition::Center,
             field: None,
+            fake_cursors: Vec::new(),
         }
     }
 
@@ -205,10 +212,15 @@ impl EditTarget {
     }
 
     pub(crate) fn synchronize_buffer(&mut self, old_len: usize) -> Option<DisplayChange> {
+        if self.allows_multiple_cursors().is_err() {
+            self.exit_multiple_cursors();
+        } else {
+            self.dedup_cursors();
+        }
         let change = self.input.synchronize_buffer(&self.buffer, old_len)?;
         self.keys.clear();
         self.last_command = None;
-        self.goal_column = None;
+        self.clear_all_goal_columns();
         Some(change)
     }
 
@@ -229,6 +241,9 @@ impl EditTarget {
     pub fn set_read_only(&mut self, read_only: bool) {
         self.buffer.break_history_group();
         self.buffer.set_read_only(read_only);
+        if read_only {
+            self.exit_multiple_cursors();
+        }
     }
 
     pub fn mark_saved_at(&mut self, point: SavePoint) -> Result<(), EditError> {
@@ -405,9 +420,14 @@ impl EditTarget {
         }
         if !matches!(
             self.last_command,
-            Some(Command::NextLine | Command::PreviousLine)
+            Some(
+                Command::NextLine
+                    | Command::PreviousLine
+                    | Command::McMarkNextLikeThis
+                    | Command::McMarkPreviousLikeThis
+            )
         ) {
-            self.goal_column = None;
+            self.clear_all_goal_columns();
         }
         if self.last_command != Some(Command::Recenter) {
             self.recenter_position = RecenterPosition::Center;
@@ -419,7 +439,24 @@ impl EditTarget {
             self.buffer.break_history_group();
         }
         let append_kill = self.kill_ring.begin_command();
-        let result = self.execute_command(token, command, viewport, append_kill);
+        let result = if matches!(
+            command,
+            Command::McMarkNextLikeThis
+                | Command::McMarkPreviousLikeThis
+                | Command::McSkipToNextLikeThis
+                | Command::McSkipToPreviousLikeThis
+                | Command::McUnmarkNextLikeThis
+                | Command::McUnmarkPreviousLikeThis
+                | Command::McMarkAllLikeThis
+                | Command::McEditLines
+        ) {
+            self.break_all_kill_chains();
+            self.execute_mc_management(command)
+        } else if self.has_multiple_cursors() {
+            self.execute_mc_command(token, command, viewport, append_kill)
+        } else {
+            self.execute_single_command(token, command, viewport, append_kill)
+        };
         if result.is_err() {
             self.buffer.break_history_group();
         }
@@ -427,7 +464,7 @@ impl EditTarget {
         result
     }
 
-    fn execute_command(
+    pub(super) fn execute_single_command(
         &mut self,
         token: SessionToken,
         command: Command,
@@ -639,6 +676,20 @@ impl EditTarget {
         forward: bool,
         viewport: Option<&dyn CommandViewport>,
     ) -> Result<Option<ByteOffset>, RouteError> {
+        let mut goal = self.goal_column;
+        let result = self.vertical_destination_for(text, point, &mut goal, forward, viewport);
+        self.goal_column = goal;
+        result
+    }
+
+    pub(super) fn vertical_destination_for(
+        &self,
+        text: &Rope,
+        point: ByteOffset,
+        goal_column: &mut Option<usize>,
+        forward: bool,
+        viewport: Option<&dyn CommandViewport>,
+    ) -> Result<Option<ByteOffset>, RouteError> {
         let sections = self.buffer.sections();
         let (current, target) = match (sections.as_ref(), viewport) {
             (None, Some(viewport)) => {
@@ -660,13 +711,12 @@ impl EditTarget {
                 )
             }
         };
-        let goal = *self
-            .goal_column
-            .get_or_insert_with(|| column::column(text, current.start.0..point.0));
+        let goal =
+            *goal_column.get_or_insert_with(|| column::column(text, current.start.0..point.0));
         Ok(target.map(|target| column::offset(text, target.start.0..target.end.0, goal)))
     }
 
-    fn line_range(text: &Rope, row: u32) -> Range<ByteOffset> {
+    pub(super) fn line_range(text: &Rope, row: u32) -> Range<ByteOffset> {
         let start = text.point_to_offset(Point::new(row, 0));
         ByteOffset(start)..ByteOffset(start + text.line_len(row) as usize)
     }
@@ -696,6 +746,7 @@ impl EditTarget {
             text,
             EditGroup::Isolated,
         )?;
+        self.dedup_cursors();
         self.interrupt_command_chain();
         Ok(update)
     }
@@ -751,6 +802,7 @@ impl EditTarget {
         point: ByteOffset,
     ) -> Result<(), RouteError> {
         self.input.guard_command(&self.buffer, token)?;
+        self.exit_multiple_cursors();
         self.buffer.set_point(point)?;
         self.buffer.break_history_group();
         self.keys.clear();
@@ -768,6 +820,7 @@ impl EditTarget {
         }
         let before = self.buffer.point();
         self.buffer.set_point(point)?;
+        self.dedup_cursors();
         if selected && self.buffer.point() != before {
             self.buffer.deactivate_pointer_mark();
         }
@@ -784,6 +837,7 @@ impl EditTarget {
         point: ByteOffset,
     ) -> Result<(), RouteError> {
         self.input.guard_command(&self.buffer, token)?;
+        self.exit_multiple_cursors();
         self.buffer.set_point(point)?;
         let point = self.buffer.point();
         self.buffer.set_pointer_mark(point)?;
@@ -815,7 +869,7 @@ impl EditTarget {
 
     fn interrupt_command_chain(&mut self) {
         self.last_command = None;
-        self.kill_ring.break_chain();
+        self.break_all_kill_chains();
     }
 
     fn guard_input(&self, token: SessionToken) -> Result<(), RouteError> {
@@ -833,6 +887,9 @@ impl EditTarget {
         text: &str,
     ) -> Result<InputUpdate, RouteError> {
         self.guard_input(token)?;
+        if self.has_multiple_cursors() {
+            return self.replace_text_multi(token, range, text);
+        }
         let update = self
             .input
             .replace_text(&mut self.buffer, token, range, text)?;
@@ -851,6 +908,7 @@ impl EditTarget {
         let update = self
             .input
             .replace_and_mark(&mut self.buffer, token, range, text, selected)?;
+        self.dedup_cursors();
         if update.edit.is_some() {
             self.interrupt_command_chain();
         }
@@ -862,6 +920,9 @@ impl EditTarget {
         token: SessionToken,
     ) -> Result<Option<InputUpdate>, RouteError> {
         self.guard_input(token)?;
+        if self.has_multiple_cursors() {
+            return self.commit_preedit_multi();
+        }
         let update = self.input.commit_preedit(&mut self.buffer)?;
         if update.is_some() {
             self.interrupt_command_chain();

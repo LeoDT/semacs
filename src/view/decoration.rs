@@ -1,4 +1,4 @@
-use super::{RowPart, ViewportLayout, cursor::Cursor};
+use super::{RowPart, ViewportLayout};
 use crate::syntax::DisplayHighlights;
 use crate::theme::{StyleOverride, StyleRole, ThemeSettings};
 use gpui_kit::{
@@ -110,10 +110,10 @@ impl<'a> TextStyle<'a> {
         })
     }
 
-    fn runs(
+    pub(super) fn runs(
         &self,
         range: Range<usize>,
-        cursor: Option<Range<usize>>,
+        cursors: &[Range<usize>],
     ) -> SmallVec<[DecorationRun; 4]> {
         let mut syntax = self
             .syntax
@@ -216,12 +216,15 @@ impl<'a> TextStyle<'a> {
                     end = end.min(current.end);
                 }
             }
-            if let Some(cursor) = &cursor {
-                if position < cursor.start {
-                    end = end.min(cursor.start);
-                } else if position < cursor.end {
-                    attributes.foreground = self.styles[StyleRole::Cursor as usize].foreground;
-                    end = end.min(cursor.end);
+            if !cursors.is_empty() {
+                let index = cursors.partition_point(|cursor| cursor.end <= position);
+                if let Some(cursor) = cursors.get(index) {
+                    if cursor.start <= position {
+                        attributes.foreground = self.styles[StyleRole::Cursor as usize].foreground;
+                        end = end.min(cursor.end);
+                    } else {
+                        end = end.min(cursor.start);
+                    }
                 }
             }
             let color = attributes.foreground.expect("resolved foreground");
@@ -301,7 +304,7 @@ impl RowPart {
         window: &mut Window,
     ) {
         let mut offset = 0;
-        for run in style.runs(self.range.start.0..self.range.end.0, None) {
+        for run in style.runs(self.range.start.0..self.range.end.0, &[]) {
             let end = offset + run.len as usize;
             if let Some(color) = run.background_color {
                 let left = self
@@ -328,7 +331,7 @@ impl RowPart {
         &self,
         origin: Point<Pixels>,
         line_height: Pixels,
-        cursor: Option<&Cursor>,
+        cursors: &[Range<usize>],
         style: &TextStyle<'_>,
         window: &mut Window,
         cx: &mut App,
@@ -336,8 +339,7 @@ impl RowPart {
         let Some(line) = &self.line else {
             return;
         };
-        let cursor = cursor.map(|cursor| cursor.range.start.0..cursor.range.end.0);
-        let mut runs = style.runs(self.range.start.0..self.range.end.0, cursor);
+        let mut runs = style.runs(self.range.start.0..self.range.end.0, cursors);
         for run in &mut runs {
             run.background_color = None;
         }
@@ -406,7 +408,7 @@ mod tests {
         let annotations = buffer.annotations().unwrap();
         let style =
             TextStyle::new(&theme, Some(&syntax), None, 0).with_annotations(Some(&annotations));
-        let runs = style.runs(0..3, Some(0..1));
+        let runs = style.runs(0..3, std::slice::from_ref(&(0..1)));
         assert_eq!(runs[0].color, theme.style(StyleRole::Cursor).foreground);
         assert_eq!(
             runs[0].background_color,
@@ -421,7 +423,7 @@ mod tests {
         assert_eq!(runs.last().unwrap().background_color, None);
         let style = TextStyle::new(&theme, Some(&syntax), Some(1..4), 0)
             .with_annotations(Some(&annotations));
-        let runs = style.runs(1..4, None);
+        let runs = style.runs(1..4, &[]);
         assert_eq!(runs.len(), 1);
         assert_eq!(runs[0].color, theme.style(StyleRole::Default).foreground);
         assert!(runs[0].background_color.is_none());
@@ -463,7 +465,7 @@ mod tests {
             Some(theme.style(StyleRole::SectionCurrent).background)
         );
         assert_eq!(current.named_line_background(B(4)), None);
-        let runs = current.runs(0..4, Some(0..1));
+        let runs = current.runs(0..4, std::slice::from_ref(&(0..1)));
         assert_eq!(runs[0].color, theme.style(StyleRole::Cursor).foreground);
         assert_eq!(
             runs[1].color,
@@ -476,7 +478,7 @@ mod tests {
         let partial = TextStyle::new(&theme, None, None, 0)
             .with_named_ranges(&named)
             .with_current_section(Some(B(1)..B(2)));
-        let runs = partial.runs(0..2, None);
+        let runs = partial.runs(0..2, &[]);
         assert_eq!(runs.len(), 2);
         assert_eq!(runs[0].color, theme.style(StyleRole::DiffAdded).foreground);
         assert_eq!(
@@ -496,7 +498,7 @@ mod tests {
         }
         for cursor in [None, Some(0..1), Some(2..5), Some(4..7)] {
             let style = TextStyle::new(&theme, None, None, 4);
-            let runs = style.runs(0..8, cursor.clone());
+            let runs = style.runs(0..8, cursor.as_slice());
             let mut offset = 0;
             for run in &runs {
                 for byte in offset..offset + run.len as usize {
@@ -539,7 +541,7 @@ mod tests {
         let marked = 1..4;
         let cursor = 3..7;
         let style = TextStyle::new(&theme, Some(&syntax), Some(marked.clone()), 1);
-        let runs = style.runs(0..text.len() + marked.len(), Some(cursor.clone()));
+        let runs = style.runs(0..text.len() + marked.len(), std::slice::from_ref(&cursor));
         assert!(runs.spilled());
         let mut offset = 0;
         for run in runs {
@@ -570,7 +572,7 @@ mod tests {
         let theme = ThemeSettings::default();
         let style = TextStyle::new(&theme, None, None, 0);
         for range in [0..1, 1..4, 4..5, 0..5] {
-            let runs = style.runs(0..5, Some(range.clone()));
+            let runs = style.runs(0..5, std::slice::from_ref(&range));
             let mut offset = 0;
             for run in &runs {
                 let end = offset + run.len as usize;

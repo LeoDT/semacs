@@ -1,4 +1,6 @@
-use super::{AppliedEdit, Buffer, Edit, EditError, EditSource, SavePoint};
+use super::{
+    AppliedBatchEdit, AppliedEdit, BatchEdit, Buffer, Edit, EditError, EditSource, SavePoint,
+};
 use crate::text::{ByteOffset, Rope};
 
 #[derive(Clone, Copy, Default, PartialEq, Eq)]
@@ -20,19 +22,39 @@ pub(crate) enum HistoryState {
     After(GroupId),
 }
 
-struct Group {
-    id: GroupId,
-    kind: EditGroup,
+struct EditEntry {
+    /// Start offset in the pre-group document (D0).
     start: ByteOffset,
     removed: Rope,
     inserted: Rope,
+}
+
+struct Group {
+    id: GroupId,
+    kind: EditGroup,
+    entries: Vec<EditEntry>,
+    primary_entry: Option<usize>,
     point_before: ByteOffset,
     point_after: ByteOffset,
-    undo_mark: Option<usize>,
-    redo_mark: Option<usize>,
+    undo_mark: Option<(usize, usize)>,
+    redo_mark: Option<(usize, usize)>,
     modified_before: bool,
     modified_after: bool,
     origin: u64,
+}
+
+impl Group {
+    /// Returns the post-group (D1) start offset for each entry.
+    fn after_starts(&self) -> Vec<ByteOffset> {
+        let mut delta: isize = 0;
+        let mut starts = Vec::with_capacity(self.entries.len());
+        for entry in &self.entries {
+            let start = (entry.start.0 as isize + delta) as usize;
+            starts.push(ByteOffset(start));
+            delta += entry.inserted.len() as isize - entry.removed.len() as isize;
+        }
+        starts
+    }
 }
 
 #[derive(Default)]
@@ -56,47 +78,81 @@ impl History {
             && previous.origin == group.origin
             && previous.kind == group.kind
             && previous.point_after == group.point_before
+            && previous.entries.len() == group.entries.len()
+            && previous.primary_entry == group.primary_entry
         {
+            let prev_after_starts = previous.after_starts();
             match group.kind {
                 EditGroup::Insert
-                    if previous.removed.is_empty()
-                        && group.removed.is_empty()
-                        && previous.start.0 + previous.inserted.len() == group.start.0 =>
+                    if previous.entries.iter().zip(&group.entries).enumerate().all(
+                        |(i, (prev, cur))| {
+                            prev.removed.is_empty()
+                                && cur.removed.is_empty()
+                                && prev_after_starts[i].0 + prev.inserted.len() == cur.start.0
+                        },
+                    ) =>
                 {
-                    previous.inserted.append(group.inserted);
-                }
-                EditGroup::BackwardDelete
-                    if previous.inserted.is_empty()
-                        && group.inserted.is_empty()
-                        && group.start.0 + group.removed.len() == previous.start.0 =>
-                {
-                    previous.undo_mark = previous
-                        .undo_mark
-                        .map(|offset| offset + group.removed.len())
-                        .or(group.undo_mark);
-                    group.removed.append(previous.removed.clone());
-                    previous.removed = group.removed;
-                    previous.start = group.start;
-                }
-                EditGroup::ForwardDelete
-                    if previous.inserted.is_empty()
-                        && group.inserted.is_empty()
-                        && previous.start == group.start =>
-                {
-                    previous.undo_mark = previous.undo_mark.or(group
-                        .undo_mark
-                        .map(|offset| previous.removed.len() + offset));
-                    previous.removed.append(group.removed);
-                }
-                _ => {
-                    self.merging = group.kind != EditGroup::Isolated;
-                    self.undo.push(group);
+                    for (prev, cur) in previous.entries.iter_mut().zip(group.entries) {
+                        prev.inserted.append(cur.inserted);
+                    }
+                    previous.point_after = group.point_after;
+                    previous.modified_after = group.modified_after;
                     return;
                 }
+                EditGroup::BackwardDelete
+                    if previous.entries.iter().zip(&group.entries).enumerate().all(
+                        |(i, (prev, cur))| {
+                            prev.inserted.is_empty()
+                                && cur.inserted.is_empty()
+                                && cur.start.0 + cur.removed.len() == prev_after_starts[i].0
+                        },
+                    ) =>
+                {
+                    let cur_lens: Vec<usize> = group
+                        .entries
+                        .iter()
+                        .map(|entry| entry.removed.len())
+                        .collect();
+                    previous.undo_mark = previous
+                        .undo_mark
+                        .map(|(idx, offset)| (idx, offset + cur_lens[idx]))
+                        .or(group.undo_mark);
+                    for (prev, mut cur) in previous.entries.iter_mut().zip(group.entries) {
+                        let removed_len = cur.removed.len();
+                        cur.removed.append(prev.removed.clone());
+                        prev.removed = cur.removed;
+                        prev.start = ByteOffset(prev.start.0 - removed_len);
+                    }
+                    previous.point_after = group.point_after;
+                    previous.modified_after = group.modified_after;
+                    return;
+                }
+                EditGroup::ForwardDelete
+                    if previous.entries.iter().zip(&group.entries).enumerate().all(
+                        |(i, (prev, cur))| {
+                            prev.inserted.is_empty()
+                                && cur.inserted.is_empty()
+                                && prev_after_starts[i] == cur.start
+                        },
+                    ) =>
+                {
+                    let prev_lens: Vec<usize> = previous
+                        .entries
+                        .iter()
+                        .map(|entry| entry.removed.len())
+                        .collect();
+                    previous.undo_mark = previous.undo_mark.or(group
+                        .undo_mark
+                        .map(|(idx, offset)| (idx, prev_lens[idx] + offset)));
+                    for (prev, cur) in previous.entries.iter_mut().zip(group.entries) {
+                        prev.removed.append(cur.removed);
+                    }
+                    previous.point_after = group.point_after;
+                    previous.modified_after = group.modified_after;
+                    return;
+                }
+                _ => {}
             }
-            previous.point_after = group.point_after;
-            previous.modified_after = group.modified_after;
-            return;
         }
         self.merging = group.kind != EditGroup::Isolated;
         self.undo.push(group);
@@ -224,42 +280,85 @@ impl Buffer {
         edit: Edit<'_>,
         kind: EditGroup,
     ) -> Result<Option<AppliedEdit>, EditError> {
-        self.validate_edit(&edit)?;
-        let (removed, mark, modified) = {
+        let batch = [BatchEdit {
+            range: edit.range,
+            text: edit.text,
+        }];
+        self.edit_batch_grouped(edit.snapshot, &batch, edit.source, kind, Some(0))
+            .map(|applied| applied.map(|batch| batch.summary))
+    }
+
+    pub(crate) fn edit_batch_grouped(
+        &mut self,
+        snapshot: super::SnapshotId,
+        edits: &[BatchEdit<'_>],
+        source: EditSource,
+        kind: EditGroup,
+        primary_index: Option<usize>,
+    ) -> Result<Option<AppliedBatchEdit>, EditError> {
+        self.validate_batch(snapshot, edits)?;
+        let (entries, primary_entry, undo_mark, modified) = {
             let doc = self.document.borrow();
-            (
-                doc.snapshot
+            let mark = doc.mark.position();
+            let mut entries = Vec::new();
+            let mut primary_entry = None;
+            let mut undo_mark = None;
+            for (raw_idx, edit) in edits.iter().enumerate() {
+                if edit.range.is_empty() && edit.text.is_empty() {
+                    continue;
+                }
+                let idx = entries.len();
+                if primary_index == Some(raw_idx) {
+                    primary_entry = Some(idx);
+                }
+                let removed = doc
+                    .snapshot
                     .text
-                    .slice(edit.range.start.0..edit.range.end.0),
-                doc.mark.position(),
-                doc.modified,
-            )
+                    .slice(edit.range.start.0..edit.range.end.0);
+                if undo_mark.is_none()
+                    && let Some(m) = mark
+                    && m > edit.range.start
+                    && m <= edit.range.end
+                {
+                    undo_mark = Some((idx, m.0 - edit.range.start.0));
+                }
+                entries.push(EditEntry {
+                    start: edit.range.start,
+                    removed,
+                    inserted: Rope::from(edit.text),
+                });
+            }
+            (entries, primary_entry, undo_mark, doc.modified)
         };
-        let removed_len = edit.range.end.0 - edit.range.start.0;
-        let group = Group {
-            id: GroupId(0),
-            kind,
-            start: edit.range.start,
-            removed,
-            inserted: Rope::from(edit.text),
-            point_before: self.point(),
-            point_after: ByteOffset(edit.range.start.0 + edit.text.len()),
-            undo_mark: mark
-                .filter(|m| *m > edit.range.start && m.0 <= edit.range.start.0 + removed_len)
-                .map(|m| m.0 - edit.range.start.0),
-            redo_mark: None,
-            modified_before: modified,
-            modified_after: true,
-            origin: self.view_id,
-        };
-        let applied = self.apply_edit(edit)?;
-        let mut doc = self.document.borrow_mut();
-        if applied.is_some() {
-            doc.history.record(group);
-        } else if kind == EditGroup::Isolated {
-            doc.history.merging = false;
+        if entries.is_empty() {
+            if kind == EditGroup::Isolated {
+                self.document.borrow_mut().history.merging = false;
+            }
+            return Ok(None);
         }
-        Ok(applied)
+        let point_before = self.point();
+        let applied = self.apply_batch(snapshot, edits, source, primary_index)?;
+        if let Some(applied) = applied {
+            let group = Group {
+                id: GroupId(0),
+                kind,
+                entries,
+                primary_entry,
+                point_before,
+                point_after: self.point(),
+                undo_mark,
+                redo_mark: None,
+                modified_before: modified,
+                modified_after: true,
+                origin: self.view_id,
+            };
+            self.document.borrow_mut().history.record(group);
+            return Ok(Some(applied));
+        }
+        if kind == EditGroup::Isolated {
+            self.document.borrow_mut().history.merging = false;
+        }
+        Ok(None)
     }
 
     pub fn undo(&mut self) -> Result<Option<AppliedEdit>, EditError> {
@@ -284,31 +383,75 @@ impl Buffer {
             };
             group
         };
-        let (removed, inserted, restore_mark) = if redo {
-            (&group.removed, &group.inserted, group.redo_mark)
-        } else {
-            (&group.inserted, &group.removed, group.undo_mark)
-        };
+        let after_starts = group.after_starts();
         let mark = self.mark();
-        let restore_mark = restore_mark.filter(|_| mark == Some(group.start));
-        let inverse_mark = {
-            let m = self.mark();
-            m.filter(|m| *m > group.start && m.0 <= group.start.0 + removed.len())
-                .map(|m| m.0 - group.start.0)
+        let (restore_mark, inverse_mark, ranges_and_texts) = if redo {
+            let restore = group.redo_mark.and_then(|(idx, rel)| {
+                (mark == Some(group.entries[idx].start))
+                    .then(|| ByteOffset(after_starts[idx].0 + rel))
+            });
+            let inverse = mark.and_then(|m| {
+                group.entries.iter().enumerate().find_map(|(idx, entry)| {
+                    (m > entry.start && m.0 <= entry.start.0 + entry.removed.len())
+                        .then(|| (idx, m.0 - entry.start.0))
+                })
+            });
+            let ops: Vec<_> = group
+                .entries
+                .iter()
+                .map(|entry| {
+                    (
+                        entry.start..ByteOffset(entry.start.0 + entry.removed.len()),
+                        entry.inserted.to_string(),
+                    )
+                })
+                .collect();
+            (restore, inverse, ops)
+        } else {
+            let restore = group.undo_mark.and_then(|(idx, rel)| {
+                (mark == Some(after_starts[idx]))
+                    .then(|| ByteOffset(group.entries[idx].start.0 + rel))
+            });
+            let inverse = mark.and_then(|m| {
+                group.entries.iter().enumerate().find_map(|(idx, entry)| {
+                    let start = after_starts[idx];
+                    (m > start && m.0 <= start.0 + entry.inserted.len())
+                        .then(|| (idx, m.0 - start.0))
+                })
+            });
+            let ops: Vec<_> = group
+                .entries
+                .iter()
+                .enumerate()
+                .map(|(idx, entry)| {
+                    let start = after_starts[idx];
+                    (
+                        start..ByteOffset(start.0 + entry.inserted.len()),
+                        entry.removed.to_string(),
+                    )
+                })
+                .collect();
+            (restore, inverse, ops)
         };
-        let text = inserted.to_string();
-        let result = self.apply_edit(Edit {
-            snapshot: self.snapshot_id(),
-            range: group.start..ByteOffset(group.start.0 + removed.len()),
-            text: &text,
-            source: if redo {
+        let batch: Vec<BatchEdit<'_>> = ranges_and_texts
+            .iter()
+            .map(|(range, text)| BatchEdit {
+                range: range.clone(),
+                text: text.as_str(),
+            })
+            .collect();
+        let result = self.apply_batch(
+            self.snapshot_id(),
+            &batch,
+            if redo {
                 EditSource::Redo
             } else {
                 EditSource::Undo
             },
-        });
+            None,
+        );
         let applied = match result {
-            Ok(a) => a,
+            Ok(a) => a.map(|batch| batch.summary),
             Err(e) => {
                 let mut d = self.document.borrow_mut();
                 if redo {
@@ -320,13 +463,15 @@ impl Buffer {
             }
         };
         let mut doc = self.document.borrow_mut();
-        if let Some(offset) = restore_mark {
-            doc.mark
-                .set(Some(ByteOffset(group.start.0 + offset)), false);
+        if let Some(position) = restore_mark {
+            doc.mark.set(Some(position), false);
         }
         if redo {
             group.undo_mark = inverse_mark;
-            self.point.set(group.start.0);
+            let redo_point = group
+                .primary_entry
+                .map_or(group.point_after.0, |idx| after_starts[idx].0);
+            self.point.set(redo_point);
             doc.modified = group.modified_after;
             doc.history.undo.push(group);
         } else {
@@ -367,11 +512,13 @@ mod tests {
         }
         assert_eq!(buffer.document.borrow_mut().history.undo.len(), 1);
         assert_eq!(
-            buffer.document.borrow_mut().history.undo[0].inserted.len(),
+            buffer.document.borrow_mut().history.undo[0].entries[0]
+                .inserted
+                .len(),
             COUNT
         );
         assert!(
-            buffer.document.borrow_mut().history.undo[0]
+            buffer.document.borrow_mut().history.undo[0].entries[0]
                 .removed
                 .is_empty()
         );
@@ -381,11 +528,13 @@ mod tests {
         }
         assert_eq!(buffer.document.borrow_mut().history.undo.len(), 2);
         assert_eq!(
-            buffer.document.borrow_mut().history.undo[1].removed.len(),
+            buffer.document.borrow_mut().history.undo[1].entries[0]
+                .removed
+                .len(),
             COUNT
         );
         assert!(
-            buffer.document.borrow_mut().history.undo[1]
+            buffer.document.borrow_mut().history.undo[1].entries[0]
                 .inserted
                 .is_empty()
         );
@@ -471,5 +620,182 @@ mod tests {
         let doc = first.document.borrow_mut();
         assert_eq!(doc.history.undo.len(), 2);
         assert_ne!(doc.history.undo[0].origin, doc.history.undo[1].origin);
+    }
+
+    #[test]
+    fn batch_edit_is_one_undo_group_merges_sustained_edits_and_tracks_save_point() {
+        let mut first = Buffer::new(
+            None,
+            crate::files::DecodedFile {
+                text: "aa bb cc".into(),
+                format: crate::files::FileFormat::default(),
+            },
+        );
+        let mut second = first.new_view();
+        second.set_point(ByteOffset(6)).unwrap();
+
+        let saved = first.begin_save();
+        first.mark_saved_at(saved).unwrap();
+        assert!(!first.is_modified());
+
+        // Typing '1' then '2' at offsets 2, 5, 8 should merge into one undo group.
+        first
+            .edit_batch_grouped(
+                first.snapshot_id(),
+                &[
+                    BatchEdit {
+                        range: ByteOffset(2)..ByteOffset(2),
+                        text: "1",
+                    },
+                    BatchEdit {
+                        range: ByteOffset(5)..ByteOffset(5),
+                        text: "1",
+                    },
+                    BatchEdit {
+                        range: ByteOffset(8)..ByteOffset(8),
+                        text: "1",
+                    },
+                ],
+                EditSource::Command,
+                EditGroup::Insert,
+                Some(0),
+            )
+            .unwrap()
+            .unwrap();
+        assert_eq!(first.text().to_string(), "aa1 bb1 cc1");
+        assert_eq!(second.point(), ByteOffset(8));
+
+        first
+            .edit_batch_grouped(
+                first.snapshot_id(),
+                &[
+                    BatchEdit {
+                        range: ByteOffset(3)..ByteOffset(3),
+                        text: "2",
+                    },
+                    BatchEdit {
+                        range: ByteOffset(7)..ByteOffset(7),
+                        text: "2",
+                    },
+                    BatchEdit {
+                        range: ByteOffset(11)..ByteOffset(11),
+                        text: "2",
+                    },
+                ],
+                EditSource::Command,
+                EditGroup::Insert,
+                Some(0),
+            )
+            .unwrap()
+            .unwrap();
+        assert_eq!(first.text().to_string(), "aa12 bb12 cc12");
+        assert_eq!(first.document.borrow().history.undo.len(), 1);
+        assert!(first.is_modified());
+
+        // One undo restores all three sites and returns to the clean save point.
+        first.undo().unwrap().unwrap();
+        assert_eq!(first.text().to_string(), "aa bb cc");
+        assert!(!first.is_modified());
+        assert_eq!(second.point(), ByteOffset(6));
+
+        // Redo reapplies all three sites atomically.
+        first.redo().unwrap().unwrap();
+        assert_eq!(first.text().to_string(), "aa12 bb12 cc12");
+        assert!(first.is_modified());
+
+        // Consecutive multi-site backward deletes also merge into a single group.
+        first.break_history_group();
+        first
+            .edit_batch_grouped(
+                first.snapshot_id(),
+                &[
+                    BatchEdit {
+                        range: ByteOffset(3)..ByteOffset(4),
+                        text: "",
+                    },
+                    BatchEdit {
+                        range: ByteOffset(8)..ByteOffset(9),
+                        text: "",
+                    },
+                    BatchEdit {
+                        range: ByteOffset(13)..ByteOffset(14),
+                        text: "",
+                    },
+                ],
+                EditSource::Command,
+                EditGroup::BackwardDelete,
+                Some(0),
+            )
+            .unwrap()
+            .unwrap();
+        first
+            .edit_batch_grouped(
+                first.snapshot_id(),
+                &[
+                    BatchEdit {
+                        range: ByteOffset(2)..ByteOffset(3),
+                        text: "",
+                    },
+                    BatchEdit {
+                        range: ByteOffset(6)..ByteOffset(7),
+                        text: "",
+                    },
+                    BatchEdit {
+                        range: ByteOffset(10)..ByteOffset(11),
+                        text: "",
+                    },
+                ],
+                EditSource::Command,
+                EditGroup::BackwardDelete,
+                Some(0),
+            )
+            .unwrap()
+            .unwrap();
+        assert_eq!(first.text().to_string(), "aa bb cc");
+        assert_eq!(first.document.borrow().history.undo.len(), 2);
+        first.undo().unwrap().unwrap();
+        assert_eq!(first.text().to_string(), "aa12 bb12 cc12");
+    }
+
+    #[test]
+    fn touching_batch_edits_map_markers_and_undo_mark_without_double_collapse() {
+        let mut first = Buffer::new(
+            None,
+            crate::files::DecodedFile {
+                text: "abcd".into(),
+                format: crate::files::FileFormat::default(),
+            },
+        );
+        let mut second = first.new_view();
+        second.set_point(ByteOffset(2)).unwrap();
+        first.set_mark(ByteOffset(2)).unwrap();
+
+        // Edit 0: 0..1 -> "XXX" (new_range 0..3), Edit 1: 1..2 -> "" (new_range 3..3).
+        first
+            .edit_batch_grouped(
+                first.snapshot_id(),
+                &[
+                    BatchEdit {
+                        range: ByteOffset(0)..ByteOffset(1),
+                        text: "XXX",
+                    },
+                    BatchEdit {
+                        range: ByteOffset(1)..ByteOffset(2),
+                        text: "",
+                    },
+                ],
+                EditSource::Command,
+                EditGroup::Isolated,
+                Some(0),
+            )
+            .unwrap()
+            .unwrap();
+        assert_eq!(first.text().to_string(), "XXXcd");
+        assert_eq!(second.point(), ByteOffset(3));
+        assert_eq!(first.mark(), Some(ByteOffset(3)));
+
+        first.undo().unwrap().unwrap();
+        assert_eq!(first.text().to_string(), "abcd");
+        assert_eq!(first.mark(), Some(ByteOffset(2)));
     }
 }

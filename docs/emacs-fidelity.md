@@ -605,3 +605,33 @@ F2 仅提供 status 与单文件整文件级 index 操作，不包含 hunk / 批
 ### 首版不提供的上游能力
 
 以下 `isearch.el` 能力在首版不实现：`M-%` / `C-M-%`（`isearch-query-replace`）、`M-s o`（`isearch-occur`）、`M-s h r/l`（`hi-lock` 持久高亮）、`M-s '`（`char-fold`）、`isearch-lazy-count` 计数前缀、`isearch-allow-scroll` / `isearch-allow-motion`、`M-y`（`isearch-yank-pop-only`）、`M-TAB` 历史补全、`C-x 8` / `C-\` Emacs 内置输入法及 `C-h` isearch 帮助子菜单。
+
+## 阶段 F10：多选区同步编辑（`multiple-cursors`）
+
+本节定义已确认的多选区同步编辑行为，参照 Emacs 外部包 `multiple-cursors.el` 的成熟交互与约定。
+
+### 命令与默认绑定
+
+| 键位 | 命令 | 行为 |
+|---|---|---|
+| `C->` | `mc/mark-next-like-this` | 有非空活动 region 时向后匹配下一个字面出现并创建同朝向活动 region 的次光标；无活动 region 时在下一行同列创建次光标（保留 `goal-column`） |
+| `C-<` | `mc/mark-previous-like-this` | 同上，向前匹配或上一行同列 |
+| `C-c C-<` | `mc/mark-all-like-this` | 按主光标非空活动 region 匹配全 buffer 全部不重叠出现 |
+| `C-S-c C-S-c` | `mc/edit-lines` | 在跨行活动 region 覆盖的每一行同列创建光标（末尾在列 0 时按上游规则不包含该空尾行）并停用 region |
+| （无默认键位，`M-x` / JS 自绑） | `mc/skip-to-next-like-this` / `mc/skip-to-previous-like-this` | 跳过该方向最远端次光标并继续寻找下一处匹配；无更多匹配时保留原光标并提示 `No more matches` |
+| （无默认键位，`M-x` / JS 自绑） | `mc/unmark-next-like-this` / `mc/unmark-previous-like-this` | 移除该方向最远端的一个次光标 |
+| `C-S-<mouse-1>` | 鼠标加 / 删光标（对齐 `mc/add-cursor-on-click`） | 点击已有次光标处移除该次光标；点击新位置时把原主光标保留为次光标并将主光标移至点击处 |
+
+- 不修改内置 `C-d`（`delete-char`），用户可通过 JS 配置自行绑定。
+
+### 同步编辑、退出与视觉边界
+
+- **退出与换行（保持上游默认）**：多光标模式下 `RET` / `C-m` 退出多光标模式而不插入换行；多光标同步换行使用 `C-j`（`electric-newline-and-maybe-indent`）。`C-g` 为两段式——任一光标存在活动 region 时先停用全部 region 并留在多光标模式，否则退出多光标模式；`ESC ESC ESC` 直接停用并退出。普通左键点击、启动 `isearch`（`C-s` / `C-r` 等）及切为只读同样退出多光标模式。
+- **Emacs 编辑与单一 undo 组**：不启用 `delete-selection-mode`；有活动选区时直接输入在各选区 point 处插入，按 `Backspace` / `Delete` 删除全部活动选区再输入，`C-d` 始终按字符向前删除。整批多光标编辑作为单一原子 undo 组提交，连续同类多光标自插入、后删与前删各自合并，一次 `undo` / `redo` 整体回退或重做全部位置并维护 `SavePoint` 与 `modified`。
+- **同步命令与独立状态**：字符 / 词 / 行 / 段落移动、`set-mark-command`、删除、`C-j`、`TAB`、kill / copy / yank、自插入与 IME 最终提交均对全部光标同步执行；每个次光标维护独立的 `point`、`mark`（含激活态）、`goal-column` 与局部 `kill-ring`（创建时继承主 kill ring，之后各自 kill / yank 互不串扰）。滚动（`C-v` / `M-v` / `C-l`）、`undo` / `undo-redo` 与 `mc/*` 管理命令只执行一次。移动或编辑后自动合并重合光标，只剩 1 个光标时自动退出多光标模式。
+- **IME、分屏与范围限制**：多光标状态归属当前 view（同 buffer 的其他分屏 view 保持各自光标数，point 随批量编辑正确位移）。组合期间沿用 D17 命令屏障，预编辑投影在主光标，最终提交同步写入全部光标。仅限可编辑普通正文 buffer；只读 buffer、minibuffer 与结构化 section buffer 拒绝开启多光标。
+- **视觉与 mode line**：全部可见次光标直接复用 `cursor` 样式（与上游 `mc/cursor-face` 默认继承 `cursor` 一致），同一行多个光标各自正确反色覆盖字符；全部活动次选区复用 `region` 样式；多光标激活时在 mode line 显示 `mc:<数量>`。
+
+### 首版不提供的上游能力
+
+以下 `multiple-cursors.el` 能力在首版不实现：自定义交互式 `mc/cmds-to-run-for-all` / `mc/cmds-to-run-once` 列表持久化、`mc/mark-all-dwim`、`mc/insert-numbers` / `mc/insert-letters`、`mc/sort-regions` / `mc/reverse-regions`、`mc-hide-unmatched-lines-mode`（`C-'`）以及独立 minor-mode keymap 的 JS 配置 API。

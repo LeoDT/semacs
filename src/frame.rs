@@ -9,6 +9,7 @@ pub fn mode_line(
     format: crate::files::FileFormat,
     modified: bool,
     position: (u32, usize),
+    cursor_count: usize,
     selected: bool,
     cx: &App,
 ) -> impl IntoElement + Styled {
@@ -21,7 +22,7 @@ pub fn mode_line(
         StyleRole::ModeLineInactive
     });
 
-    h_flex()
+    let row = h_flex()
         .id("mode-line")
         .h(px(24.0))
         .flex_shrink_0()
@@ -35,7 +36,12 @@ pub fn mode_line(
         .text_sm()
         .child(name)
         .child(format)
-        .child(position)
+        .child(position);
+    if cursor_count > 1 {
+        row.child(format!("mc:{cursor_count}"))
+    } else {
+        row
+    }
 }
 
 pub fn echo_area(message: &str, max_height: Pixels, cx: &App) -> impl IntoElement {
@@ -84,6 +90,7 @@ mod tests {
                     FileFormat::default(),
                     false,
                     (1, 0),
+                    1,
                     true,
                     cx,
                 );
@@ -92,6 +99,7 @@ mod tests {
                     FileFormat::default(),
                     false,
                     (1, 0),
+                    1,
                     false,
                     cx,
                 );

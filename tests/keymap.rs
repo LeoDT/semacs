@@ -71,6 +71,11 @@ fn default_bindings_match_the_emacs_reference_or_approved_contracts() {
                 "C-x 0" => Some("delete-window"),
                 // Approved override: the user binds kill-current-buffer here.
                 "C-x C-k" => Some("kill-current-buffer"),
+                // Approved F10 multiple-cursors bindings (external package convention).
+                "C->" => Some("mc/mark-next-like-this"),
+                "C-<" => Some("mc/mark-previous-like-this"),
+                "C-c C-<" => Some("mc/mark-all-like-this"),
+                "C-S-c C-S-c" => Some("mc/edit-lines"),
                 "C-h e" => messages_reference.get("C-h e").copied(),
                 key if project_reference.contains_key(key) => project_reference.get(key).copied(),
                 key if search_reference.contains_key(key) => search_reference.get(key).copied(),
@@ -89,6 +94,8 @@ fn default_bindings_match_the_emacs_reference_or_approved_contracts() {
     for sequence in [
         "ctrl-x",
         "ctrl-x p",
+        "ctrl-c",
+        "ctrl-shift-c",
         "alt-g",
         "alt-s",
         "ctrl-h",

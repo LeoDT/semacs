@@ -134,7 +134,15 @@ fn registered_handler_receives_typing_newline_and_scalar_deletion(cx: &mut TestA
         assert!(view.target.buffer().is_modified());
         assert!(view.layout_ready());
     });
-    visual.simulate_keystrokes("ctrl-v ctrl-c ctrl-x");
+    visual.simulate_keystrokes("ctrl-v ctrl-c");
+    redraw(&mut visual);
+    visual.read(|cx| {
+        let view = editor.read(cx);
+        assert_eq!(view.target.buffer().text().to_string(), "中🙂e\n");
+        assert_eq!(view.message(), Some("C-c"));
+        assert!(view.target.is_pending());
+    });
+    visual.simulate_keystrokes("ctrl-g ctrl-x");
     redraw(&mut visual);
     visual.read(|cx| {
         let view = editor.read(cx);

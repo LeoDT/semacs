@@ -48,6 +48,31 @@ impl BufferView {
             return;
         };
         self.resume_input(cx);
+        if event.modifiers.control
+            && event.modifiers.shift
+            && !event.modifiers.alt
+            && !event.modifiers.platform
+        {
+            match self
+                .target
+                .toggle_cursor_at_pointer(self.target.token(), offset)
+            {
+                Ok(()) => self.clear_message(cx),
+                Err(error) => {
+                    self.set_message(error.to_string(), cx);
+                    return;
+                }
+            }
+            self.pointer_drag = None;
+            self.invalidate_input_registration();
+            self.scroll_anchor = None;
+            self.pending_scroll = None;
+            cx.emit(Feedback::PointerDown);
+            window.focus(&self.focus, cx);
+            window.notify_text_selection_changed(&self.focus);
+            cx.notify();
+            return;
+        }
         if let Err(error) = self.target.press_pointer(self.target.token(), offset) {
             self.set_message(error.to_string(), cx);
             return;

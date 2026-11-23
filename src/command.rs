@@ -120,6 +120,14 @@ commands! {
     KeyboardEscapeQuit => "keyboard-escape-quit", Edit, ["escape escape escape" => "ESC ESC ESC"];
     Undo => "undo", Edit, ["ctrl-/" => "C-/", "ctrl-_" => "C-_", "ctrl-x u" => "C-x u"];
     UndoRedo => "undo-redo", Edit, ["ctrl-?" => "C-?", "ctrl-alt-_" => "C-M-_"];
+    McMarkNextLikeThis => "mc/mark-next-like-this", Edit, ["ctrl->" => "C->"];
+    McMarkPreviousLikeThis => "mc/mark-previous-like-this", Edit, ["ctrl-<" => "C-<"];
+    McMarkAllLikeThis => "mc/mark-all-like-this", Edit, ["ctrl-c ctrl-<" => "C-c C-<"];
+    McEditLines => "mc/edit-lines", Edit, ["ctrl-shift-c ctrl-shift-c" => "C-S-c C-S-c"];
+    McSkipToNextLikeThis => "mc/skip-to-next-like-this", Edit, [];
+    McSkipToPreviousLikeThis => "mc/skip-to-previous-like-this", Edit, [];
+    McUnmarkNextLikeThis => "mc/unmark-next-like-this", Edit, [];
+    McUnmarkPreviousLikeThis => "mc/unmark-previous-like-this", Edit, [];
     ExecuteExtendedCommand => "execute-extended-command", Application, ["alt-x" => "M-x"];
     ViewEchoAreaMessages => "view-echo-area-messages", Application, ["ctrl-h e" => "C-h e"];
     ReloadConfiguration => "reload-configuration", Application, [];

@@ -242,6 +242,7 @@ impl AppShell {
             }
         };
         origin.update(cx, |view, cx| {
+            view.exit_multiple_cursors(cx);
             view.set_isearch_active(true, cx);
         });
         self.isearch = Some(IsearchSession {
