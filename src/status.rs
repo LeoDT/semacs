@@ -17,6 +17,7 @@ mod render;
 mod tests;
 
 pub use render::{RenderedStatus, StatusLocation};
+pub(crate) use render::{StatusAction, StatusVisitSpan};
 
 pub const MAX_RECORDS: usize = 4096;
 pub const MAX_BYTES: usize = 16 * 1024 * 1024;

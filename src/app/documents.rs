@@ -24,6 +24,7 @@ pub(super) struct VisitOptions {
     pub location: Option<(usize, usize)>,
     pub tree: Option<super::tree::Visit>,
     pub pane: Option<u64>,
+    pub other_window: bool,
     pub select_pane: bool,
 }
 
@@ -33,6 +34,7 @@ impl Default for VisitOptions {
             location: None,
             tree: None,
             pane: None,
+            other_window: false,
             select_pane: true,
         }
     }
@@ -108,10 +110,20 @@ impl AppShell {
                         return;
                     }
                     view.update(cx, |view, cx| view.install_input_lifecycle(window, cx));
-                    let options = opening.options;
-                    let target_pane = options.pane.filter(|pane| {
-                        shell.body_panes.contains_key(pane) && shell.panes.side() != Some(pane)
-                    });
+                    let mut options = opening.options;
+                    let target_pane = options
+                        .pane
+                        .filter(|pane| {
+                            shell.body_panes.contains_key(pane) && shell.panes.side() != Some(pane)
+                        })
+                        .or_else(|| {
+                            options.other_window.then(|| {
+                                let id = view.read(cx).buffer().snapshot_id().buffer;
+                                shell.other_window_pane(id, window, cx)
+                            })?
+                        });
+                    options.pane = target_pane;
+                    options.other_window = false;
                     let index = match target_pane {
                         Some(pane) => shell.insert_view_in(pane, view, cx),
                         None => shell.insert_view(view, cx),
@@ -168,7 +180,12 @@ impl AppShell {
     ) {
         let target_pane = options
             .pane
-            .filter(|pane| self.body_panes.contains_key(pane) && self.panes.side() != Some(pane));
+            .filter(|pane| self.body_panes.contains_key(pane) && self.panes.side() != Some(pane))
+            .or_else(|| {
+                options
+                    .other_window
+                    .then(|| self.other_window_pane(self.buffers[index].id(), window, cx))?
+            });
         if let Some(pane_id) = target_pane {
             if !self.show_buffer_in_pane(pane_id, index, options.select_pane, window, cx) {
                 return;

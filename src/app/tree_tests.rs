@@ -373,3 +373,52 @@ fn opening_a_minibuffer_during_read_does_not_lose_its_focus(cx: &mut TestAppCont
         );
     });
 }
+
+#[gpui::test]
+fn previous_and_next_buffer_respect_dedicated_tree_side_window(cx: &mut TestAppContext) {
+    let fixture = Fixture::new();
+    let (mut visual, shell) = open(&fixture, cx);
+    let initial_id = visual.read(|cx| shell.read(cx).active_buffer_id());
+    command(&mut visual, &shell, Command::Treemacs);
+    wait(&mut visual, &shell);
+    let tree_id = visual.read(|cx| shell.read(cx).active_buffer_id());
+
+    // Ordinary window skips *Treemacs* when cycling buffers (before *Messages* exists).
+    command(&mut visual, &shell, Command::OtherWindow);
+    visual.read(|cx| assert_eq!(shell.read(cx).active_buffer_id(), initial_id));
+    visual.simulate_keystrokes("ctrl-x left");
+    visual.read(|cx| {
+        assert_eq!(shell.read(cx).active_buffer_id(), initial_id);
+        assert_eq!(
+            shell.read(cx).active_view().read(cx).message(),
+            Some("No previous buffer")
+        );
+    });
+
+    // Dedicated *Treemacs* side window refuses previous-buffer and next-buffer.
+    command(&mut visual, &shell, Command::OtherWindow);
+    visual.read(|cx| assert_eq!(shell.read(cx).active_buffer_id(), tree_id));
+    visual.simulate_keystrokes("ctrl-x left");
+    visual.read(|cx| {
+        assert_eq!(shell.read(cx).active_buffer_id(), tree_id);
+        assert_eq!(
+            shell.read(cx).active_view().read(cx).message(),
+            Some("Window is dedicated to *Treemacs*")
+        );
+    });
+    visual.simulate_keystrokes("ctrl-x right");
+    visual.read(|cx| {
+        assert_eq!(shell.read(cx).active_buffer_id(), tree_id);
+        assert_eq!(
+            shell.read(cx).active_view().read(cx).message(),
+            Some("Window is dedicated to *Treemacs*")
+        );
+    });
+
+    // Even when *Messages* exists, cycling in an ordinary window still skips *Treemacs*.
+    command(&mut visual, &shell, Command::OtherWindow);
+    for keys in ["ctrl-x left", "ctrl-x left", "ctrl-x right", "ctrl-x right"] {
+        visual.simulate_keystrokes(keys);
+        visual.read(|cx| assert_ne!(shell.read(cx).active_buffer_id(), tree_id));
+    }
+}

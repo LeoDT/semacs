@@ -3,7 +3,7 @@ use crate::app::git_test_support::*;
 use crate::command::Command;
 use crate::mode::ModeId;
 use gpui_kit as gpui;
-use gpui_kit::TestAppContext;
+use gpui_kit::{TestAppContext, VisualTestContext};
 
 #[gpui::test]
 fn status_opens_reuses_contextual_commands_and_fixed_repository_diff(cx: &mut TestAppContext) {
@@ -31,11 +31,25 @@ fn status_opens_reuses_contextual_commands_and_fixed_repository_diff(cx: &mut Te
                 .any(|entry| entry.name == "section-toggle")
         );
         assert!(
-            !shell
+            shell
+                .read(cx)
+                .commands
+                .commands_for(ModeId::MAGIT_STATUS)
+                .any(|entry| entry.name == "magit-visit-thing")
+        );
+        assert!(
+            shell
                 .read(cx)
                 .commands
                 .commands_for(ModeId::MAGIT_STATUS)
                 .any(|entry| entry.name == "magit-diff-visit-file")
+        );
+        assert!(
+            !shell
+                .read(cx)
+                .commands
+                .commands_for(ModeId::MAGIT_STATUS)
+                .any(|entry| entry.name == "magit-diff-jump")
         );
         buffer.snapshot_id().buffer
     });
@@ -57,7 +71,7 @@ fn status_opens_reuses_contextual_commands_and_fixed_repository_diff(cx: &mut Te
                 .collapsed
         );
     });
-    command(&mut visual, &shell, Command::MagitDiffVisit);
+    command(&mut visual, &shell, Command::MagitDiffJump);
     visual.read(|cx| assert!(status.read(cx).message().unwrap().contains("unavailable")));
     command(&mut visual, &shell, Command::MagitDiffUnstaged);
     wait(&mut visual, &shell);
@@ -564,4 +578,356 @@ fn refresh_failure_preserves_content_and_old_completion_cannot_clear_new_slot(
     });
     release.send(()).unwrap();
     wait(&mut visual, &shell);
+}
+
+#[gpui::test]
+fn status_ret_visits_untracked_unstaged_staged_and_group_diffs_like_magit(cx: &mut TestAppContext) {
+    let repo = repo();
+    repo.write("both.txt", "line1\nline2\nold\nline4\n");
+    repo.write("del.txt", "gone\n");
+    repo.commit();
+    repo.write("both.txt", "line1\nline2\nindexed\nline4\n");
+    repo.git(&["add", "both.txt"]);
+    repo.write("both.txt", "line1\nline2\nworktree\nline4\n");
+    std::fs::remove_file(repo.0.join("del.txt")).unwrap();
+    repo.write("new.txt", "untracked body\n");
+    std::fs::create_dir_all(repo.0.join("plain_dir")).unwrap();
+    repo.write("plain_dir/child.txt", "nested\n");
+
+    let (mut visual, shell) = open(&repo, cx);
+    command(&mut visual, &shell, Command::MagitStatus);
+    wait(&mut visual, &shell);
+    let status = visual.read(|cx| shell.read(cx).active_view().clone());
+    let status_index = visual.read(|cx| shell.read(cx).buffer_index(&status, cx).unwrap());
+
+    let move_to = |visual: &mut VisualTestContext, needle: &str, delta: usize| {
+        visual.update(|window, cx| {
+            shell.update(cx, |shell, cx| {
+                shell.activate(status_index, window, cx);
+            });
+            let active = shell.read(cx).active_view().clone();
+            active.update(cx, |view, cx| {
+                let text = view.buffer().text().to_string();
+                let offset = text
+                    .find(needle)
+                    .unwrap_or_else(|| panic!("missing {needle:?} in:\n{text}"));
+                view.show_location(crate::text::ByteOffset(offset + delta), window, cx);
+            });
+        });
+    };
+
+    // Root header has nothing to visit.
+    move_to(&mut visual, "Status: ", 0);
+    visual.simulate_keystrokes("enter");
+    visual.read(|cx| {
+        assert_eq!(
+            status.read(cx).message(),
+            Some("There is no thing at point that could be visited")
+        );
+    });
+
+    // Untracked group heading has nothing to visit.
+    move_to(&mut visual, "Untracked files", 0);
+    visual.simulate_keystrokes("enter");
+    visual.read(|cx| {
+        assert_eq!(
+            status.read(cx).message(),
+            Some("There is no thing at point that could be visited")
+        );
+    });
+
+    // Untracked regular file opens editable worktree buffer in the same pane.
+    let panes_before = visual.read(|cx| shell.read(cx).panes.leaves().len());
+    move_to(&mut visual, "?? new.txt", 0);
+    visual.simulate_keystrokes("enter");
+    wait(&mut visual, &shell);
+    visual.read(|cx| {
+        let shell = shell.read(cx);
+        assert_eq!(shell.panes.leaves().len(), panes_before);
+        let buf = shell.active_view().read(cx).buffer();
+        assert_eq!(
+            buf.path().as_deref(),
+            Some(repo.0.join("new.txt").as_path())
+        );
+        assert_eq!(buf.text().to_string(), "untracked body\n");
+        assert!(!buf.is_read_only());
+    });
+
+    // Untracked plain directory reports missing dired cleanly.
+    move_to(&mut visual, "?? plain_dir/", 0);
+    visual.simulate_keystrokes("enter");
+    visual.read(|cx| {
+        assert!(
+            status
+                .read(cx)
+                .message()
+                .unwrap()
+                .contains("Cannot visit directory")
+        );
+    });
+
+    // Collapsed unstaged file heading opens editable worktree file at the first changed line (line 3).
+    move_to(&mut visual, "MM both.txt", 0);
+    visual.simulate_keystrokes("enter");
+    wait(&mut visual, &shell);
+    visual.read(|cx| {
+        let buf = shell.read(cx).active_view().read(cx).buffer();
+        assert_eq!(
+            buf.path().as_deref(),
+            Some(repo.0.join("both.txt").as_path())
+        );
+        assert!(!buf.is_read_only());
+        assert_eq!(buf.line_column(), (3, 0));
+    });
+
+    // Expand unstaged both.txt: RET on +worktree visits worktree at line 3 col 2;
+    // RET on -indexed visits read-only index blob at line 3 col 2.
+    move_to(&mut visual, "MM both.txt", 0);
+    visual.simulate_keystrokes("tab");
+    move_to(&mut visual, "+worktree", 3);
+    visual.simulate_keystrokes("enter");
+    wait(&mut visual, &shell);
+    visual.read(|cx| {
+        let buf = shell.read(cx).active_view().read(cx).buffer();
+        assert_eq!(
+            buf.path().as_deref(),
+            Some(repo.0.join("both.txt").as_path())
+        );
+        assert!(!buf.is_read_only());
+        assert_eq!(buf.line_column(), (3, 2));
+    });
+
+    move_to(&mut visual, "-indexed", 3);
+    visual.simulate_keystrokes("enter");
+    wait(&mut visual, &shell);
+    visual.read(|cx| {
+        let buf = shell.read(cx).active_view().read(cx).buffer();
+        assert!(buf.is_read_only());
+        assert_eq!(buf.text().to_string(), "line1\nline2\nindexed\nline4\n");
+        assert_eq!(buf.line_column(), (3, 2));
+    });
+
+    // Unstaged deleted file visits read-only index blob.
+    move_to(&mut visual, ".D del.txt", 0);
+    visual.simulate_keystrokes("enter");
+    wait(&mut visual, &shell);
+    visual.read(|cx| {
+        let buf = shell.read(cx).active_view().read(cx).buffer();
+        assert!(buf.is_read_only());
+        assert_eq!(buf.text().to_string(), "gone\n");
+    });
+
+    // Staged file heading opens read-only index blob at first changed line (line 3);
+    // expanding staged file and pressing RET on -old opens HEAD blob at line 3 col 1.
+    visual.update(|window, cx| {
+        shell.update(cx, |shell, cx| {
+            shell.activate(status_index, window, cx);
+        });
+        status.update(cx, |view, cx| {
+            let text = view.buffer().text().to_string();
+            let staged_pos = text.find("Staged changes").unwrap();
+            let file_pos = staged_pos + text[staged_pos..].find("MM both.txt").unwrap();
+            view.show_location(crate::text::ByteOffset(file_pos), window, cx);
+        });
+    });
+    visual.simulate_keystrokes("enter");
+    wait(&mut visual, &shell);
+    visual.read(|cx| {
+        let buf = shell.read(cx).active_view().read(cx).buffer();
+        assert!(buf.is_read_only());
+        assert_eq!(buf.text().to_string(), "line1\nline2\nindexed\nline4\n");
+        assert_eq!(buf.line_column(), (3, 0));
+    });
+
+    visual.update(|window, cx| {
+        shell.update(cx, |shell, cx| {
+            shell.activate(status_index, window, cx);
+        });
+        status.update(cx, |view, cx| {
+            let text = view.buffer().text().to_string();
+            let staged_pos = text.find("Staged changes").unwrap();
+            let file_pos = staged_pos + text[staged_pos..].find("MM both.txt").unwrap();
+            view.show_location(crate::text::ByteOffset(file_pos), window, cx);
+        });
+    });
+    visual.simulate_keystrokes("tab");
+    move_to(&mut visual, "-old", 2);
+    visual.simulate_keystrokes("enter");
+    wait(&mut visual, &shell);
+    visual.read(|cx| {
+        let buf = shell.read(cx).active_view().read(cx).buffer();
+        assert!(buf.is_read_only());
+        assert_eq!(buf.text().to_string(), "line1\nline2\nold\nline4\n");
+        assert_eq!(buf.line_column(), (3, 1));
+    });
+
+    // RET on Unstaged changes heading opens magit-diff-unstaged; RET on Staged changes opens magit-diff-staged.
+    move_to(&mut visual, "Unstaged changes", 0);
+    command(&mut visual, &shell, Command::MagitDiffVisit);
+    visual.read(|cx| {
+        assert_eq!(
+            status.read(cx).message(),
+            Some("No supported file location here")
+        );
+    });
+    visual.simulate_keystrokes("enter");
+    wait(&mut visual, &shell);
+    visual.read(|cx| {
+        assert_eq!(
+            shell
+                .read(cx)
+                .active_view()
+                .read(cx)
+                .buffer()
+                .comparison()
+                .unwrap()
+                .kind,
+            crate::diff::DiffKind::Unstaged
+        );
+    });
+
+    move_to(&mut visual, "Staged changes", 0);
+    visual.simulate_keystrokes("enter");
+    wait(&mut visual, &shell);
+    visual.read(|cx| {
+        assert_eq!(
+            shell
+                .read(cx)
+                .active_view()
+                .read(cx)
+                .buffer()
+                .comparison()
+                .unwrap()
+                .kind,
+            crate::diff::DiffKind::Staged
+        );
+    });
+}
+
+#[gpui::test]
+fn visit_file_other_window_keeps_status_visible_and_supports_init_js_rebinding(
+    cx: &mut TestAppContext,
+) {
+    let repo = repo();
+    repo.write("staged.txt", "before\n");
+    repo.commit();
+    repo.write("staged.txt", "after\n");
+    repo.git(&["add", "staged.txt"]);
+    repo.write("untracked.txt", "hello other window\n");
+
+    let (mut visual, shell) = open(&repo, cx);
+    command(&mut visual, &shell, Command::MagitStatus);
+    wait(&mut visual, &shell);
+    let status_pane = visual.read(|cx| *shell.read(cx).panes.selected());
+    let status_id = visual.read(|cx| shell.read(cx).active_buffer_id());
+    assert_eq!(visual.read(|cx| shell.read(cx).panes.leaves()), vec![0, 1]);
+
+    // C-x 4 RET on untracked file opens it in pane 0 and keeps status visible in pane 1.
+    visual.update(|window, cx| {
+        let active = shell.read(cx).active_view().clone();
+        active.update(cx, |view, cx| {
+            let offset = view
+                .buffer()
+                .text()
+                .to_string()
+                .find("?? untracked.txt")
+                .unwrap();
+            view.show_location(crate::text::ByteOffset(offset), window, cx);
+        });
+    });
+    visual.simulate_keystrokes("ctrl-x 4 enter");
+    wait(&mut visual, &shell);
+    visual.read(|cx| {
+        let shell = shell.read(cx);
+        assert_eq!(shell.panes.leaves(), vec![0, 1]);
+        assert_eq!(*shell.panes.selected(), 0);
+        assert_eq!(shell.body_panes[&status_pane].current, status_id);
+        let buf = shell.active_view().read(cx).buffer();
+        assert_eq!(
+            buf.path().as_deref(),
+            Some(repo.0.join("untracked.txt").as_path())
+        );
+    });
+
+    // Global C-x bindings still fall through from the status mode layer, and C-x 4 RET on a staged file
+    // opens the read-only index blob in pane 0 while status stays in pane 1.
+    visual.update(|window, cx| {
+        shell.update(cx, |shell, cx| shell.select_pane(status_pane, window, cx));
+        let active = shell.read(cx).active_view().clone();
+        active.update(cx, |view, cx| {
+            let text = view.buffer().text().to_string();
+            let staged_pos = text.find("Staged changes").unwrap();
+            let offset = staged_pos + text[staged_pos..].find("M. staged.txt").unwrap();
+            view.show_location(crate::text::ByteOffset(offset), window, cx);
+        });
+    });
+    visual.simulate_keystrokes("ctrl-x 4 enter");
+    wait(&mut visual, &shell);
+    visual.read(|cx| {
+        let shell = shell.read(cx);
+        assert_eq!(shell.panes.leaves(), vec![0, 1]);
+        assert_eq!(*shell.panes.selected(), 0);
+        assert_eq!(shell.body_panes[&status_pane].current, status_id);
+        let buf = shell.active_view().read(cx).buffer();
+        assert!(buf.is_read_only());
+        assert_eq!(buf.text().to_string(), "after\n");
+    });
+
+    // When status is the only pane (after C-x 1), C-x 4 RET splits and keeps status visible.
+    visual.update(|window, cx| {
+        shell.update(cx, |shell, cx| {
+            shell.select_pane(status_pane, window, cx);
+            shell.window_command(Command::DeleteOtherWindows, window, cx);
+        });
+        window.draw(cx).clear(cx);
+    });
+    visual.read(|cx| assert_eq!(shell.read(cx).panes.leaves().len(), 1));
+    visual.update(|window, cx| {
+        let active = shell.read(cx).active_view().clone();
+        active.update(cx, |view, cx| {
+            let offset = view
+                .buffer()
+                .text()
+                .to_string()
+                .find("?? untracked.txt")
+                .unwrap();
+            view.show_location(crate::text::ByteOffset(offset), window, cx);
+        });
+    });
+    visual.simulate_keystrokes("ctrl-x 4 enter");
+    wait(&mut visual, &shell);
+    visual.read(|cx| {
+        let shell = shell.read(cx);
+        assert_eq!(shell.panes.leaves().len(), 2);
+        assert_ne!(*shell.panes.selected(), status_pane);
+        assert_eq!(shell.body_panes[&status_pane].current, status_id);
+    });
+
+    // Rebinding RET to magit-diff-visit-file-other-window via init.js works in magit-status.
+    let init = repo.0.join("init.js");
+    std::fs::write(
+        &init,
+        "semacs.bindKey('enter', 'magit-diff-visit-file-other-window', { mode: 'magit-status' });",
+    )
+    .unwrap();
+    visual.update(|window, cx| {
+        shell.update(cx, |shell, cx| {
+            shell.select_pane(status_pane, window, cx);
+            shell.config_path = Some(init.clone());
+            let origin = shell.active_view().clone();
+            shell.reload_configuration(&origin, window, cx);
+        });
+    });
+    until(&mut visual, &shell, |shell| shell.reload_task.is_none());
+    visual.simulate_keystrokes("enter");
+    wait(&mut visual, &shell);
+    visual.read(|cx| {
+        let shell = shell.read(cx);
+        assert_ne!(*shell.panes.selected(), status_pane);
+        assert_eq!(shell.body_panes[&status_pane].current, status_id);
+        assert_eq!(
+            shell.active_view().read(cx).buffer().path().as_deref(),
+            Some(repo.0.join("untracked.txt").as_path())
+        );
+    });
 }

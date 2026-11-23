@@ -52,6 +52,16 @@ pub const MODES: &[ModeId] = &[
 
 const MODE_BINDINGS: &[(ModeId, &str, crate::command::Command)] = &[
     (
+        ModeId::MAGIT_STATUS,
+        "enter",
+        crate::command::Command::MagitVisitThing,
+    ),
+    (
+        ModeId::MAGIT_STATUS,
+        "ctrl-m",
+        crate::command::Command::MagitVisitThing,
+    ),
+    (
         ModeId::MAGIT_LOG,
         "enter",
         crate::command::Command::MagitVisitThing,

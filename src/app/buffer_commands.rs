@@ -281,6 +281,114 @@ impl AppShell {
         true
     }
 
+    fn is_cyclable_buffer(&self, id: BufferId) -> bool {
+        self.buffers.index_of(id).is_some_and(|index| {
+            let buffer = &self.buffers[index].buffer;
+            !buffer.display_name().starts_with(' ')
+                && buffer.mode() != crate::mode::ModeId::TREEMACS
+        })
+    }
+
+    /// Upstream GNU Emacs 31.1 `previous-buffer` / `next-buffer`
+    /// (`switch-to-prev-buffer` / `switch-to-next-buffer`).
+    pub(super) fn cycle_buffer(
+        &mut self,
+        forward: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.minibuffer.is_some() {
+            return;
+        }
+        if self.isearch.is_some() {
+            self.finish_isearch(false, false, true, Some(window), cx);
+        }
+        let pane_id = *self.panes.selected();
+        if self.panes.side() == Some(&pane_id) {
+            let target = self.active_view().clone();
+            self.show_message(&target, "Window is dedicated to *Treemacs*", cx);
+            return;
+        }
+        let old = self.body_panes[&pane_id].current;
+        let mut next_buffers = self.body_panes[&pane_id].next.clone();
+        let prev_buffers = &self.body_panes[&pane_id].previous;
+        let new_id = if forward {
+            next_buffers
+                .iter()
+                .copied()
+                .find(|&id| {
+                    id != old && self.buffers.index_of(id).is_some() && prev_buffers.contains(&id)
+                })
+                .or_else(|| {
+                    self.buffers.ids_in_mru().iter().copied().find(|&id| {
+                        id != old && self.is_cyclable_buffer(id) && !prev_buffers.contains(&id)
+                    })
+                })
+                .or_else(|| {
+                    prev_buffers
+                        .iter()
+                        .rev()
+                        .copied()
+                        .find(|&id| id != old && self.buffers.index_of(id).is_some())
+                })
+        } else {
+            prev_buffers
+                .iter()
+                .copied()
+                .find(|&id| {
+                    id != old && self.buffers.index_of(id).is_some() && !next_buffers.contains(&id)
+                })
+                .or_else(|| {
+                    self.buffers.ids_in_mru().iter().rev().copied().find(|&id| {
+                        id != old && self.is_cyclable_buffer(id) && !next_buffers.contains(&id)
+                    })
+                })
+                .or_else(|| {
+                    next_buffers.iter().rev().copied().find(|&id| {
+                        id != old
+                            && self.buffers.index_of(id).is_some()
+                            && prev_buffers.contains(&id)
+                    })
+                })
+        };
+        let Some(new_id) = new_id else {
+            let target = self.active_view().clone();
+            self.show_message(
+                &target,
+                if forward {
+                    "No next buffer"
+                } else {
+                    "No previous buffer"
+                },
+                cx,
+            );
+            return;
+        };
+        let Some(index) = self.buffers.index_of(new_id) else {
+            return;
+        };
+        self.echo = None;
+        self.cancel_file_open();
+        let old_view = self.active_view().clone();
+        old_view.update(cx, |view, cx| view.suspend_input(cx));
+        let view = self.buffer_target(index, window, cx);
+        let pane = self.body_panes.get_mut(&pane_id).unwrap();
+        pane.show_buffer(new_id);
+        if forward {
+            next_buffers.retain(|id| *id != new_id);
+        } else {
+            next_buffers.retain(|id| *id != old);
+            next_buffers.insert(0, old);
+        }
+        pane.next = next_buffers;
+        self.update_selected_views(window, cx);
+        view.update(cx, |view, cx| {
+            view.invalidate_split_geometry();
+            view.restore_input(window, cx);
+        });
+        cx.notify();
+    }
+
     pub(super) fn remove_buffer(
         &mut self,
         index: usize,
@@ -356,6 +464,7 @@ impl AppShell {
             .chain(self.tree_window.hidden.iter_mut())
         {
             pane.previous.retain(|previous| *previous != id);
+            pane.next.retain(|next| *next != id);
             pane.quit_restore.retain(|restore| restore.buffer != id);
             if let Some(mount) = pane.editors.remove(&id) {
                 mount.view.update(cx, |view, cx| view.suspend_input(cx));

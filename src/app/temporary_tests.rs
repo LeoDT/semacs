@@ -280,3 +280,40 @@ fn killed_origin_and_missing_source_never_leave_input_suspended(cx: &mut TestApp
         );
     });
 }
+
+#[gpui::test]
+fn diff_from_status_reuses_the_other_window_instead_of_splitting_status(cx: &mut TestAppContext) {
+    let repo = repo();
+    let (mut visual, shell) = open(&repo, cx);
+    let origin = visual.read(|cx| shell.read(cx).active_buffer_id());
+    command(&mut visual, &shell, Command::MagitStatus);
+    wait(&mut visual, &shell);
+    let status = visual.read(|cx| {
+        let shell = shell.read(cx);
+        assert_eq!(shell.panes.leaves(), vec![0, 1]);
+        assert_eq!(*shell.panes.selected(), 1);
+        shell.active_buffer_id()
+    });
+    // Opening unstaged diff from magit-status reuses pane 0 instead of creating a 3rd pane.
+    command(&mut visual, &shell, Command::MagitDiffUnstaged);
+    wait(&mut visual, &shell);
+    visual.read(|cx| {
+        let shell = shell.read(cx);
+        assert_eq!(shell.panes.leaves(), vec![0, 1]);
+        assert_eq!(*shell.panes.selected(), 0);
+        assert_eq!(
+            shell.body_panes[&0].active_view().read(cx).buffer().mode(),
+            ModeId::MAGIT_DIFF
+        );
+        assert_eq!(shell.body_panes[&1].current, status);
+    });
+    // Pressing q in the diff restores the previous file in pane 0 and returns focus to status in pane 1.
+    visual.simulate_keystrokes("q");
+    visual.read(|cx| {
+        let shell = shell.read(cx);
+        assert_eq!(shell.panes.leaves(), vec![0, 1]);
+        assert_eq!(*shell.panes.selected(), 1);
+        assert_eq!(shell.body_panes[&0].current, origin);
+        assert_eq!(shell.body_panes[&1].current, status);
+    });
+}

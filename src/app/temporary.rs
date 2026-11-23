@@ -16,6 +16,55 @@ pub(super) struct QuitRestore {
 }
 
 impl AppShell {
+    /// Target pane for `other-window` file/blob visits (Emacs `switch-to-buffer-other-window`).
+    /// Reuses another ordinary pane already displaying `buffer`, the recorded origin pane, or
+    /// another existing ordinary pane; splits only when the selected pane is the only ordinary pane.
+    pub(super) fn other_window_pane(
+        &mut self,
+        buffer: BufferId,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Option<u64> {
+        let source = *self.panes.selected();
+        let ordinary = self.panes.ordinary_leaves();
+        if let Some(pane) = ordinary
+            .iter()
+            .copied()
+            .find(|pane| *pane != source && self.body_panes[pane].current == buffer)
+        {
+            return Some(pane);
+        }
+        if let Some(body) = self.body_panes.get(&source)
+            && let Some(origin_pane) = body.quit_restore.iter().rev().find_map(|restore| {
+                (restore.source != source
+                    && self.body_panes.contains_key(&restore.source)
+                    && self.panes.side() != Some(&restore.source))
+                .then_some(restore.source)
+            })
+        {
+            return Some(origin_pane);
+        }
+        if let Some(other) = ordinary.iter().copied().find(|pane| *pane != source) {
+            return Some(other);
+        }
+        if self.panes.side() != Some(&source) {
+            let axis = if self.check_split(Axis::Vertical, cx).is_ok() {
+                Some(Axis::Vertical)
+            } else if self.check_split(Axis::Horizontal, cx).is_ok() {
+                Some(Axis::Horizontal)
+            } else {
+                None
+            };
+            if let Some(axis) = axis {
+                let (buf, scroll) = self.active_view().read(cx).split_state();
+                let view = Self::create_view(buf, window, cx);
+                view.update(cx, |view, cx| view.initialize_scroll(scroll, cx));
+                return Some(self.split_selected(view, axis, window, cx));
+            }
+        }
+        None
+    }
+
     pub(super) fn display_temporary(
         &mut self,
         index: usize,
@@ -41,6 +90,25 @@ impl AppShell {
             .find(|pane| self.body_panes[pane].current == buffer)
         {
             self.select_pane(pane, window, cx);
+            return;
+        }
+        if let Some(other) = self
+            .panes
+            .ordinary_leaves()
+            .into_iter()
+            .find(|pane| *pane != source)
+        {
+            let previous = self.body_panes[&other].current;
+            if self.show_buffer_in_pane(other, index, true, window, cx) {
+                let pane = self.body_panes.get_mut(&other).unwrap();
+                pane.quit_restore.retain(|restore| restore.buffer != buffer);
+                pane.quit_restore.push(QuitRestore {
+                    buffer,
+                    owner: None,
+                    previous: Some(previous),
+                    source,
+                });
+            }
             return;
         }
         let previous = self.active_buffer_id();

@@ -205,7 +205,7 @@ commands! {
     MagitCommitSquash => "magit-commit-squash", Application, [];
     MagitLogCurrent => "magit-log-current", Application, [];
     MagitShowCommit => "magit-show-commit", Application, [];
-    MagitVisitThing => "magit-visit-thing", Application("magit-log", "magit-log-select", "magit-revision"), [];
+    MagitVisitThing => "magit-visit-thing", Application("magit-status", "magit-log", "magit-log-select", "magit-revision"), [];
     MagitLogMore => "magit-log-double-commit-limit", Application("magit-log", "magit-log-select"), ["+" => "+"];
     MagitLogLess => "magit-log-half-commit-limit", Application("magit-log", "magit-log-select"), ["-" => "-"];
     MagitLogSelectPick => "magit-log-select-pick", Application("magit-log-select"), [];
@@ -235,7 +235,8 @@ commands! {
     MagitDiffJump => "magit-diff-jump", Application("magit-diff"), ["j" => "j"];
     MagitRefresh => "magit-refresh", Application("magit-diff", "magit-status", "magit-log", "magit-log-select", "magit-revision"), ["g" => "g"];
     MagitModeBuryBuffer => "magit-mode-bury-buffer", Application("magit-diff", "magit-status", "magit-process", "magit-log", "magit-log-select", "magit-revision"), ["q" => "q"];
-    MagitDiffVisit => "magit-diff-visit-file", Application("magit-diff", "magit-revision"), ["enter" => "RET", "ctrl-m" => "C-m"];
+    MagitDiffVisit => "magit-diff-visit-file", Application("magit-diff", "magit-status", "magit-revision"), ["enter" => "RET", "ctrl-m" => "C-m"];
+    MagitDiffVisitOtherWindow => "magit-diff-visit-file-other-window", Application("magit-diff", "magit-status", "magit-revision"), ["ctrl-x 4 enter" => "C-x 4 RET", "ctrl-x 4 ctrl-m" => "C-x 4 C-m"];
     ScrollLeft => "scroll-left", Application("magit-diff", "magit-status", "magit-process", "magit-log", "magit-log-select", "magit-revision", "rg"), ["alt-right" => "M-<right>"];
     ScrollRight => "scroll-right", Application("magit-diff", "magit-status", "magit-process", "magit-log", "magit-log-select", "magit-revision", "rg"), ["alt-left" => "M-<left>"];
     LoadTheme => "load-theme", Application, [];
@@ -247,6 +248,8 @@ commands! {
     SaveBuffer => "save-buffer", Application, ["ctrl-x ctrl-s" => "C-x C-s"];
     WriteFile => "write-file", Application, ["ctrl-x ctrl-w" => "C-x C-w"];
     SwitchToBuffer => "switch-to-buffer", Application, ["ctrl-x b" => "C-x b"];
+    PreviousBuffer => "previous-buffer", Application, ["ctrl-x left" => "C-x <left>", "ctrl-x ctrl-left" => "C-x C-<left>"];
+    NextBuffer => "next-buffer", Application, ["ctrl-x right" => "C-x <right>", "ctrl-x ctrl-right" => "C-x C-<right>"];
     KillBuffer => "kill-buffer", Application, ["ctrl-x k" => "C-x k"];
     KillCurrentBuffer => "kill-current-buffer", Application, ["ctrl-x ctrl-k" => "C-x C-k"];
     SplitWindowBelow => "split-window-below", Application, ["ctrl-x 2" => "C-x 2"];

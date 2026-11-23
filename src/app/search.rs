@@ -785,6 +785,7 @@ impl AppShell {
                 location: Some((location.line, location.column)),
                 tree: None,
                 pane: target_pane,
+                other_window: false,
                 select_pane: select_target,
             },
             window,

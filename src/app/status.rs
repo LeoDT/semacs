@@ -4,7 +4,7 @@ use super::{
 };
 use crate::buffer::{Buffer, BufferId};
 use crate::input::SessionToken;
-use crate::status::{RenderedStatus, Status};
+use crate::status::{RenderedStatus, Status, StatusAction};
 use crate::view::BufferView;
 use gpui_kit::{Context, Entity, Window};
 use std::sync::{Arc, atomic::AtomicBool};
@@ -295,5 +295,61 @@ impl AppShell {
             view.update(cx, |view, cx| view.restore_section_scroll(anchor, cx));
         }
         true
+    }
+
+    pub(super) fn visit_status(
+        &mut self,
+        thing: bool,
+        other_window: bool,
+        origin: &Entity<BufferView>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match origin.read(cx).buffer().status_visit(thing) {
+            Ok(StatusAction::Diff(kind)) => self.open_diff(kind, origin, window, cx),
+            Ok(StatusAction::Visit(visit)) => {
+                self.visit_git_location(visit, other_window, origin, window, cx)
+            }
+            Ok(StatusAction::WorktreeFile { path, location }) => {
+                if !path.is_file() {
+                    self.show_message(
+                        origin,
+                        "Worktree file is missing or is not a regular file",
+                        cx,
+                    );
+                    return;
+                }
+                self.visit_file_with(
+                    path,
+                    origin,
+                    super::documents::VisitOptions {
+                        location,
+                        other_window,
+                        ..Default::default()
+                    },
+                    window,
+                    cx,
+                );
+            }
+            Ok(StatusAction::Submodule(path)) => {
+                if !path.is_dir() {
+                    self.show_message(origin, "Submodule directory is missing or inaccessible", cx);
+                    return;
+                }
+                self.open_status_in(origin, Some(path), window, cx);
+            }
+            Ok(StatusAction::Directory(path)) => {
+                if std::fs::symlink_metadata(path.join(".git")).is_ok() {
+                    self.open_status_in(origin, Some(path), window, cx);
+                } else {
+                    self.show_message(
+                        origin,
+                        "Cannot visit directory (dired is not available)",
+                        cx,
+                    );
+                }
+            }
+            Err(error) => self.show_message(origin, error, cx),
+        }
     }
 }

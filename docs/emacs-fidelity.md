@@ -92,6 +92,7 @@
 | `M-x` | execute-extended-command | 是 |
 | `C-x C-f` / `C-x C-s` / `C-x C-w` | find-file / save-buffer / write-file | 是 |
 | `C-x b` / `C-x k` | switch-to-buffer / kill-buffer | 是 |
+| `C-x <left>` / `C-x C-<left>`、`C-x <right>` / `C-x C-<right>` | previous-buffer / next-buffer | 是（语义对齐 GNU Emacs 31.1 `switch-to-prev-buffer` / `switch-to-next-buffer`，按当前 window 独立历史轮换、不改写全局 MRU、跳过侧窗并在 dedicated 侧窗拒绝） |
 | `C-x C-k` | kill-current-buffer | 是（已批准默认键位差异） |
 | `C-x C-c` | save-buffers-kill-terminal | 是 |
 | `C-s` / `C-r` | isearch-forward / isearch-backward | 延后 |
@@ -334,7 +335,7 @@
 - `n` 到下一个可见 section heading；`p` 在正文先回当前 section 起点，在起点再到前一个可见 heading；`^` 到父节点。用这三个 section 移动命令跳到 hunk 时按 Magit `magit-hunk-set-window-start`：hunk 末端（hunk 之后那一行的行首，Magit 的 section end）不完全可见时把 hunk heading 放到窗口顶部；Magit 的折叠 overlay 止于 section end 之前，所以折叠只隐藏正文、不改变末端行是否可见，其他 section 没有该规则，`j`、RET 与鼠标跳转也不套用，都按上面的 point 滚动规则处理。`j` 在 diffstat 文件项与对应文件间跳转，必要时打开目标祖先。SPC / DEL / S-SPC 及原通用翻页键按可见行翻页，普通文本移动跳过隐藏正文。
 - status / diff 使用独立的分组标题、分支、hash、文件头、hunk 头、上下文、增删行和 diffstat 命名样式，见[主题 API](scripting.md#主题与命名样式)。当前 section 按各 view 的 point 提供独立于 region 的背景反馈及对应 diff 高亮样式；角色背景铺满逻辑行，字体变化参与 view 的布局身份。使用自有可配置配色，不引入 Delta、隐藏增删标记或词级高亮；折叠 heading 带指示。长行不软换行，M-右 / M-左（`scroll-left` / `scroll-right`）水平查看，point 移动到屏幕外列时跟随。普通编辑 buffer 在水平偏移为 0 时软换行，横滚期间的临时截断见[鼠标滚轮](#鼠标滚轮)。
 - `g` 重新读取相同比较。按 section 类型 / 路径 / 父链及 hunk heading 身份尽量保留折叠、各 view point 与顶部 section 相对行列；节点消失时回退到最近仍存在的祖先 heading，不能保证 hunk 内容变化后仍匹配。只读刷新没有文本 undo，也不标记 modified。
-- `RET` / `C-m` 在删除行访问旧侧，在新增 / 上下文行访问新侧并定位；heading 使用对应侧起始行。HEAD / index 使用本次 diff 的完整 blob 身份打开只读快照，不重解释为当前 index 或 worktree；unstaged 新侧复用普通文件 buffer，保留其未保存文本，行列超界时夹紧。不提供 C-RET 的跨版本行号映射。
+- `RET` / `C-m` 在删除行访问旧侧，在新增 / 上下文行访问新侧并定位；heading 使用对应侧起始行。HEAD / index 使用本次 diff 的完整 blob 身份打开只读快照，不重解释为当前 index 或 worktree；unstaged 新侧复用普通文件 buffer，保留其未保存文本，行列超界时夹紧。`C-x 4 RET` / `C-x 4 C-m`（`magit-diff-visit-file-other-window`）在 `magit-diff` / `magit-status` / `magit-revision` 中以相同目标规则在另一普通 window 打开（优先复用已显示该 buffer 的另一普通窗、来源窗或其它普通窗；唯一普通窗时自动 split）。不提供 C-RET 的跨版本行号映射。
 - Git 在后台以参数数组执行，关闭外部 diff / textconv，不运行 Git 写命令。每窗口最多一个 Git 读取，无请求队列；单次子进程 15 秒，stdout 16 MiB、stderr 64 KiB，diff 最多 4096 个文件 / 100000 行 patch，超限明确失败。禁止按需自动抓取缺失 blob；固定 worktree / git-dir，刷新不能意外回落到父仓库。刷新失败保留旧内容；结果校验目标及请求身份，不按完成时焦点重新定向。打开 / 版本访问期间焦点目标变化或进入读入会话时不抢回界面。
 
 F1 不包含 status、transient、Git 写操作、任意 revision / range、patch 导入、untracked 浏览、结构化 / 部分 hunk 选择、词级差异、hunk 语法、递归折叠全套、兄弟导航、搜索自动展开、diff 参数修改或窗口恢复式 q；新增窄写入切片见下节，后续 window 行为见 [F3](#阶段-f3临时-window-与普通-commit)。
@@ -351,7 +352,7 @@ F2 仅提供 status 与单文件整文件级 index 操作，不包含 hunk / 批
 - 头部显示转义 worktree 路径、分支和完整 HEAD OID，明确 detached / unborn；不查询 commit message、upstream 或 remote。固定依次显示 `Untracked files`、`Unstaged changes`、`Staged changes`、`Unmerged paths` 和条目数量（空组仍显示）。未跟踪目录用 Git normal 粒度，不递归展开；两侧变化可重复列项，冲突单列。保留记录顺序和原始路径，显示 XY、rename 旧 → 新及 submodule 状态；非法 UTF-8 按字节转义，不以显示文本充当身份。
 - 组默认展开、文件为无正文叶节点，root 不可折叠，叶节点 TAB / C-i 无操作；section 导航、可见行翻页、水平查看和当前 section 样式复用 F1，长行不软换行。折叠共享，point / scroll 各 view 独立；刷新按组、路径及父链恢复，rename 旧节点消失，无匹配回退最近存活祖先。reload 不重建投影。
 - 确认仓库后、读取前在主线程绑定既有 buffer / 会话或新建意图；目标失效或新建冲突时丢弃，不在完成时重查并复活会话。打开还绑定发起 pane / buffer / 输入会话，目标变化、读入或 IME 时不抢焦点、不更新已有 status。`g` / `magit-refresh` 按当前 status 或 diff 类型刷新，按会话 / 请求号安装，无需仍选中，不切焦点；读取失败保留旧内容，不冒充 clean。
-- status 中的 staged / unstaged diff 命令查看整个固定仓库比较，不隐式按 point 过滤；F1 diff 不能 stage / unstage。status 不增加 RET 文件访问、`j`、窗口恢复式 `q` 或内嵌 hunk。
+- status 中的 staged / unstaged diff 命令查看整个固定仓库比较，不隐式按 point 过滤；F1 diff 不能 stage / unstage。status 不增加 `j`（F2 历史边界；后续窗口恢复式 `q` 见 F3，内嵌 hunk 见 F4，status `RET` 文件访问对齐见 F4）。
 - 关闭 view 不杀 buffer，kill 禁止迟到投影。status 另存成功后解除会话、section、mode 和只读限制，成为普通文件；保存失败不脱离。保存 V1 期间若已刷新到 V2，成功后磁盘为 V1、内存保留 V2 且 modified；若另存成功在先，迟到刷新拒绝安装。
 
 ### 单文件写入与脚本
@@ -379,7 +380,7 @@ F2 仅提供 status 与单文件整文件级 index 操作，不包含 hunk / 批
 
 ### 临时显示与退出
 
-- status / diff 沿用既有 buffer / view / split；目标已显示时复用，否则默认尝试下方 split，空间不足或布局尚不能 split 时使用当前 window。不是新 OS frame 或浮动对话框，不自动保存普通文件。
+- status / diff 沿用既有 buffer / view / split（对齐上游 `magit-display-buffer-traditional` 与 Emacs `display-buffer`）：目标已显示时复用；否则已有其它普通 window 时在另一普通 window 显示，不再把当前 window 切成两半；仅在当前为唯一普通 window 时尝试下方 split，空间不足或布局尚不能 split 时使用当前 window。不是新 OS frame 或浮动对话框，不自动保存普通文件。
 - `q` / `magit-mode-bury-buffer` 是 status / diff 的 mode 局部命令，bury 而不 kill。关闭本次创建且无需保留局部 buffer 历史的临时 window，或恢复本次替换的 buffer / 来源焦点；被替换的既有 view 保留 point / 滚动。没有本次显示记录时使用局部历史及可用 buffer 回退，不无条件删除 window。
 - 只撤销本次显示的局部变化，不恢复整棵旧布局；用户后来创建的其他 split 保留。临时 window 已被用户用于其他 buffer 时优先恢复局部历史，最后一个 window 不删除，已关闭来源不复活；原 buffer 已 kill 时回退到存活 buffer，必要时创建 scratch。
 - 显示策略只在异步结果仍属于原目标且输入允许时执行；切换目标、进入读入、前缀等待或 IME 时不抢焦点、不追加临时 window。刷新仍不切焦点；配置 reload 不抹掉显示归属。
@@ -419,6 +420,11 @@ F2 仅提供 status 与单文件整文件级 index 操作，不包含 hunk / 批
 
 - status 的 staged / unstaged 文件包含所属比较的文件正文与 hunk sections，文件默认折叠，hunk 默认展开；untracked / unmerged 保持现有清单，不提供冲突 hunk 写入。文件头沿用 XY / 原始路径身份，正文使用既有 diff 语义样式。binary、非 UTF-8 正文、symlink / 类型变化等明确显示摘要，metadata-only 明示；不伪造可操作文本 hunk。其他 F1 / F2 支持边界不扩大。
 - `TAB`、section 导航、当前 section 高亮、共享折叠与独立 view point / scroll 沿用既有 section 模型。刷新以组 / 原始路径 / hunk heading / 父链恢复，hunk 消失或身份变化回退最近存活祖先；不保证内容变化后仍命中原 hunk。
+- status 中 `RET` / `C-m`（`magit-visit-thing`）、`M-x magit-diff-visit-file` 与 `C-x 4 RET` / `C-x 4 C-m`（`magit-diff-visit-file-other-window`）对齐上游 Magit（`942d61d5`）：
+  - `Unstaged changes` / `Staged changes` 组标题上 `RET` 分别打开 `magit-diff-unstaged` / `magit-diff-staged`；`Untracked files` / `Unmerged paths` 标题与头部无目标时回显 `There is no thing at point that could be visited`。
+  - `Untracked` / `Unmerged` 普通文件上 `RET` 在当前窗口打开 worktree 文件；submodule 与含 `.git` 的嵌套目录打开对应目录的 `magit-status`；普通未跟踪目录因无 dired 提示无法访问目录。
+  - `Unstaged` 文件 / hunk / 行上 `RET` 按上游规则访问对应侧并在当前窗口打开：新增 / 上下文行及文件 / hunk 标题访问 worktree 文件（折叠或展开的文件 / hunk 标题定位至首个 hunk / 当前 hunk 的首处变更行，复用已有 buffer 并保留未保存编辑），删除行与已删除文件访问 index 只读 blob 快照。
+  - `Staged` 文件 / hunk / 行上 `RET` 按上游默认（`magit-diff-visit-prefer-worktree = nil`）访问只读快照：新增 / 上下文行及标题访问 index blob，删除行与已删除文件访问 HEAD blob。
 - 文件 heading 的 `s` / `u` 保留 F2 整文件行为；hunk heading 或正文的同一命令仅对当前一个普通文本 hunk 操作。仍不支持非空活动 region、部分行、多 section、组级批量或 discard；独立 diff 仍只读。
 - hunk stage 将捕获的 patch 以 `git apply --cached -p0 -C3 --ignore-space-change` 应用到 index；unstage 增加 `--reverse`。保留 Git 路径引用、原始正文及无末尾换行标记，独立应用时调整新侧起始行号；普通内容 hunk 不顺带应用独立 chmod metadata。不读取未保存 buffer、不写 worktree / HEAD / refs，无额外确认、自动备份 / undo / 重试或回滚。
 - hunk patch 由 Git 按上下文匹配并报告失败，不增加 HEAD / index OID / XY 快照一致性检查，也不把整文件 stage 的执行时磁盘语义冒充 hunk 语义。现有特殊 index / sparse / 路径类型 / 外部 filter 范围限制仍适用，不通过 patch 绕过。失败保留诊断，沿用核心终态重读，不把刷新成功误报为写入成功。

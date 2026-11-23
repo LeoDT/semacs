@@ -1,5 +1,7 @@
 use super::Buffer;
-use crate::status::{RenderedStatus, Repository, Status, StatusLocation};
+use crate::status::{
+    RenderedStatus, Repository, Status, StatusAction, StatusLocation, StatusVisitSpan,
+};
 use std::sync::Arc;
 
 pub(super) struct StatusSession {
@@ -7,6 +9,7 @@ pub(super) struct StatusSession {
     request: u64,
     data: Option<Arc<Status>>,
     locations: Vec<StatusLocation>,
+    visits: Vec<StatusVisitSpan>,
     stale: bool,
 }
 
@@ -25,6 +28,7 @@ impl Buffer {
                 request: 0,
                 data: None,
                 locations: Vec::new(),
+                visits: Vec::new(),
                 stale: false,
             });
         }
@@ -75,8 +79,28 @@ impl Buffer {
         let session = doc.status.as_mut().unwrap();
         session.data = Some(Arc::new(data));
         session.locations = rendered.locations;
+        session.visits = rendered.visits;
         session.stale = false;
         true
+    }
+
+    pub(crate) fn status_visit(&self, thing: bool) -> Result<StatusAction, String> {
+        let doc = self.document.borrow();
+        let session = doc.status.as_ref().ok_or("Not a status buffer")?;
+        let data = session.data.as_ref().ok_or("Status is not ready")?;
+        let point = self.point();
+        if doc
+            .sections
+            .as_ref()
+            .is_some_and(|sections| sections.collapse_point(point) != point)
+        {
+            return Err(if thing {
+                "There is no thing at point that could be visited".into()
+            } else {
+                "No supported file location here".into()
+            });
+        }
+        data.visit(&session.visits, point, thing)
     }
 
     pub(crate) fn status_identity(&self) -> Option<(Repository, u64)> {

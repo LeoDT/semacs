@@ -25,6 +25,7 @@ pub(super) struct BodyPane {
     pub current: BufferId,
     pub editors: HashMap<BufferId, EditorMount>,
     pub previous: Vec<BufferId>,
+    pub next: Vec<BufferId>,
     pub quit_restore: Vec<super::temporary::QuitRestore>,
 }
 
@@ -38,6 +39,7 @@ impl BodyPane {
         Self {
             current,
             previous: Vec::new(),
+            next: Vec::new(),
             quit_restore: Vec::new(),
             editors: HashMap::from([(
                 current,
@@ -55,6 +57,7 @@ impl BodyPane {
             self.previous.retain(|previous| *previous != buffer);
             self.previous.insert(0, self.current);
             self.current = buffer;
+            self.next.clear();
         }
     }
 

@@ -79,7 +79,10 @@ impl AppShell {
                     self.prompt_show_commit(origin, window, cx);
                 }
             }
-            Command::MagitVisitThing | Command::MagitDiffVisit => {
+            Command::MagitVisitThing
+            | Command::MagitDiffVisit
+            | Command::MagitDiffVisitOtherWindow => {
+                let other_window = command == Command::MagitDiffVisitOtherWindow;
                 match origin.read(cx).buffer().history_action() {
                     Ok(Action::Commit(oid)) if command == Command::MagitVisitThing => {
                         self.show_history_commit(oid, origin, window, cx)
@@ -88,7 +91,7 @@ impl AppShell {
                     Ok(Action::File {
                         default: Some(visit),
                         ..
-                    }) => self.visit_git_location(visit, origin, window, cx),
+                    }) => self.visit_git_location(visit, other_window, origin, window, cx),
                     Ok(Action::File { default: None, .. }) => self.show_message(
                         origin,
                         "No supported file version exists on this side",

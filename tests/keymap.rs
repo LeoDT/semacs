@@ -71,6 +71,9 @@ fn default_bindings_match_the_emacs_reference_or_approved_contracts() {
                 "C-x 0" => Some("delete-window"),
                 // Approved override: the user binds kill-current-buffer here.
                 "C-x C-k" => Some("kill-current-buffer"),
+                // Emacs 31.1 standard buffer cycling bindings.
+                "C-x <left>" | "C-x C-<left>" => Some("previous-buffer"),
+                "C-x <right>" | "C-x C-<right>" => Some("next-buffer"),
                 // Approved F10 multiple-cursors bindings (external package convention).
                 "C->" => Some("mc/mark-next-like-this"),
                 "C-<" => Some("mc/mark-previous-like-this"),

@@ -397,7 +397,7 @@ impl AppShell {
                     return;
                 };
                 if let Some(target) = self.end_session(id, window, cx) {
-                    self.visit_git_location(version.visit, &target, window, cx);
+                    self.visit_git_location(version.visit, false, &target, window, cx);
                 }
             }
             ReadKind::MagitDiffRange {

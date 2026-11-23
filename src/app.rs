@@ -488,7 +488,22 @@ impl AppShell {
             | Command::MagitLogSelectQuit => {
                 self.commit_action_command(command, origin, window, cx)
             }
-            Command::MagitDiffVisit if origin.read(cx).buffer().history_query().is_some() => {
+            Command::MagitVisitThing
+            | Command::MagitDiffVisit
+            | Command::MagitDiffVisitOtherWindow
+                if origin.read(cx).buffer().status_repository().is_some() =>
+            {
+                self.visit_status(
+                    command == Command::MagitVisitThing,
+                    command == Command::MagitDiffVisitOtherWindow,
+                    origin,
+                    window,
+                    cx,
+                )
+            }
+            Command::MagitDiffVisit | Command::MagitDiffVisitOtherWindow
+                if origin.read(cx).buffer().history_query().is_some() =>
+            {
                 self.history_command(command, origin, window, cx)
             }
             Command::MagitLogCurrent
@@ -526,6 +541,7 @@ impl AppShell {
             | Command::MagitDiffJump
             | Command::MagitRefresh
             | Command::MagitDiffVisit
+            | Command::MagitDiffVisitOtherWindow
             | Command::ScrollLeft
             | Command::ScrollRight => self.diff_command(command, origin, window, cx),
             Command::MagitModeBuryBuffer => self.quit_temporary(window, cx),
@@ -557,6 +573,8 @@ impl AppShell {
                     .map(|index| self.buffers[index].buffer.display_name());
                 self.begin_read(ReadKind::SwitchToBuffer { default }, origin, "", window, cx);
             }
+            Command::PreviousBuffer => self.cycle_buffer(false, window, cx),
+            Command::NextBuffer => self.cycle_buffer(true, window, cx),
             Command::KillBuffer => {
                 #[cfg(unix)]
                 if self

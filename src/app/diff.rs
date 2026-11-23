@@ -106,7 +106,12 @@ impl AppShell {
                 self.refresh_history(origin, window, cx)
             }
             Command::MagitRefresh => self.refresh_diff(origin, window, cx),
-            Command::MagitDiffVisit => self.visit_diff(origin, window, cx),
+            Command::MagitDiffVisit | Command::MagitDiffVisitOtherWindow => self.visit_diff(
+                command == Command::MagitDiffVisitOtherWindow,
+                origin,
+                window,
+                cx,
+            ),
             Command::ScrollLeft | Command::ScrollRight => origin.update(cx, |view, cx| {
                 view.scroll_horizontal(command == Command::ScrollLeft, cx)
             }),
@@ -791,6 +796,7 @@ impl AppShell {
 
     fn visit_diff(
         &mut self,
+        other_window: bool,
         origin: &Entity<BufferView>,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -802,12 +808,13 @@ impl AppShell {
                 return;
             }
         };
-        self.visit_git_location(visit, origin, window, cx);
+        self.visit_git_location(visit, other_window, origin, window, cx);
     }
 
     pub(super) fn visit_git_location(
         &mut self,
         visit: Visit,
+        other_window: bool,
         origin: &Entity<BufferView>,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -822,7 +829,17 @@ impl AppShell {
                     );
                     return;
                 }
-                self.visit_file_at(path, origin, Some((line, column)), window, cx);
+                self.visit_file_with(
+                    path,
+                    origin,
+                    super::documents::VisitOptions {
+                        location: Some((line, column)),
+                        other_window,
+                        ..Default::default()
+                    },
+                    window,
+                    cx,
+                );
             }
             Visit::Blob {
                 root,
@@ -876,10 +893,24 @@ impl AppShell {
                                     );
                                     let buffer = Buffer::version_snapshot(&name, &text);
                                     let index = shell.create_buffer(buffer, window, cx);
-                                    shell.activate(index, window, cx);
-                                    shell.active_view().clone().update(cx, |view, cx| {
-                                        view.show_line_column(line, column, window, cx)
+                                    let target_pane = other_window.then(|| {
+                                        shell.other_window_pane(
+                                            shell.buffers[index].id(),
+                                            window,
+                                            cx,
+                                        )
                                     });
+                                    let switched = match target_pane.flatten() {
+                                        Some(pane) => {
+                                            shell.show_buffer_in_pane(pane, index, true, window, cx)
+                                        }
+                                        None => shell.activate(index, window, cx),
+                                    };
+                                    if switched {
+                                        shell.active_view().clone().update(cx, |view, cx| {
+                                            view.show_line_column(line, column, window, cx)
+                                        });
+                                    }
                                 }
                                 Err(error) => shell.show_message(&origin, error, cx),
                             }
