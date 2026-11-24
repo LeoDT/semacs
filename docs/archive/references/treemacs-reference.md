@@ -1,6 +1,6 @@
 # Treemacs 参照：文本树与文件浏览
 
-> 本文是方向确认后的上游参照调查，**不是 semacs 行为契约或实施规格**。首版范围、键位、布局与取舍仍待确认；当前计划见 [实施计划](../plan.md)，逐项运行结果与证据边界见 [F6 观察记录](../../tests/emacs/RESULTS.md#f6treemacs-文件夹树参照)。
+> 本文是方向确认后的上游参照调查，**不是 semacs 行为契约或实施规格**。首版范围、键位、布局与取舍仍待确认；当前计划见 [实施计划](../../plan.md)，逐项运行结果与证据边界见 [F6 观察记录](../../../tests/emacs/RESULTS.md#f6treemacs-文件夹树参照)。
 
 ## 来源与证据边界
 
@@ -30,7 +30,7 @@
 - `TAB`：root / 目录开合，文件展开 tag 段（无 tag 时回显 `No tags found for …`）；`RET`：root / 目录开合，文件走默认访问动作，tag 跳转；`h` / `l` 是 COLLAPSE / RET 的别名。
 - 目录读取与刷新保留可匹配的折叠状态与 point；`g` / `r` 刷新、`s` 排序、`<` / `>` / `=` / `w` 调整宽度（`=` 会把最长可见行宽度写回选项）。F6c 静态补充：`treemacs-fit-window-width` 遍历整个树 buffer，不限于窗口视口；`treemacs--button-close` 会删除折叠节点的子行，因此 semacs 对应的是全部未被 section 折叠的行，而不是已加载但被折叠的子节点。此处不是新增实测。
 - `n` / `p` = `treemacs-next-line` / `previous-line`（按 button 走行，受 wrap-around 影响）；`M-n` / `M-p` = `treemacs-next-neighbour` / `previous-neighbour`（同层）；**`C-n` / `C-p` 仍是 `next-line` / `previous-line`**。
-- 默认键位共 91 条（含 `o` / `t` / `y` / `C-c C-p` / `C-c C-w` 前缀），清单见 [f6-bindings.tsv](../../tests/emacs/f6-bindings.tsv)。
+- 默认键位共 91 条（含 `o` / `t` / `y` / `C-c C-p` / `C-c C-w` 前缀），清单见 [f6-bindings.tsv](../../../tests/emacs/f6-bindings.tsv)。
 
 ### 默认显示策略
 
@@ -74,4 +74,4 @@
 
 用户确认：上游 treemacs 的实测行为**全部照搬**，上述待确认的产品取舍全部按上游取值——侧窗保护语义、键位（含 `n` / `p` / `M-n` / `M-p` 与保持不动的 `C-n` / `C-p`）、根识别（project.el 优先 + 当前目录兜底）、dotfiles / gitignored 默认显示、follow 默认开启与当前文件定位、访问目标与前缀参数。上游没有的额外限制、确认或快照检查不引入。
 
-有效契约见 [保真度：阶段 F6](../emacs-fidelity.md#阶段-f6文件夹-tree-viewer)；首版不提供的上游能力（排序选择器、git 注解与 `t i`、filewatch、图标、peek、文件管理、workspaces、持久化等）也在该节末尾登记，属于已确认的首版范围缺口，不是对上游行为的改写。实施顺序见 [实施计划](../plan.md)。
+有效契约见 [保真度：阶段 F6](../../emacs-fidelity.md#阶段-f6文件夹-tree-viewer)；首版不提供的上游能力（排序选择器、git 注解与 `t i`、filewatch、图标、peek、文件管理、workspaces、持久化等）也在该节末尾登记，属于已确认的首版范围缺口，不是对上游行为的改写。实施顺序见 [实施计划](../../plan.md)。

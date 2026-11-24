@@ -1,6 +1,6 @@
 # F3 临时 window 与普通 commit：本地验证
 
-本记录冻结阶段集中审查修复后的本地结论，不随以后代码更新。有效范围见 [F3 契约](../emacs-fidelity.md#阶段-f3临时-window-与普通-commit)，来源身份见 [上游参照](../work/f3-window-commit.md)，阶段收尾与宿主验证选择仍从[计划](../plan.md)进入。
+本记录冻结阶段集中审查修复后的本地结论，不随以后代码更新。有效范围见 [F3 契约](../emacs-fidelity.md#阶段-f3临时-window-与普通-commit)，来源身份见 [上游参照](../archive/references/f3-window-commit.md)，阶段收尾与宿主验证选择仍从[计划](../plan.md)进入。
 
 ## 源码身份与环境
 

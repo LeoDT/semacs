@@ -379,7 +379,7 @@ F2 仅提供 status 与单文件整文件级 index 操作，不包含 hunk / 批
 
 ## 阶段 F3：临时 window 与普通 commit
 
-本节定义 F3 已确认的行为，扩展 F1 / F2 的历史范围；交付结论与未测边界见 [F3 归档](archive/f3-window-commit.md)，静态核对入口与来源身份见 [F3 上游参照](work/f3-window-commit.md)，后续工作见[计划](plan.md)。
+本节定义 F3 已确认的行为，扩展 F1 / F2 的历史范围；交付结论与未测边界见 [F3 归档](archive/f3-window-commit.md)，静态核对入口与来源身份见 [F3 上游参照](archive/references/f3-window-commit.md)，后续工作见[计划](plan.md)。
 
 ### 临时显示与退出
 
@@ -436,7 +436,7 @@ F2 仅提供 status 与单文件整文件级 index 操作，不包含 hunk / 批
 
 ## 阶段 F5：本地提交历史与提交整理
 
-本节扩展 F1–F4 的历史范围，不追溯改写旧阶段的排除项或验收结论。交付结论见 [F5 归档](archive/f5-history-commit.md)，上游来源与外部参照见 [F5 调研](work/f5-history-commit.md)，后续工作只见[计划](plan.md)。
+本节扩展 F1–F4 的历史范围，不追溯改写旧阶段的排除项或验收结论。交付结论见 [F5 归档](archive/f5-history-commit.md)，上游来源与外部参照见 [F5 调研](archive/references/f5-history-commit.md)，后续工作只见[计划](plan.md)。
 
 ### 日志与固定提交查看
 

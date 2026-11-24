@@ -275,5 +275,5 @@ Magit 的 rebase / merge 等流程以 Git 自身的恢复状态为真源，编�
 ## 10. 参考
 
 - semacs：`src/scripting.rs`、`src/scripting/runtime.rs`、`src/scripting/bootstrap.js`、`src/app/scripting.rs`、`src/command_registry.rs`、`src/keymap.rs`、`src/mode.rs`、`src/buffer.rs`、`src/section.rs`、`src/diff.rs`、`src/git.rs`、`src/editing/transform.rs`。
-- semacs 文档：[D26](../decisions.md#d26-rust-核心与脚本扩展)、[D28](../decisions.md#d28-buffer-mode-与结构化显示)、[JS 配置](../scripting.md)、[阶段 D 契约](../emacs-fidelity.md#阶段-djs-配置与文本变换)、[F1 契约](../emacs-fidelity.md#阶段-f1mode-与只读-magit-diff)、[Magit 源码调查](f-magit-reference.md)。
+- semacs 文档：[D26](../decisions.md#d26-rust-核心与脚本扩展)、[D28](../decisions.md#d28-buffer-mode-与结构化显示)、[JS 配置](../scripting.md)、[阶段 D 契约](../emacs-fidelity.md#阶段-djs-配置与文本变换)、[F1 契约](../emacs-fidelity.md#阶段-f1mode-与只读-magit-diff)、[Magit 源码调查](../archive/references/f-magit-reference.md)。
 - Chord：`packages/chord/docs/design.md` 的 §15 jobs（intent / run / finish、持久化与恢复）、§16 facet、§17 registries、§21 reload and rollout、§24 Durable integration；`packages/chord/README.md`。

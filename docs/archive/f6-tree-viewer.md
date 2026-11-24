@@ -8,7 +8,7 @@ F6a 项目根、F6b 独立文本树 / 固定左侧 side window、F6c 导航与�
 
 本地功能 / headless 回归和 F6b / F6c 各一次集中审查后的修复已完成；单窗口宿主功能观察与独立 fixture 核对通过，无已知阻塞性遗留。收尾没有代用户提交工作区，也没有启动下一 project 阶段。
 
-上游参照及静读补充仍见 [treemacs 参照](../work/treemacs-reference.md)，它不是 semacs 通过记录。上游目录上的显式 `o` 访问会打开 dired；用户批准 semacs 仅提示暂不支持目录访问，不创建 split，差异已进入有效契约。其余首版排除的上游能力仍以契约为准，不把候选项视为未完成 bug。
+上游参照及静读补充仍见 [treemacs 参照](references/treemacs-reference.md)，它不是 semacs 通过记录。上游目录上的显式 `o` 访问会打开 dired；用户批准 semacs 仅提示暂不支持目录访问，不创建 split，差异已进入有效契约。其余首版排除的上游能力仍以契约为准，不把候选项视为未完成 bug。
 
 ## 验证依据与边界
 

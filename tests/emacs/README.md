@@ -79,7 +79,7 @@ emacs -Q --batch \
   -l tests/emacs/f5-magit.el -f ert-run-tests-batch-and-exit
 ```
 
-运行前核对 Magit 身份；路径或依赖不同应另记环境，不默认为同一基准。本轮固定 checkout 为 `942d61d5de37c89a3a7c6cf693696b900b1d97b0`（`v4.7.1-74-g942d61d5`）。fixture 只创建于 `.pi/tmp/`，隔离系统 / 用户 Git 配置及替代仓库环境，正常结束删除；不操作日常仓库。测试捕获部分查询、日志选择和 Git 启动器；reword 另用临时 editor 与真实 Git 检查 tree / index，root / merge revision 使用真实 batch buffer。它不证明真实 command loop、按键输入、GUI 或 semacs 通过。结果与依赖源码身份见 [F5 记录](RESULTS.md#f5magit-提交与历史参照)，静态入口见 [调研](../../docs/work/f5-history-commit.md)。
+运行前核对 Magit 身份；路径或依赖不同应另记环境，不默认为同一基准。本轮固定 checkout 为 `942d61d5de37c89a3a7c6cf693696b900b1d97b0`（`v4.7.1-74-g942d61d5`）。fixture 只创建于 `.pi/tmp/`，隔离系统 / 用户 Git 配置及替代仓库环境，正常结束删除；不操作日常仓库。测试捕获部分查询、日志选择和 Git 启动器；reword 另用临时 editor 与真实 Git 检查 tree / index，root / merge revision 使用真实 batch buffer。它不证明真实 command loop、按键输入、GUI 或 semacs 通过。结果与依赖源码身份见 [F5 记录](RESULTS.md#f5magit-提交与历史参照)，静态入口见 [调研](../../docs/archive/references/f5-history-commit.md)。
 
 ## M4 滚动参照
 

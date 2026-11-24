@@ -1,11 +1,11 @@
 # F5 上游参照：提交历史与提交整理
 
-本文保留固定上游的核对入口，不维护产品能力或实现进度。有效行为与批准范围见 [F5 契约](../emacs-fidelity.md#阶段-f5本地提交历史与提交整理)，交付结论见 [F5 归档](../archive/f5-history-commit.md)，后续工作见[计划](../plan.md)，外部运行证据见 [F5 对照结果](../../tests/emacs/RESULTS.md#f5magit-提交与历史参照)。外部参照不表示 semacs 通过验收。
+本文保留固定上游的核对入口，不维护产品能力或实现进度。有效行为与批准范围见 [F5 契约](../../emacs-fidelity.md#阶段-f5本地提交历史与提交整理)，交付结论见 [F5 归档](../f5-history-commit.md)，后续工作见[计划](../../plan.md)，外部运行证据见 [F5 对照结果](../../../tests/emacs/RESULTS.md#f5magit-提交与历史参照)。外部参照不表示 semacs 通过验收。
 
 ## 固定来源与观察边界
 
 - Magit：本地 `/home/leodt/ghq/github.com/magit/magit`，`942d61d5de37c89a3a7c6cf693696b900b1d97b0`，`v4.7.1-74-g942d61d5`，调查时工作区干净。
-- Emacs 31.1、Git 2.56.0；显式加载该 checkout 和指定依赖，不加载日常 init 或整个 package 目录。依赖身份与可复现入口见 [对照说明](../../tests/emacs/README.md#f5magit-提交与历史参照)。
+- Emacs 31.1、Git 2.56.0；显式加载该 checkout 和指定依赖，不加载日常 init 或整个 package 目录。依赖身份与可复现入口见 [对照说明](../../../tests/emacs/README.md#f5magit-提交与历史参照)。
 - 已静态阅读下列入口；另运行 `tests/emacs/f5-magit.el` 的 batch ERT。源码推演、替换查询 / 启动器的直接调用、真实 Git 子进程和 batch revision buffer 分别解释，不冒充真实 command loop / GUI、完整 hook / 签名生命周期或 semacs 通过证据。
 - 不复制或翻译上游实现，不引入 Magit 为运行依赖。既有 editor / process 生命周期参照仍见 [F3](f3-window-commit.md)。
 
@@ -29,4 +29,4 @@
 
 ## 证据使用
 
-普通 commit / editor 的继承行为见 [F3 参照](f3-window-commit.md)。batch 对照只覆盖已记录的直接调用、查询捕获及 fixture Git / revision 行为，不代替真实 transient / command loop 或 GUI 观察；semacs 本地测试、审查修复和未测边界另见[本地记录](../records/f5-history-commit-local.md)。
+普通 commit / editor 的继承行为见 [F3 参照](f3-window-commit.md)。batch 对照只覆盖已记录的直接调用、查询捕获及 fixture Git / revision 行为，不代替真实 transient / command loop 或 GUI 观察；semacs 本地测试、审查修复和未测边界另见[本地记录](../../records/f5-history-commit-local.md)。

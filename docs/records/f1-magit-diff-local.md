@@ -2,7 +2,7 @@
 
 ## 身份与范围
 
-本记录对应基于 `d6a7ba4` 的 F1 未提交实现及其审查修复（Rust 1.99.1、Git 2.56.0）；行为以 [F1 契约](../emacs-fidelity.md#阶段-f1mode-与只读-magit-diff) 为准。外部行为依据是 [固定 Magit 源码参考](../work/f-magit-reference.md)，不是 Magit GUI 实测。
+本记录对应基于 `d6a7ba4` 的 F1 未提交实现及其审查修复（Rust 1.99.1、Git 2.56.0）；行为以 [F1 契约](../emacs-fidelity.md#阶段-f1mode-与只读-magit-diff) 为准。外部行为依据是 [固定 Magit 源码参考](../archive/references/f-magit-reference.md)，不是 Magit GUI 实测。
 
 实现覆盖 buffer mode / 配置期局部键位 / 命令上下文、共享 section 折叠、可见行与截断显示、staged / unstaged Git 读取、diffstat / 导航 / 刷新及正确侧的 RET 版本访问。不包含 Git 写操作或完整 Magit 工作流。
 

@@ -6,7 +6,7 @@
 - 纳入新文件的源码清单 SHA-256：`f985ec90d826720982ed7bb7882a0375ee8a09e005dc05e7aa649001a986ce6e`。清单生成入口：`git ls-files -co --exclude-standard -z -- Cargo.toml Cargo.lock src types tests examples scripts | LC_ALL=C sort -zu | xargs -0 sha256sum`；本地清单保留于 `.pi/tmp/f5-source-manifest.sha256`。该清单包含 untracked 新源码；性能驱动的普通 `source.patch` 单独不能替代它。
 - release 桌面二进制 `target/release/semacs` SHA-256：`3bcf01f561fa8aff1504f963fd5a736a0eabcbdfa0ba2a6cab6ac81ed887080c`；仅构建，未启动。
 - 本机 Rust `1.99.1 (58cf8f9c3 2026-10-13)`、Git `2.56.0`；GPUI TestPlatform / TestTextSystem，Git / helper 用 `.pi/tmp/` 下可丢弃仓库及隔离子进程，不启动桌面、不读写日常 Git 配置 / hooks / 工作文件。
-- 批准范围及有效行为见 [F5 契约](../emacs-fidelity.md#阶段-f5本地提交历史与提交整理)，不在此另维护功能规格。Magit 固定参照及 13 项外部 batch 对照见 [上游入口](../work/f5-history-commit.md) / [外部结果](../../tests/emacs/RESULTS.md#f5magit-提交与历史参照)，不是 semacs 通过记录。
+- 批准范围及有效行为见 [F5 契约](../emacs-fidelity.md#阶段-f5本地提交历史与提交整理)，不在此另维护功能规格。Magit 固定参照及 13 项外部 batch 对照见 [上游入口](../archive/references/f5-history-commit.md) / [外部结果](../../tests/emacs/RESULTS.md#f5magit-提交与历史参照)，不是 semacs 通过记录。
 
 ## 自动检查
 

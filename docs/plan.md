@@ -2,81 +2,41 @@
 
 本文是当前工作和跨会话待办的唯一入口；维护与归档规则见 [文档说明](README.md#维护规则)。范围与当前方向见 [需求](requirements.md#当前方向v1-后)，行为见 [保真度契约](emacs-fidelity.md)。里程碑按可验收行为划分，不按工期估算。
 
-## 当前状态：F11 已完成，下一步待确认后续方向
+## 当前状态：R0–F11 已完成并归档，待确认 F12 方向
 
-R0–F11、日常编辑增强及 F5 后插入项均已完成，交付摘要见 [R0–F1 归档](archive/completed-through-f1.md)、[F2 归档](archive/f2-status.md)、[F3 归档](archive/f3-window-commit.md)、[F4 归档](archive/f4-status-hunks.md)、[F5 归档](archive/f5-history-commit.md)、[F5 后插入项归档](archive/post-f5-insertions.md)、[F6 归档](archive/f6-tree-viewer.md)、[F7 归档](archive/f7-project.md)、[F8 归档](archive/f8-search-rg.md)、[F9 归档](archive/f9-isearch.md)、[F10 归档](archive/f10-multiple-cursors.md) 与 [F11 归档](archive/f11-diff-range.md)。固定源码 / 环境、结果和未测边界见[冻结记录索引](records/README.md)。
+R0–F11（含基础编辑、主题与多语言语法、Magit diff / status / commit / log / range、文件夹 tree viewer、基础 project、ripgrep 项目与文件夹搜索、isearch 增量搜索、多光标同步编辑）及阶段间小增强均已完成，交付结论与当时未测边界统一见 [已完成阶段归档索引](archive/README.md)，固定版本验收与诊断证据见 [冻结记录索引](records/README.md)。
 
 没有已知阻塞性遗留；已接受的性能观察、字体 / 中文输入差异和未测边界保持原结论，不因功能收尾或方向调整视为预算通过。
 
-用户已确认方向调整：从继续复刻 Emacs / Magit 基础功能，转为“使用 Emacs 操作逻辑的代码查看工具”。基础编辑保留；后续编辑能力以自动 / 智能缩进为主；主要精力放在 diff、文件夹 tree viewer，并加入基础 project 功能。已交付的 Git 写入不回退，但不自动扩展为完整 Magit / Git 客户端。长期边界见 [D29](decisions.md#d29-代码查看优先)。
+产品重心已确认以「使用 Emacs 操作逻辑的代码查看工具」为主线：基础编辑保留，已交付的 Git 写入保持可用但不继续扩展为完整 Magit / Git 客户端；主要精力放在代码查看、结构导航与浏览体验增强。长期边界见 [D29](decisions.md#d29-代码查看优先) 与 [需求与范围](requirements.md#当前方向v1-后)。阶段收尾后停下汇报，不自动进入下一阶段。
 
-## tree viewer 之前的小增强（已交付）
+## 后续候选方向（尚未排期，待确认 F12）
 
-用户此前确认的三项小增强均已完成，行为分别见[F2 motion 差异](emacs-fidelity.md#已登记的-f2-motion-差异)、[独立 diff 查看](emacs-fidelity.md#独立-diff-查看)、[鼠标滚轮](emacs-fidelity.md#鼠标滚轮)与[候选式读入](emacs-fidelity.md#候选式读入阶段-b)；上游静态参照的版本保留在对应契约条目内。
+以下方向已确认但尚未排期，仍不是已批准的实施顺序：
 
-1. point 离开视口时按 Emacs redisplay 居中，`M->` 按 `end-of-buffer` 的 `(recenter -3)` 定位，Magit `n` / `p` 跳到放不下的 hunk 时把 hunk heading 置顶。
-2. 鼠标滚轮按 `mwheel-scroll` / `scroll-up` / `scroll-down` 调整窗口与 point，含 Shift 水平滚动、临时截断与归零恢复；GPUI 量、整行累计和收件时间加速适配已确认。
-3. find-file 候选按 Vertico 的 history → length → alpha 排序（fuzzy 只做过滤），注解照 Marginalia `left` 格式，新增持久化 file-name history；mtime 不参与排序，不补 `./` / `../`。
-
-`kill-current-buffer`（`C-x C-k`，含 minibuffer 内退出会话）与 Magit `S-TAB` 全局 section 可见性也已交付。这些改动不改变已交付 F1–F5 的契约。
-
-## F6 文件夹 tree viewer（已完成）
-
-项目根、独立文本树 / 左侧 side window、完整首版导航与访问已完成，交付摘要和未测边界见 [F6 归档](archive/f6-tree-viewer.md)。本地回归与集中审查修复已完成，获准的单窗口宿主功能观察及独立路径 / 字节核对通过，固定身份和证据见 [F6 宿主记录](records/f6-tree-host-01.md)。这不表示精确 0.2 秒宿主时序、原生性能、IME 或 GPU 已测；窗口尺寸未提供。
-
-## F7 基础 project（已完成）
-
-按 GNU Emacs 31.1 内置 `project.el` 语义完成了项目识别、已知项目列表持久化（`$XDG_STATE_HOME/semacs/projects`）、`C-x p` 前缀与 `project-switch-project` / `project-find-file` / `project-switch-to-buffer` / `project-kill-buffers` 及管理命令，交付摘要与未测边界见 [F7 归档](archive/f7-project.md)，有效行为见 [F7 契约](emacs-fidelity.md#阶段-f7基础-project)。
-
-## F8 ripgrep 搜索（已完成）
-
-参照 GNU Emacs 31.1 `grep-mode` / `compile.el` / `project.el` 与 `rg.el`，完成了项目内搜索（`C-x p g` / `M-x rg-project` / `C-x p p` `[g]`）与任意文件夹搜索（`M-x rg`）、流式 `*rg*` 结果 buffer（`rg` mode）、按文件分组折叠、精确命中高亮、结果内导航与改条件重搜（`r`/`t`/`d`/`f`/`c`/`i`/`g`/`C-c C-k`/`q`）以及全局 `M-g n` / `M-g p` / `C-x \`` 跳转，交付摘要与未测边界见 [F8 归档](archive/f8-search-rg.md)，有效行为见 [F8 契约](emacs-fidelity.md#阶段-f8ripgrep-搜索项目与文件夹)。
-
-## F9 当前 buffer / diff 增量搜索（已完成）
-
-参照 GNU Emacs 31.1 `isearch.el` 完成了当前 buffer 与 diff / section 增量搜索（`C-s` / `C-r`）、增量正则搜索（`C-M-s` / `C-M-r`，Rust `regex` 语法）、词 / 符号 / 光标处符号搜索（`M-s w` / `M-s _` / `M-s .`）、搜索历史环、抓取文本、`M-e` 编辑与非增量搜索、折叠 section 自动临时展开 / 立即复折 / 停留保留（`M-s i` 切换跳过）、`isearch` / `isearch.lazy` 高亮以及只读 buffer 下的 IME 中文搜索。交付摘要与未测边界见 [F9 归档](archive/f9-isearch.md)，有效行为见 [F9 契约](emacs-fidelity.md#阶段-f9当前-buffer--diff-增量搜索isearch)。
-
-## F10 多选区同步编辑（已完成）
-
-参照 Emacs `multiple-cursors.el` 完成了多光标管理命令与绑定（`C->`、`C-<`、`C-c C-<`、`C-S-c C-S-c`、`mc/skip-to-*`、`mc/unmark-*` 及 `C-S-<mouse-1>`，保留内置 `C-d`）、Emacs 风格同步编辑（无 `delete-selection-mode`、每光标独立 `kill-ring`、`RET` 退出 / `C-j` 换行 / `C-g` 两段式、IME 同步提交）、多处原子单一 undo 组与连续合并、重合光标去重、同行多光标反色渲染及 mode line `mc:<数量>` 指示。交付摘要与未测边界见 [F10 归档](archive/f10-multiple-cursors.md)，有效行为见 [F10 契约](emacs-fidelity.md#阶段-f10多选区同步编辑multiple-cursors)。
-
-## F11 diff range / revision（已完成）
-
-参照上游 Magit（`942d61d5`）在现有 status / diff / log / revision 查看器上完成了任意 revision 与 range 查看：`d`（`magit-diff`）与 `D`（`magit-diff-refresh`）单键菜单、`magit-diff-dwim` / `magit-diff-range` / `magit-diff-working-tree` / `magit-diff-switch-range-type` / `magit-diff-flip-revs` 及全局 `magit-show-commit`；支持 `A..B`、`A...B`（含省略侧默认 `HEAD`）、单 rev 对比 working tree、ref 候选与 `..` / `...` 右侧补全、以及从 `magit-log` / `magit-log-select` 用多 commit region 直接打开 `<older>..<newer>`；比较身份固定到解析后的完整 OID，读取失败保留旧投影，不自动保存编辑 buffer，不扩展 Git 写工作流。交付摘要与未测边界见 [F11 归档](archive/f11-diff-range.md)，有效行为见 [F11 契约](emacs-fidelity.md#阶段-f11diff-range--revision)。
-
-阶段收尾后停下汇报，不自动进入下一阶段。
-
-## 后续方向（顺序与依赖，尚未排期）
-
-### 1. 自动 / 智能缩进（仅记录）
-
-- 需求保留；触发时机、语言范围、tree-sitter 规则与是否包含格式化均未定，不排期。
-- 复用 [D24](decisions.md#d24-缩进边界) 的缩进 / 编辑分离和唯一 Edit 入口；不引入 major-mode 插件框架。
-
-## 已确认的浏览体验增强（未排期）
-
-用户已确认以下方向都想要，搜索相关优先；代码折叠与 jump list / 返回明确不纳入当前方向。以下仍不是已批准的实施顺序。
-
-### 搜索（优先）
-
-- **isearch / diff 内搜索**：当前 buffer 增量搜索；diff 隐藏 section 的展开 / 收起策略需单独定义。
-- **项目内搜索 / occur**：ripgrep 或匹配行列表，结果可跳转；依赖 project 根、有界进程与结果 buffer。
-- **搜索范围与结果呈现**：项目 / buffer / diff 的范围选择、匹配高亮、结果列表与重复搜索；结果跳转沿用现有文件 / 位置打开方式，不新增 jump list。
-
-### 结构导航与阅读辅助
+### 结构导航与阅读辅助（tree-sitter，不引入 LSP）
 
 - **imenu / tree-sitter outline**：按函数 / 类 / Markdown 标题列出并跳转；复用现有语言查询，不引入 LSP。
 - **面包屑 / 当前符号**：在 mode line 或 header 显示路径与 tree-sitter 外层结构；不依赖 LSP。
 - **更多语言 / 符号导航**：按实际代码库补 grammar 与 outline 查询，不预建语言平台。
 
-### tree 集成
+### tree viewer 集成
 
 - **tree git 注解**：显示文件状态；复用现有 Git 读取与刷新边界。
 - **peek / 临时预览**：从 tree 短暂查看文件而不切换焦点；复用 F3 临时 window 语义。
 
-### 持久化
+### 搜索补齐（按需）
 
-- **最近项目 / 文件、树状态持久化**：按实际使用决定，不提前建设。
+- **occur**：当前 buffer 匹配行列表与跳转；沿用现有文件 / 位置打开方式，不新增 jump list。（项目 / 文件夹 ripgrep 搜索与当前 buffer / diff 增量搜索已分别在 F8、F9 交付。）
+
+### 状态持久化（按需）
+
+- **最近文件列表、树展开状态等持久化**：按实际使用决定，不提前建设（`find-file` 历史与已知项目列表已持久化）。
+
+### 自动 / 智能缩进（仅记录）
+
+- 需求保留；触发时机、语言范围、tree-sitter 规则与是否包含格式化均未定，不排期。
+- 复用 [D24](decisions.md#d24-缩进边界) 的缩进 / 编辑分离和唯一 Edit 入口；不引入 major-mode 插件框架。
 
 ### 明确不纳入当前方向
 

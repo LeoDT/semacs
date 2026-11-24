@@ -1,6 +1,6 @@
 # 已完成阶段归档：F3 临时 window 与普通 commit
 
-本页保存 F3 收尾时的交付结论和未测边界，不追随后续代码更新。有效行为见 [F3 契约](../emacs-fidelity.md#阶段-f3临时-window-与普通-commit)，JS 入口见[配置文档](../scripting.md)，来源身份见[上游参照](../work/f3-window-commit.md)，当前工作及未排期需求以[计划](../plan.md)为准。
+本页保存 F3 收尾时的交付结论和未测边界，不追随后续代码更新。有效行为见 [F3 契约](../emacs-fidelity.md#阶段-f3临时-window-与普通-commit)，JS 入口见[配置文档](../scripting.md)，来源身份见[上游参照](references/f3-window-commit.md)，当前工作及未排期需求以[计划](../plan.md)为准。
 
 ## 交付结论
 

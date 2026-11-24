@@ -177,7 +177,7 @@ Save file /tmp/x? (y, n, !, ., q, M-~, C-r, C-f, d or C-h)
 | revision 命令 | 捕获真实入口使用 `show -p --format=`，没有强制 first-parent。 |
 | root / merge revision | 真实 batch revision buffer 显示 root 的 `+base`；两父提交的 resolution fixture 由真实 Git show 产生 combined，真实 Magit buffer 含 `@@@` 及 `++resolved`。不是屏幕呈现 / 文件版本访问覆盖。 |
 
-尚未观察：真实 command loop / transient 与选择界面按键、GUI / IME、发布及 merge-range 多步查询、完整 hooks / 签名 / editor 失败生命周期、combined 的各 parent 版本访问。以上源码静态入口和实施待决范围见 [F5 调研](../../docs/work/f5-history-commit.md)，不以本记录替代产品契约或批准差异。
+尚未观察：真实 command loop / transient 与选择界面按键、GUI / IME、发布及 merge-range 多步查询、完整 hooks / 签名 / editor 失败生命周期、combined 的各 parent 版本访问。以上源码静态入口和实施待决范围见 [F5 调研](../../docs/archive/references/f5-history-commit.md)，不以本记录替代产品契约或批准差异。
 
 ## M3：鼠标选区与文件读入预填参照
 
@@ -249,7 +249,7 @@ python3 tests/emacs/drive.py m4-recenter-motion
 
 环境固定：GNU Emacs 31.1；treemacs `20251226.1307`（上游 commit `2ab5a3c89fa01bbbd99de9b8986908b2bc5a7b49`），elpa 依赖 dash `20260221.1346`、s `20260522.135`、f `20241003.1131`、ace-window `20220911.358`、avy `20241101.1357`、pfuture `20220913.1401`、hydra `20250316.1254`、lv `20200507.1518`、ht `20230703.558`、cfrs `20250729.1422`；`emacs -Q --batch` 与 `emacs -Q -nw`（40x100 pty）；fixture 在 `.pi/tmp/` 或系统临时目录；加载 `treemacs-autoloads.el`，与真实安装一致。批次观察：`2026-11-13` 本地。
 
-此前 [treemacs 参照](../../docs/work/treemacs-reference.md) 只做了源码静读；本轮首次运行 treemacs，下文以运行结果为准，并标出与静读不一致的地方。
+此前 [treemacs 参照](../../docs/archive/references/treemacs-reference.md) 只做了源码静读；本轮首次运行 treemacs，下文以运行结果为准，并标出与静读不一致的地方。
 
 ### 入口
 

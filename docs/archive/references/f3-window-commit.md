@@ -1,13 +1,13 @@
 # F3 上游参照：window 与 Git editor 生命周期
 
-本页只保留静态核对入口与来源身份，不维护实现进度、测试矩阵或另一份行为规格。有效行为见 [F3 契约](../emacs-fidelity.md#阶段-f3临时-window-与普通-commit)，交付结论见 [F3 归档](../archive/f3-window-commit.md)，后续工作见[计划](../plan.md)，本地验证见[冻结记录](../records/f3-window-commit-local.md)。密码 / passphrase 读入已由用户排除于 F3，不是阶段收尾前置条件。
+本页只保留静态核对入口与来源身份，不维护实现进度、测试矩阵或另一份行为规格。有效行为见 [F3 契约](../../emacs-fidelity.md#阶段-f3临时-window-与普通-commit)，交付结论见 [F3 归档](../f3-window-commit.md)，后续工作见[计划](../../plan.md)，本地验证见[冻结记录](../../records/f3-window-commit-local.md)。密码 / passphrase 读入已由用户排除于 F3，不是阶段收尾前置条件。
 
 ## 来源身份与参照边界
 
 - Magit 固定参照：`942d61d5de37c89a3a7c6cf693696b900b1d97b0`（`v4.7.1-74-g942d61d5`），本地 `/home/leodt/ghq/github.com/magit/magit`。
 - 补充 with-editor：本机 `with-editor-20260731.2234/with-editor.el`，包头 revision `a1f92a26e530`，SHA-256 `6ea16f15b201ab1c26b04bd4df514f915f58787786f2d58d802de5ae26dfc106`。它不是该 Magit checkout 锁定的依赖，不能混称为同一固定快照。
 - 补充 Emacs：本机 31.1 的 `lisp/window.el`、`files.el`、`server.el` 和 `vc/log-edit.el`。
-- 以上仅静态阅读，不加载日常配置、不运行 Emacs / 桌面 / 用户 hooks，不代表 command loop 或宿主观察；未复制或翻译上游实现，不引入这些包为运行依赖。来源义务见 [THIRD_PARTY](../../THIRD_PARTY.md)。
+- 以上仅静态阅读，不加载日常配置、不运行 Emacs / 桌面 / 用户 hooks，不代表 command loop 或宿主观察；未复制或翻译上游实现，不引入这些包为运行依赖。来源义务见 [THIRD_PARTY](../../../THIRD_PARTY.md)。
 
 ## 核对入口
 
