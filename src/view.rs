@@ -25,7 +25,7 @@ use crate::editing::{
 };
 use crate::input::{DisplayChange, DisplayId, DisplaySnapshot, SessionToken};
 use crate::keymap::Keymap;
-use crate::platform::{BufferInputHandler, GpuiClipboard, InputOperation};
+use crate::platform::{BufferInputHandler, GpuiClipboard, InputOperation, ReadOnlyClipboard};
 use crate::text::ByteOffset;
 use crate::theme::{StyleRole, ThemeSettings};
 
@@ -102,12 +102,49 @@ struct EmphasisResult {
     change: Option<EmphasisChange>,
 }
 
+pub(super) struct MaskMap {
+    pairs: Vec<(usize, usize)>,
+}
+
+impl MaskMap {
+    fn real_to_masked(&self, real_rel: usize) -> usize {
+        let ix = self
+            .pairs
+            .partition_point(|&(real, _)| real <= real_rel)
+            .saturating_sub(1);
+        self.pairs[ix].1
+    }
+
+    fn masked_to_real(&self, masked_rel: usize) -> usize {
+        let ix = self
+            .pairs
+            .partition_point(|&(_, masked)| masked <= masked_rel)
+            .saturating_sub(1);
+        self.pairs[ix].0
+    }
+}
+
 struct RowPart {
     range: Range<ByteOffset>,
     x: Pixels,
     width: Pixels,
     line: Option<ShapedLine>,
     cursor_stops: Vec<usize>,
+    mask: Option<MaskMap>,
+}
+
+impl RowPart {
+    pub(super) fn mask_index(&self, real_rel: usize) -> usize {
+        self.mask
+            .as_ref()
+            .map_or(real_rel, |mask| mask.real_to_masked(real_rel))
+    }
+
+    pub(super) fn unmask_index(&self, masked_rel: usize) -> usize {
+        self.mask
+            .as_ref()
+            .map_or(masked_rel, |mask| mask.masked_to_real(masked_rel))
+    }
 }
 
 struct ShapedRow {
@@ -130,11 +167,19 @@ impl ShapedRow {
             .text()
             .chunks_in_range(row.start.0..row.start.0 + row.row.content_len)
             .collect();
+        let mask_split = metrics
+            .settings()
+            .mask_from
+            .map(|from| from.saturating_sub(row.start.0).min(text.len()));
+        let (plain, secret) = match mask_split {
+            Some(split) if split < text.len() => (&text[..split], Some(&text[split..])),
+            _ => (text.as_str(), None),
+        };
         let mut parts = Vec::new();
         let mut phase = row.row.tab_phase;
         let mut x = px(0.);
         let mut start = 0;
-        for (offset, fragment) in text.split_inclusive('\t').scan(0, |offset, fragment| {
+        for (offset, fragment) in plain.split_inclusive('\t').scan(0, |offset, fragment| {
             let start = *offset;
             *offset += fragment.len();
             Some((start, fragment))
@@ -162,6 +207,7 @@ impl ShapedRow {
                     width,
                     cursor_stops: cursor::cursor_stops(&line),
                     line: Some(line),
+                    mask: None,
                 });
                 x += width;
                 phase = metrics.advance_phase(phase, width);
@@ -175,13 +221,40 @@ impl ShapedRow {
                     width,
                     line: None,
                     cursor_stops: Vec::new(),
+                    mask: None,
                 });
                 x += width;
                 phase = px(0.);
             }
             start = offset + fragment.len();
         }
-        debug_assert_eq!(start, text.len());
+        debug_assert_eq!(start, plain.len());
+        if let Some(secret) = secret {
+            let count = secret.chars().count();
+            let mut masked = String::with_capacity(count * '•'.len_utf8());
+            let mut pairs = Vec::with_capacity(count + 1);
+            let mut cursor_stops = Vec::with_capacity(count + 1);
+            for (real_rel, _) in secret.char_indices() {
+                pairs.push((real_rel, masked.len()));
+                cursor_stops.push(real_rel);
+                masked.push('•');
+            }
+            pairs.push((secret.len(), masked.len()));
+            cursor_stops.push(secret.len());
+            let split = mask_split.unwrap();
+            let runs = metrics.runs(&masked, row.start.0 + split);
+            let line = system.shape_line(masked.into(), metrics.settings().font_size, &runs, None);
+            let width = line.width();
+            parts.push(RowPart {
+                range: ByteOffset(row.start.0 + split)..ByteOffset(row.start.0 + text.len()),
+                x,
+                width,
+                cursor_stops,
+                line: Some(line),
+                mask: Some(MaskMap { pairs }),
+            });
+            x += width;
+        }
         Self {
             source: row,
             parts,
@@ -201,7 +274,9 @@ impl ShapedRow {
                 return Some(
                     part.x
                         + match &part.line {
-                            Some(line) => line.x_for_index(offset.0 - part.range.start.0),
+                            Some(line) => {
+                                line.x_for_index(part.mask_index(offset.0 - part.range.start.0))
+                            }
                             None if offset == part.range.start => px(0.),
                             None => part.width,
                         },
@@ -222,11 +297,12 @@ impl ShapedRow {
                             .chars()
                             .next()
                             .map_or(before, |ch| before + ch.len_utf8());
-                        if x - line.x_for_index(before) > line.x_for_index(after) - x {
+                        let chosen = if x - line.x_for_index(before) > line.x_for_index(after) - x {
                             after
                         } else {
                             before
-                        }
+                        };
+                        part.unmask_index(chosen)
                     }
                     None => usize::from(x > part.x + part.width / 2.),
                 };
@@ -439,6 +515,7 @@ pub struct BufferView {
     message: Option<SharedString>,
     message_task: Option<Task<()>>,
     annotate_message: bool,
+    secret: bool,
     annotation_cache: std::cell::RefCell<Option<feedback::AnnotationLayout>>,
     isearch_highlight: Option<IsearchHighlight>,
     isearch_capture: Option<IsearchCapture>,
@@ -484,6 +561,7 @@ impl BufferView {
                 tab_size: TAB_WIDTH,
                 typography: Default::default(),
                 visible_lines: None,
+                mask_from: None,
             },
             metrics: None,
             index: None,
@@ -512,6 +590,7 @@ impl BufferView {
             message: None,
             message_task: None,
             annotate_message: false,
+            secret: false,
             annotation_cache: std::cell::RefCell::new(None),
             isearch_highlight: None,
             isearch_capture: None,
@@ -543,6 +622,18 @@ impl BufferView {
         cx.notify();
     }
 
+    pub(crate) fn set_secret(&mut self, secret: bool, cx: &mut Context<Self>) {
+        if self.secret != secret {
+            self.secret = secret;
+            self.invalidate_input_registration();
+            cx.notify();
+        }
+    }
+
+    pub(crate) fn is_secret(&self) -> bool {
+        self.secret
+    }
+
     pub fn display_snapshot(&self) -> DisplaySnapshot {
         self.target.display_snapshot()
     }
@@ -567,6 +658,7 @@ impl BufferView {
             .buffer()
             .sections()
             .map(|sections| sections.visible_lines());
+        self.settings.mask_from = self.secret.then(|| self.buffer().read_only_prefix().0);
         self.geometry = None;
         self.observed_snapshot = self.buffer().snapshot();
         self.observed_revision = revision;
@@ -1409,6 +1501,7 @@ impl BufferView {
             .buffer()
             .sections()
             .map(|sections| sections.visible_lines());
+        self.settings.mask_from = self.secret.then(|| self.buffer().read_only_prefix().0);
         let snapshot = self.display_snapshot();
         let typography = self.typography(cx);
         if typography == self.settings.typography {
@@ -1834,12 +1927,20 @@ impl BufferView {
         );
         let before_point = self.target.buffer().point();
         let token = self.target.token();
-        let clipboard = GpuiClipboard::new(cx);
+        let read_only_clipboard;
+        let gpui_clipboard;
+        let clipboard: &dyn crate::editing::SystemClipboard = if self.secret {
+            read_only_clipboard = ReadOnlyClipboard::new(cx);
+            &read_only_clipboard
+        } else {
+            gpui_clipboard = GpuiClipboard::new(cx);
+            &gpui_clipboard
+        };
         let context = CommandContext {
             viewport: viewport
                 .as_ref()
                 .map(|viewport| viewport as &dyn CommandViewport),
-            clipboard: Some(&clipboard),
+            clipboard: Some(clipboard),
         };
         let result = match layers {
             KeyLayers::Body { local, global } => self.target.dispatch_keystroke(
@@ -1916,7 +2017,15 @@ impl BufferView {
             display,
         );
         let before_point = self.target.buffer().point();
-        let clipboard = GpuiClipboard::new(cx);
+        let read_only_clipboard;
+        let gpui_clipboard;
+        let clipboard: &dyn crate::editing::SystemClipboard = if self.secret {
+            read_only_clipboard = ReadOnlyClipboard::new(cx);
+            &read_only_clipboard
+        } else {
+            gpui_clipboard = GpuiClipboard::new(cx);
+            &gpui_clipboard
+        };
         let result = self.target.execute_with_context(
             self.target.token(),
             command,
@@ -1924,7 +2033,7 @@ impl BufferView {
                 viewport: viewport
                     .as_ref()
                     .map(|viewport| viewport as &dyn CommandViewport),
-                clipboard: Some(&clipboard),
+                clipboard: Some(clipboard),
             },
         );
         match result {

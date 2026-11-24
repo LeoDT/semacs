@@ -4,7 +4,7 @@ use std::sync::atomic::AtomicBool;
 
 use super::Buffer;
 use crate::section::Sections;
-use crate::tree::{Node, RenderedTree, Tree};
+use crate::tree::{Node, RenderedTree, Tree, TreeGitStatus};
 
 #[cfg(test)]
 #[path = "tree_tests.rs"]
@@ -17,7 +17,10 @@ mod navigation_tests;
 pub(super) struct TreeSession {
     data: Arc<Tree>,
     nodes: Vec<Node>,
+    git: Option<Arc<TreeGitStatus>>,
+    git_version: u64,
     request: u64,
+    git_serial: u64,
 }
 
 #[derive(Clone)]
@@ -34,6 +37,8 @@ pub(crate) struct Request {
     pub root: PathBuf,
     data: Arc<Tree>,
     previous: Option<Arc<Sections>>,
+    git: Option<Arc<TreeGitStatus>>,
+    pub git_version: u64,
     action: ReadAction,
 }
 
@@ -62,12 +67,13 @@ impl Request {
             }
             ReadAction::Fold(..) => self.data,
         };
-        let mut rendered = data.render(
+        let mut rendered = data.render_with_git(
             self.previous.as_deref(),
             match &self.action {
                 ReadAction::Fold(node, collapsed) => Some((node.path.as_path(), *collapsed)),
                 _ => None,
             },
+            self.git.as_deref(),
         )?;
         if let ReadAction::Locate(path) = self.action {
             let heading = rendered
@@ -75,7 +81,7 @@ impl Request {
                 .ok_or("Tree node no longer exists")?
                 .heading;
             rendered.sections.reveal(heading);
-            rendered = data.render(Some(&rendered.sections), None)?;
+            rendered = data.render_with_git(Some(&rendered.sections), None, self.git.as_deref())?;
         }
         Ok((data, rendered))
     }
@@ -86,15 +92,18 @@ impl Buffer {
         let mut buffer = Self::named("*Treemacs*");
         let data = Arc::new(Tree::new(root));
         let rendered = data
-            .render(None, None)
+            .render_with_git(None, None, None)
             .expect("valid initial tree projection");
         buffer.set_mode(crate::mode::ModeId::TREEMACS);
         buffer.set_read_only(true);
-        buffer.replace_projection(&rendered.text, rendered.sections, Vec::new());
+        buffer.replace_projection(&rendered.text, rendered.sections, rendered.styles);
         buffer.document.borrow_mut().tree = Some(TreeSession {
             data,
             nodes: rendered.nodes,
+            git: None,
+            git_version: 0,
             request: 0,
+            git_serial: 0,
         });
         buffer
     }
@@ -242,31 +251,87 @@ impl Buffer {
             root: session.data.root.clone(),
             data: session.data.clone(),
             previous,
+            git: session.git.clone(),
+            git_version: session.git_version,
             action,
         })
+    }
+
+    pub(crate) fn begin_tree_git_request(&self) -> Option<(PathBuf, u64)> {
+        let mut doc = self.document.borrow_mut();
+        if doc.path.is_some() || doc.mode != crate::mode::ModeId::TREEMACS {
+            return None;
+        }
+        let session = doc.tree.as_mut()?;
+        session.git_serial = session
+            .git_serial
+            .checked_add(1)
+            .expect("tree git request identity exhausted");
+        Some((session.data.root.clone(), session.git_serial))
+    }
+
+    pub(crate) fn install_tree_git_status(
+        &mut self,
+        serial: u64,
+        root: &Path,
+        status: Option<Arc<TreeGitStatus>>,
+    ) -> bool {
+        let (data, previous) = {
+            let doc = self.document.borrow();
+            if doc.path.is_some() || doc.mode != crate::mode::ModeId::TREEMACS {
+                return false;
+            }
+            let Some(session) = doc.tree.as_ref() else {
+                return false;
+            };
+            if session.git_serial != serial || session.data.root != root {
+                return false;
+            }
+            (session.data.clone(), doc.sections.clone())
+        };
+        let Ok(rendered) = data.render_with_git(previous.as_deref(), None, status.as_deref())
+        else {
+            return false;
+        };
+        self.replace_projection(&rendered.text, rendered.sections, rendered.styles);
+        let mut doc = self.document.borrow_mut();
+        let session = doc.tree.as_mut().unwrap();
+        session.nodes = rendered.nodes;
+        session.git = status;
+        session.git_version += 1;
+        true
     }
 
     pub(crate) fn install_tree(
         &mut self,
         serial: u64,
+        git_version: u64,
         root: &Path,
         data: Arc<Tree>,
-        rendered: RenderedTree,
+        mut rendered: RenderedTree,
     ) -> bool {
-        let valid = {
+        let current_git = {
             let doc = self.document.borrow();
-            doc.path.is_none()
+            let valid = doc.path.is_none()
                 && doc.mode == crate::mode::ModeId::TREEMACS
                 && doc
                     .tree
                     .as_ref()
                     .is_some_and(|session| session.request == serial && session.data.root == root)
-                && data.root == root
+                && data.root == root;
+            if !valid {
+                return false;
+            }
+            let session = doc.tree.as_ref().unwrap();
+            (session.git_version != git_version).then(|| session.git.clone())
         };
-        if !valid {
-            return false;
+        if let Some(git) = current_git
+            && let Ok(re_rendered) =
+                data.render_with_git(Some(&rendered.sections), None, git.as_deref())
+        {
+            rendered = re_rendered;
         }
-        self.replace_projection(&rendered.text, rendered.sections, Vec::new());
+        self.replace_projection(&rendered.text, rendered.sections, rendered.styles);
         let mut doc = self.document.borrow_mut();
         let session = doc.tree.as_mut().unwrap();
         session.data = data;

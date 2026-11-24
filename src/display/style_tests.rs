@@ -16,6 +16,7 @@ fn settings() -> LayoutSettings {
         tab_size: 8,
         typography: Typography::default(),
         visible_lines: None,
+        mask_from: None,
     }
 }
 

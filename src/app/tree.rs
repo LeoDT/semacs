@@ -80,6 +80,19 @@ impl Drop for TreeWork {
     }
 }
 
+pub(super) struct TreeGitWork {
+    buffer: crate::buffer::BufferId,
+    serial: u64,
+    cancelled: Arc<AtomicBool>,
+    _task: Task<()>,
+}
+
+impl Drop for TreeGitWork {
+    fn drop(&mut self) {
+        self.cancelled.store(true, Ordering::Relaxed);
+    }
+}
+
 impl AppShell {
     pub(super) fn open_tree_for_project(
         &mut self,
@@ -205,6 +218,8 @@ impl AppShell {
         if fresh {
             let target = self.active_view().clone();
             self.tree_command(Command::TreemacsRefresh, &target, window, cx);
+        } else {
+            self.schedule_tree_git_refresh(0, window, cx);
         }
         cx.notify();
     }
@@ -317,12 +332,15 @@ impl AppShell {
             }
             TreemacsHidden => self.enqueue_tree(origin, Action::Hidden, window, cx),
             TreemacsToggle | TreemacsRefresh => {
-                let result = origin
-                    .read(cx)
-                    .buffer()
-                    .tree_action(command == TreemacsRefresh);
+                let is_refresh = command == TreemacsRefresh;
+                let result = origin.read(cx).buffer().tree_action(is_refresh);
                 match result {
-                    Ok(action) => self.enqueue_tree(origin, action, window, cx),
+                    Ok(action) => {
+                        self.enqueue_tree(origin, action, window, cx);
+                        if is_refresh {
+                            self.schedule_tree_git_refresh(0, window, cx);
+                        }
+                    }
                     Err(error) => self.show_message(origin, error, cx),
                 }
             }
@@ -393,6 +411,7 @@ impl AppShell {
             }
         };
         let serial = request.serial;
+        let git_version = request.git_version;
         let root = request.root.clone();
         let cancelled = Arc::new(AtomicBool::new(false));
         let worker_cancelled = cancelled.clone();
@@ -432,10 +451,13 @@ impl AppShell {
                                     (view, anchor)
                                 })
                                 .collect();
-                            if shell.buffers[index]
-                                .buffer
-                                .install_tree(serial, &root, data, rendered)
-                            {
+                            if shell.buffers[index].buffer.install_tree(
+                                serial,
+                                git_version,
+                                &root,
+                                data,
+                                rendered,
+                            ) {
                                 shell.refresh_buffer(id, cx);
                                 for (view, anchor) in views {
                                     view.update(cx, |view, cx| {
@@ -731,6 +753,91 @@ impl AppShell {
         }));
     }
 
+    pub(super) fn schedule_tree_git_refresh(
+        &mut self,
+        debounce_ms: u64,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.exiting() {
+            return;
+        }
+        let Some(index) = self
+            .buffers
+            .iter()
+            .position(|slot| slot.buffer.tree_root().is_some())
+        else {
+            return;
+        };
+        let id = self.buffers[index].id();
+        let Some((root, serial)) = self.buffers[index].buffer.begin_tree_git_request() else {
+            return;
+        };
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let worker_cancelled = cancelled.clone();
+        let worker_root = root.clone();
+        let task = cx.spawn_in(window, async move |shell, cx| {
+            if debounce_ms > 0 {
+                cx.background_executor()
+                    .timer(Duration::from_millis(debounce_ms))
+                    .await;
+            }
+            if worker_cancelled.load(Ordering::Relaxed) {
+                return;
+            }
+            let status = cx
+                .background_executor()
+                .spawn(async move {
+                    if worker_cancelled.load(Ordering::Relaxed) {
+                        return None;
+                    }
+                    crate::tree::TreeGitStatus::load(&worker_root, &worker_cancelled).map(Arc::new)
+                })
+                .await;
+            shell
+                .update_in(cx, |shell, _, cx| {
+                    if !shell
+                        .tree_git_work
+                        .as_ref()
+                        .is_some_and(|work| work.buffer == id && work.serial == serial)
+                    {
+                        return;
+                    }
+                    shell.tree_git_work = None;
+                    let Some(index) = shell.buffers.index_of(id) else {
+                        return;
+                    };
+                    let views: Vec<_> = shell
+                        .all_views()
+                        .into_iter()
+                        .filter(|view| view.read(cx).buffer().snapshot_id().buffer == id)
+                        .map(|view| {
+                            let anchor = view.read(cx).section_scroll_anchor();
+                            (view, anchor)
+                        })
+                        .collect();
+                    if shell.buffers[index]
+                        .buffer
+                        .install_tree_git_status(serial, &root, status)
+                    {
+                        shell.refresh_buffer(id, cx);
+                        for (view, anchor) in views {
+                            view.update(cx, |view, cx| {
+                                view.restore_section_scroll(anchor, cx);
+                            });
+                        }
+                    }
+                })
+                .ok();
+        });
+        self.tree_git_work = Some(TreeGitWork {
+            buffer: id,
+            serial,
+            cancelled,
+            _task: task,
+        });
+    }
+
     pub(super) fn discard_tree_window(
         &mut self,
         id: crate::buffer::BufferId,
@@ -743,6 +850,13 @@ impl AppShell {
             .is_some_and(|work| work.buffer == id)
         {
             self.tree_work = None;
+        }
+        if self
+            .tree_git_work
+            .as_ref()
+            .is_some_and(|work| work.buffer == id)
+        {
+            self.tree_git_work = None;
         }
         if let Some(side) = self.panes.side().copied()
             && self.body_panes[&side].current == id

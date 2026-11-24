@@ -532,6 +532,8 @@ impl AppShell {
         };
         if !saved {
             self.buffers[index].save.take_pending();
+        } else {
+            self.schedule_tree_git_refresh(200, window, cx);
         }
         let view = self.buffer_target(index, window, cx);
         self.after_save(&view, saved, message, window, cx);

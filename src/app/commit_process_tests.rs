@@ -16,6 +16,8 @@ fn repository() -> Repository {
 fn record(operation: u64, output: &[u8]) -> CommitRecord {
     CommitRecord {
         operation,
+        kind: crate::app::commits::ProcessKind::Commit,
+        label: "git commit".into(),
         repository: repository(),
         phase: CommitPhase::Running,
         output: output.to_vec(),

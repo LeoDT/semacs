@@ -61,6 +61,8 @@ fn file_associations_and_fence_aliases_are_explicit() {
         (&["md", "markdown"][..], LanguageId::Markdown),
         (&["html", "htm"][..], LanguageId::Html),
         (&["css"][..], LanguageId::Css),
+        (&["json"][..], LanguageId::Json),
+        (&["json5", "jsonc"][..], LanguageId::Json5),
     ] {
         for suffix in suffixes {
             assert_eq!(
@@ -207,6 +209,43 @@ fn css_representative_syntax_is_colored() {
 }
 
 #[test]
+fn json_and_json5_highlight_keys_values_comments_and_booleans() {
+    let json_text = r#"{"name": "semacs\n", "count": 42, "ok": true, "extra": null}"#;
+    let json = parsed("config.json", json_text);
+    assert!(!json.layers[0].tree.root_node().has_error());
+    for (token, style) in [
+        ("name", StyleRole::SyntaxFunction),
+        ("semacs", StyleRole::SyntaxString),
+        ("42", StyleRole::SyntaxNumber),
+        ("true", StyleRole::SyntaxConstant),
+        ("null", StyleRole::SyntaxConstant),
+        ("{", StyleRole::SyntaxPunctuation),
+    ] {
+        assert_token(&json, json_text, token, style);
+    }
+
+    let json5_text = "// comment\n{ unquotedKey: 'val', \"quotedKey\": 0x2A, flag: false, empty: null, /* block */ }";
+    let json5 = parsed("config.json5", json5_text);
+    assert!(!json5.layers[0].tree.root_node().has_error());
+    for (token, style) in [
+        ("// comment", StyleRole::SyntaxComment),
+        ("unquotedKey", StyleRole::SyntaxFunction),
+        ("'val'", StyleRole::SyntaxString),
+        ("quotedKey", StyleRole::SyntaxFunction),
+        ("0x2A", StyleRole::SyntaxNumber),
+        ("false", StyleRole::SyntaxConstant),
+        ("null", StyleRole::SyntaxConstant),
+        ("/* block */", StyleRole::SyntaxComment),
+        ("{", StyleRole::SyntaxPunctuation),
+    ] {
+        assert_token(&json5, json5_text, token, style);
+    }
+
+    let jsonc = parsed("tsconfig.jsonc", "{ /* jsonc */ \"strict\": true, }");
+    assert!(!jsonc.layers[0].tree.root_node().has_error());
+}
+
+#[test]
 fn markdown_blocks_inlines_tables_and_unknown_fences_have_defined_styles() {
     let text = "# Heading\n\n*italic* **bold** [label](https://example.com) `code`\n\n| Header |\n| --- |\n| *cell* |\n\n```unknown\nconst no_color = 42;\n```\n";
     let parsed = parsed("a.md", text);
@@ -260,6 +299,8 @@ fn markdown_fences_support_every_registered_public_language_and_html_children() 
             "const",
             StyleRole::SyntaxKeyword,
         ),
+        ("json", r#"{"key": 42}"#, "key", StyleRole::SyntaxFunction),
+        ("json5", "{ key: true }", "true", StyleRole::SyntaxConstant),
         ("markdown", "# Heading", "Heading", StyleRole::MarkupHeading),
     ] {
         let text = format!("中🙂\n\n```{alias}\n{code}\n```\n");

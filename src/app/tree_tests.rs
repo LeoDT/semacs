@@ -422,3 +422,78 @@ fn previous_and_next_buffer_respect_dedicated_tree_side_window(cx: &mut TestAppC
         visual.read(|cx| assert_ne!(shell.read(cx).active_buffer_id(), tree_id));
     }
 }
+
+fn wait_with_git(visual: &mut VisualTestContext, shell: &Entity<AppShell>) {
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        visual.run_until_parked();
+        visual.update(|window, cx| window.draw(cx).clear(cx));
+        if visual.read(|cx| {
+            let shell = shell.read(cx);
+            shell.tree_work.is_none()
+                && shell.tree_git_work.is_none()
+                && shell.file_task.is_none()
+                && shell.opening.is_none()
+        }) {
+            return;
+        }
+        visual.executor().advance_clock(Duration::from_millis(250));
+        assert!(Instant::now() < deadline, "tree git request did not finish");
+        std::thread::yield_now();
+    }
+}
+
+#[gpui::test]
+fn tree_applies_async_git_colors_without_blocking_expansion(cx: &mut TestAppContext) {
+    let fixture = Fixture::new();
+    let status = std::process::Command::new("git")
+        .arg("init")
+        .arg("-q")
+        .current_dir(&fixture.0)
+        .status()
+        .unwrap();
+    assert!(status.success());
+    fixture.file(".gitignore");
+    std::fs::write(fixture.0.join(".gitignore"), "ignored.log\ntarget/\n").unwrap();
+    fixture.file("ignored.log");
+    fixture.file("target/out.bin");
+    fixture.file("src/main.rs");
+    let status = std::process::Command::new("git")
+        .args(["add", ".gitignore", "src/main.rs"])
+        .current_dir(&fixture.0)
+        .status()
+        .unwrap();
+    assert!(status.success());
+
+    let (mut visual, shell) = open(&fixture, cx);
+    command(&mut visual, &shell, Command::Treemacs);
+    wait_with_git(&mut visual, &shell);
+
+    // Expanding a directory uses cached git colors immediately without needing a fresh git run.
+    point_at(&mut visual, &shell, &fixture.0.join("target"));
+    command(&mut visual, &shell, Command::TreemacsToggle);
+    wait(&mut visual, &shell);
+
+    visual.read(|cx| {
+        let buffer = shell.read(cx).active_view().read(cx).buffer();
+        let text = buffer.text().to_string();
+        let styles = buffer.named_styles();
+        let style_of = |needle: &str| {
+            let start = crate::text::ByteOffset(text.find(needle).unwrap());
+            let end = crate::text::ByteOffset(start.0 + needle.len());
+            styles
+                .iter()
+                .find(|(range, _)| *range == (start..end))
+                .map(|(_, role)| *role)
+        };
+        assert_eq!(
+            style_of("ignored.log"),
+            Some(crate::theme::StyleRole::TreeIgnored)
+        );
+        assert_eq!(
+            style_of("out.bin"),
+            Some(crate::theme::StyleRole::TreeIgnored)
+        );
+        assert_eq!(style_of("src"), Some(crate::theme::StyleRole::TreeGitAdded));
+    });
+}

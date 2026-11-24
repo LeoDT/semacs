@@ -18,7 +18,9 @@ type SemacsStyleName =
     | "diff.removed-highlight" | "diff.context-highlight"
     | "diffstat.added" | "diffstat.removed" | "section.current" | "section.heading"
     | "magit.branch" | "magit.hash"
-    | "search.file" | "search.line-number" | "search.match";
+    | "search.file" | "search.line-number" | "search.match"
+    | "tree.root" | "tree.directory" | "tree.file" | "tree.ignored"
+    | "tree.git.modified" | "tree.git.untracked" | "tree.git.added" | "tree.git.conflict";
 
 interface SemacsTextStyle {
     foreground?: string;
@@ -31,7 +33,7 @@ interface SemacsTextStyle {
 
 type SemacsStyleColors<N extends SemacsStyleName> =
     N extends "region" | "section.current" ? { background?: string } :
-    N extends "default" | "minibuffer-prompt" | "section.heading" | `syntax.${string}` | `markup.${string}` | `diff.${string}` | `diffstat.${string}` | `magit.${string}` | `search.${string}` ? SemacsTextStyle :
+    N extends "default" | "minibuffer-prompt" | "section.heading" | `syntax.${string}` | `markup.${string}` | `diff.${string}` | `diffstat.${string}` | `magit.${string}` | `search.${string}` | `tree.${string}` ? SemacsTextStyle :
     N extends "completion-match" | "completion-annotation" | "separator" ? { foreground?: string } :
     { foreground?: string; background?: string };
 

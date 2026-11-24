@@ -28,16 +28,33 @@ fn known_non_secret_prompts_match_upstream_token_spellings() {
         ))
     );
     for input in [
-        "Password: ",
-        "Passphrase for key: ",
         "Token: ",
-        "Enter PIN for card: ",
         "Continue [YES/NO]",
         "Continue [y/n] later",
         "Username: ",
         "unrecognized: ",
     ] {
         assert_eq!(detect(input.as_bytes()), None, "{input}");
+    }
+    for (input, expected) in [
+        ("Password: ", "Password: "),
+        ("Passphrase for key: ", "Passphrase for key: "),
+        ("Enter PIN for card: ", "Enter PIN for card: "),
+        (
+            "Enter passphrase for key '/home/u/.ssh/id_ed25519': ",
+            "Enter passphrase for key '/home/u/.ssh/id_ed25519': ",
+        ),
+        (
+            "Password for 'https://example.invalid':",
+            "Password for 'https://example.invalid': ",
+        ),
+        ("git@github.com's password: ", "git@github.com's password: "),
+    ] {
+        assert_eq!(
+            detect(input.as_bytes()),
+            Some(Prompt::Password(expected.into())),
+            "{input}"
+        );
     }
 }
 

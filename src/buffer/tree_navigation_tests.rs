@@ -6,9 +6,10 @@ use crate::tree::tests::Fixture;
 fn apply(buffer: &mut Buffer, action: Action) {
     let request = buffer.begin_tree_action(action).unwrap();
     let serial = request.serial;
+    let git_version = request.git_version;
     let root = request.root.clone();
     let (data, rendered) = request.read(&AtomicBool::new(false)).unwrap();
-    assert!(buffer.install_tree(serial, &root, data, rendered));
+    assert!(buffer.install_tree(serial, git_version, &root, data, rendered));
 }
 
 fn navigate(buffer: &mut Buffer, command: Command) -> Result<(), String> {

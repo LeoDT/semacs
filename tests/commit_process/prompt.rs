@@ -85,6 +85,7 @@ fn isolated_prompt_ui_child(cx: &mut gpui_kit::TestAppContext) {
         "cancel-question",
         "terminal",
         "password",
+        "cancel-password",
     ] {
         eprintln!("prompt phase: {phase}");
         let fixture = Fixture::new();
@@ -110,7 +111,14 @@ IFS= read -r reply <&3
 printf '%s\n' "$reply" > .git/default"#
             } else if phase == "password" {
                 r#"echo "$PPID" > .git/git-pid
-printf 'Password: ' > /dev/tty
+exec 3<>/dev/tty
+printf 'Password: ' >&3
+IFS= read -r reply <&3
+printf '%s\n' "$reply" > .git/secret
+exit 1"#
+            } else if phase == "cancel-password" {
+                r#"echo "$PPID" > .git/git-pid
+printf "Enter passphrase for key '/tmp/k': " > /dev/tty
 IFS= read -r reply < /dev/tty"#
             } else if phase == "cancel-question" {
                 r#"echo "$PPID" > .git/git-pid
@@ -167,6 +175,8 @@ IFS= read -r reply < /dev/tty"#
                     "[Y/n]"
                 } else if phase == "password" {
                     "Password: "
+                } else if phase == "cancel-password" {
+                    "Enter passphrase"
                 } else if phase == "cancel-question" {
                     "[y/n]"
                 } else {
@@ -243,16 +253,16 @@ IFS= read -r reply < /dev/tty"#
             visual.simulate_input("prompt commit\n\n");
             visual.simulate_keystrokes("ctrl-c ctrl-c");
         } else if phase == "password" {
-            visual.read(|cx| assert!(shell.read(cx).session().is_none()));
-            visual.simulate_keystrokes("alt-x");
-            visual.simulate_input("magit-process-buffer");
-            visual.simulate_keystrokes("enter");
             pump(&mut visual, |visual| {
                 visual.read(|cx| {
-                    shell.read(cx).active_view().read(cx).buffer().mode() == ModeId::MAGIT_PROCESS
+                    matches!(
+                        shell.read(cx).session().map(|read| read.kind()),
+                        Some(ReadKind::CommitPassword { prompt, .. }) if prompt == "Password: "
+                    )
                 })
             });
-            visual.simulate_keystrokes("alt-< n k y k");
+            visual.simulate_input("fixture-secret");
+            visual.simulate_keystrokes("enter");
         } else if phase == "terminal" {
             pump(&mut visual, |visual| {
                 visual.read(|cx| {
@@ -274,7 +284,11 @@ IFS= read -r reply < /dev/tty"#
                 visual.read(|cx| {
                     matches!(
                         shell.read(cx).session().map(|read| read.kind()),
-                        Some(ReadKind::CommitUsername { .. } | ReadKind::CommitYesNo { .. })
+                        Some(
+                            ReadKind::CommitUsername { .. }
+                                | ReadKind::CommitYesNo { .. }
+                                | ReadKind::CommitPassword { .. }
+                        )
                     )
                 })
             });
@@ -303,6 +317,7 @@ IFS= read -r reply < /dev/tty"#
             );
             assert!(record.diagnostics.is_empty(), "{:?}", record.diagnostics);
             assert!(!String::from_utf8_lossy(&record.output).contains("fixture-user"));
+            assert!(!String::from_utf8_lossy(&record.output).contains("fixture-secret"));
         });
         if answering {
             for (name, expected) in [
@@ -317,6 +332,12 @@ IFS= read -r reply < /dev/tty"#
                 );
             }
             assert!(fixture.head().is_some());
+        } else if phase == "password" {
+            assert_eq!(
+                fs::read_to_string(fixture.repository.git_dir.join("secret")).unwrap(),
+                "fixture-secret\n"
+            );
+            assert!(fixture.head().is_none());
         } else {
             assert!(fixture.head().is_none());
         }

@@ -7,9 +7,10 @@ use std::fs;
 fn finish(buffer: &mut Buffer, refresh: bool) {
     let request = buffer.begin_tree_request(refresh).unwrap();
     let serial = request.serial;
+    let git_version = request.git_version;
     let root = request.root.clone();
     let (data, rendered) = request.read(&AtomicBool::new(false)).unwrap();
-    assert!(buffer.install_tree(serial, &root, data, rendered));
+    assert!(buffer.install_tree(serial, git_version, &root, data, rendered));
 }
 
 fn heading(buffer: &Buffer, path: &Path) -> ByteOffset {
@@ -144,17 +145,20 @@ fn late_results_and_results_after_save_as_cannot_replace_projection() {
     let old = buffer.begin_tree_request(true).unwrap();
     let next = buffer.begin_tree_request(true).unwrap();
     let old_serial = old.serial;
+    let old_git = old.git_version;
     let (data, rendered) = old.read(&AtomicBool::new(false)).unwrap();
-    assert!(!buffer.install_tree(old_serial, &fixture.0, data, rendered));
+    assert!(!buffer.install_tree(old_serial, old_git, &fixture.0, data, rendered));
     let serial = next.serial;
+    let git_version = next.git_version;
     let (data, rendered) = next.read(&AtomicBool::new(false)).unwrap();
-    assert!(buffer.install_tree(serial, &fixture.0, data, rendered));
+    assert!(buffer.install_tree(serial, git_version, &fixture.0, data, rendered));
     let saved = buffer.snapshot_id();
     let request = buffer.begin_tree_request(true).unwrap();
     let serial = request.serial;
+    let git_version = request.git_version;
     let (data, rendered) = request.read(&AtomicBool::new(false)).unwrap();
     buffer.set_path(fixture.0.join("saved-tree"));
-    assert!(!buffer.install_tree(serial, &fixture.0, data, rendered));
+    assert!(!buffer.install_tree(serial, git_version, &fixture.0, data, rendered));
     assert_eq!(buffer.snapshot_id(), saved);
     assert!(buffer.begin_tree_request(true).is_err());
     assert_eq!(buffer.tree_root(), None);

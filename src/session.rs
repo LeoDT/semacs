@@ -174,6 +174,27 @@ pub enum ReadKind {
         request: u64,
         prompt: String,
     },
+    CommitPassword {
+        operation: u64,
+        request: u64,
+        prompt: String,
+    },
+    #[cfg(unix)]
+    PushMenu {
+        context: crate::push::PushContext,
+    },
+    #[cfg(unix)]
+    PushSetRemote {
+        context: crate::push::PushContext,
+    },
+    #[cfg(unix)]
+    PushSetUpstream {
+        context: crate::push::PushContext,
+    },
+    #[cfg(unix)]
+    PushElsewhere {
+        context: crate::push::PushContext,
+    },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -224,7 +245,13 @@ impl ReadKind {
                 | Self::WriteFile
                 | Self::SwitchToBuffer { .. }
                 | Self::KillBuffer { .. }
-        )
+        ) || match self {
+            #[cfg(unix)]
+            Self::PushSetRemote { .. }
+            | Self::PushSetUpstream { .. }
+            | Self::PushElsewhere { .. } => true,
+            _ => false,
+        }
     }
 
     pub fn candidate_default(&self) -> Option<&str> {
@@ -235,8 +262,18 @@ impl ReadKind {
             | Self::MagitDiffRange { default, .. }
             | Self::MagitShowCommit { default, .. } => default.as_deref(),
             Self::KillBuffer { default } => Some(default),
+            #[cfg(unix)]
+            Self::PushSetRemote { context } => context.remotes.first().map(String::as_str),
+            #[cfg(unix)]
+            Self::PushSetUpstream { context } | Self::PushElsewhere { context } => {
+                context.targets.first().map(String::as_str)
+            }
             _ => None,
         }
+    }
+
+    pub fn is_secret(&self) -> bool {
+        matches!(self, Self::CommitPassword { .. })
     }
 
     pub fn is_single_key(&self) -> bool {
@@ -255,7 +292,9 @@ impl ReadKind {
                 | Self::ProjectSwitchMenu { .. }
         ) || match self {
             #[cfg(unix)]
-            Self::CommitPublished { .. } | Self::CommitTargetMerges { .. } => true,
+            Self::CommitPublished { .. }
+            | Self::CommitTargetMerges { .. }
+            | Self::PushMenu { .. } => true,
             _ => false,
         }
     }
@@ -264,6 +303,8 @@ impl ReadKind {
         match self {
             Self::KillBufferConfirm { .. } => "Please answer y, n, or s",
             Self::CommitMenu => "Choose c, a, w, f, s; C-g cancels",
+            #[cfg(unix)]
+            Self::PushMenu { .. } => "Choose p, u, e; C-g cancels",
             Self::DiffMenu => "Choose d, r, u, s, w, c; C-g cancels",
             Self::DiffRefreshMenu => "Choose r, f, g; C-g cancels",
             Self::ProjectSwitchMenu { .. } => {
@@ -282,6 +323,33 @@ impl ReadKind {
             ReadKind::FontFamily => "Font family: ".to_owned(),
             ReadKind::Theme => "Load theme: ".to_owned(),
             ReadKind::CommitMenu => "Commit: [c] create  [a] amend  [w] reword  [f] fixup  [s] squash; C-g cancels: ".into(),
+            #[cfg(unix)]
+            ReadKind::PushMenu { context } => {
+                let branch = context.branch.as_deref().unwrap_or("(detached)");
+                let push_remote = context.push_remote.as_deref().unwrap_or("unset");
+                let upstream = context
+                    .upstream
+                    .as_ref()
+                    .map_or("unset", |upstream| upstream.short.as_str());
+                format!(
+                    "Push {branch}: [p] pushRemote ({push_remote})  [u] upstream ({upstream})  [e] elsewhere; C-g cancels: "
+                )
+            }
+            #[cfg(unix)]
+            ReadKind::PushSetRemote { context } => format!(
+                "Set branch.{}.pushRemote and push there: ",
+                context.branch.as_deref().unwrap_or("")
+            ),
+            #[cfg(unix)]
+            ReadKind::PushSetUpstream { context } => format!(
+                "Set upstream of {} and push there: ",
+                context.branch.as_deref().unwrap_or("")
+            ),
+            #[cfg(unix)]
+            ReadKind::PushElsewhere { context } => format!(
+                "Push {} to: ",
+                context.branch.as_deref().unwrap_or("")
+            ),
             ReadKind::DiffMenu => "Diff: [d] dwim  [r] range  [u] unstaged  [s] staged  [w] worktree  [c] show commit; C-g cancels: ".into(),
             ReadKind::DiffRefreshMenu => "Diff refresh: [r] switch range type  [f] flip revisions  [g] refresh; C-g cancels: ".into(),
             ReadKind::MagitDiffRange { default, .. } => match default {
@@ -352,7 +420,9 @@ impl ReadKind {
                 Some(path) => format!("Save file {}? (y or n) ", path.display()),
                 None => format!("Save buffer {name}? (y or n) "),
             },
-            ReadKind::CommitYesNo { prompt, .. } | ReadKind::CommitUsername { prompt, .. } => prompt.clone(),
+            ReadKind::CommitYesNo { prompt, .. }
+            | ReadKind::CommitUsername { prompt, .. }
+            | ReadKind::CommitPassword { prompt, .. } => prompt.clone(),
             ReadKind::CommitInterrupt { .. } => "Kill process? (y or n) ".to_owned(),
             ReadKind::CommitSecondLine => "Second line is not empty. Commit anyway? (y or n) ".to_owned(),
             #[cfg(unix)]
@@ -396,6 +466,8 @@ impl ReadSession {
             let mut keymap = Keymap::default();
             let keys: &[&str] = match &kind {
                 ReadKind::CommitMenu => &["c", "a", "w", "f", "s"],
+                #[cfg(unix)]
+                ReadKind::PushMenu { .. } => &["p", "u", "e"],
                 ReadKind::DiffMenu => &["d", "r", "u", "s", "w", "c"],
                 ReadKind::DiffRefreshMenu => &["r", "f", "g"],
                 ReadKind::ProjectSwitchMenu { .. } => &["f", "g", "b", "v", "t"],
@@ -418,7 +490,7 @@ impl ReadSession {
                 | ReadKind::DiffRefreshMenu
                 | ReadKind::ProjectSwitchMenu { .. } => &[],
                 #[cfg(unix)]
-                ReadKind::CommitTargetMerges { .. } => &[],
+                ReadKind::CommitTargetMerges { .. } | ReadKind::PushMenu { .. } => &[],
                 _ => &["space", "backspace", "delete"],
             };
             for key in extra {

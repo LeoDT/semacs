@@ -13,6 +13,8 @@ pub(super) enum LanguageId {
     Markdown,
     Html,
     Css,
+    Json,
+    Json5,
     MarkdownInline,
 }
 
@@ -80,7 +82,13 @@ impl Definition {
 use LanguageId::*;
 
 const JS_INSTANCE_HIGHLIGHTS: &str = "[(this) (super)] @variable.special";
-pub(super) static LANGUAGES: [Definition; 8] = [
+const JSON_EXTRA_HIGHLIGHTS: &str = r#"
+(pair
+  key: (_) @string.special.key)
+[ "{" "}" "[" "]" ] @punctuation.bracket
+[ "," ":" ] @punctuation.delimiter
+"#;
+pub(super) static LANGUAGES: [Definition; 10] = [
     Definition::new(
         Rust,
         &["rs"],
@@ -152,6 +160,22 @@ pub(super) static LANGUAGES: [Definition; 8] = [
         &["css"],
         || tree_sitter_css::LANGUAGE.into(),
         &[tree_sitter_css::HIGHLIGHTS_QUERY],
+        "",
+    ),
+    Definition::new(
+        Json,
+        &["json"],
+        &["json"],
+        || tree_sitter_json::LANGUAGE.into(),
+        &[tree_sitter_json::HIGHLIGHTS_QUERY, JSON_EXTRA_HIGHLIGHTS],
+        "",
+    ),
+    Definition::new(
+        Json5,
+        &["json5", "jsonc"],
+        &["json5", "jsonc"],
+        || tree_sitter_json5_orchard::LANGUAGE.into(),
+        &[include_str!("json5.scm")],
         "",
     ),
     Definition::new(

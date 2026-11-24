@@ -9,6 +9,7 @@ pub enum Prompt {
         no: String,
     },
     Username(String),
+    Password(String),
 }
 
 #[derive(Default)]
@@ -87,5 +88,26 @@ fn detect(line: &[u8]) -> Option<Prompt> {
             String::from_utf8_lossy(line)
         )));
     }
+    if let Some(prompt) = detect_password(line) {
+        return Some(Prompt::Password(prompt));
+    }
     None
+}
+
+fn detect_password(line: &[u8]) -> Option<String> {
+    if !line.ends_with(b":") {
+        return None;
+    }
+    let text = std::str::from_utf8(line).ok()?;
+    let lower = text.to_ascii_lowercase();
+    let matched = lower.starts_with("enter passphrase")
+        || lower.starts_with("enter pin")
+        || lower.starts_with("enter password")
+        || lower.starts_with("passphrase")
+        || lower.starts_with("password")
+        || lower.ends_with("'s password:")
+        || lower.ends_with("s' password:")
+        || lower.contains("passphrase for ")
+        || lower.contains("pin for ");
+    matched.then(|| format!("{text} "))
 }

@@ -25,8 +25,16 @@ impl CommitPhase {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ProcessKind {
+    Commit,
+    Push,
+}
+
 pub struct CommitRecord {
     pub operation: u64,
+    pub kind: ProcessKind,
+    pub label: String,
     pub repository: Repository,
     pub phase: CommitPhase,
     pub output: Vec<u8>,
@@ -210,6 +218,127 @@ impl AppShell {
             target: super::commit_editor::EditorTarget::capture(self, cx),
             record: CommitRecord {
                 operation,
+                kind: ProcessKind::Commit,
+                label: "git commit".into(),
+                repository,
+                phase: CommitPhase::Starting,
+                output: Vec::new(),
+                diagnostics: Vec::new(),
+            },
+            process: None,
+            interrupted: false,
+            exit_termination_requested: false,
+            interaction: Default::default(),
+            _task: task,
+        });
+        let repository = self.commits.last().unwrap().record.repository.clone();
+        self.refresh_commit_process(&repository, cx);
+        cx.notify();
+        operation
+    }
+
+    pub(super) fn start_push_process(
+        &mut self,
+        repository: Repository,
+        args: Vec<String>,
+        label: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> u64 {
+        let operation = operation_id();
+        let worker_repository = repository.clone();
+        let worker_args = args.clone();
+        let task = cx.spawn_in(window, async move |shell, cx| {
+            let started = cx
+                .background_executor()
+                .spawn(async move { Commit::start_push(&worker_repository, &worker_args) })
+                .await;
+            let (process, mut events) = match started {
+                Ok(started) => started,
+                Err(error) => {
+                    shell
+                        .update_in(cx, |shell, window, cx| {
+                            shell.commit_terminal(
+                                operation,
+                                CommitPhase::Failed {
+                                    started: error.started,
+                                    diagnostic: error.diagnostic,
+                                },
+                                window,
+                                cx,
+                            );
+                        })
+                        .ok();
+                    return;
+                }
+            };
+            if shell
+                .update_in(cx, |shell, _, cx| {
+                    let Some(session) = shell
+                        .commits
+                        .iter_mut()
+                        .find(|session| session.record.operation == operation)
+                    else {
+                        return false;
+                    };
+                    session.process = Some(process);
+                    session.record.phase = CommitPhase::Running;
+                    let repository = session.record.repository.clone();
+                    if session.exit_termination_requested
+                        && let Err(message) = session.terminate_for_exit()
+                    {
+                        shell.cancel_closing();
+                        shell.show_message(&shell.active_view().clone(), message, cx);
+                    }
+                    shell.refresh_commit_process(&repository, cx);
+                    cx.notify();
+                    true
+                })
+                .ok()
+                != Some(true)
+            {
+                return;
+            }
+            loop {
+                let event = events.next().await;
+                let terminal =
+                    matches!(&event, Ok(Event::Exited(_) | Event::WaitFailed(_)) | Err(_));
+                if terminal {
+                    let process = shell
+                        .update_in(cx, |shell, _, _| {
+                            shell
+                                .commits
+                                .iter_mut()
+                                .find(|s| s.record.operation == operation)
+                                .and_then(|s| s.process.take())
+                        })
+                        .ok()
+                        .flatten();
+                    if let Some(process) = process {
+                        cx.background_executor()
+                            .spawn(async move {
+                                let _ = process.join();
+                            })
+                            .await;
+                    }
+                }
+                let consumed = shell.update_in(cx, |shell, window, cx| {
+                    shell.consume_commit_event(operation, event, "#", window, cx);
+                });
+                if consumed.is_err() || terminal {
+                    break;
+                }
+            }
+        });
+        self.prune_commit_history(&repository);
+        self.commits.push(Session {
+            scope: crate::commit::Scope::Staged,
+            intent: crate::commit::Intent::Create,
+            target: super::commit_editor::EditorTarget::capture(self, cx),
+            record: CommitRecord {
+                operation,
+                kind: ProcessKind::Push,
+                label,
                 repository,
                 phase: CommitPhase::Starting,
                 output: Vec::new(),
@@ -364,6 +493,7 @@ impl AppShell {
         self.release_commit_editors(operation, window, cx);
         if started {
             self.queue_commit_refresh(&repository, command_buffer, window, cx);
+            self.schedule_tree_git_refresh(150, window, cx);
         }
         self.refresh_commit_process(&repository, cx);
         let origin = self.active_view().clone();
@@ -373,10 +503,14 @@ impl AppShell {
             .find(|session| session.record.operation == operation)
             .unwrap()
             .record;
+        let noun = match record.kind {
+            ProcessKind::Commit => "Git commit",
+            ProcessKind::Push => "Git push",
+        };
         let message = match &record.phase {
-            CommitPhase::Exited(status) if status.success() => "Git commit finished".into(),
-            CommitPhase::Exited(status) => format!("Git commit failed ({status})"),
-            CommitPhase::Failed { diagnostic, .. } => format!("Git commit failed: {diagnostic}"),
+            CommitPhase::Exited(status) if status.success() => format!("{noun} finished"),
+            CommitPhase::Exited(status) => format!("{noun} failed ({status})"),
+            CommitPhase::Failed { diagnostic, .. } => format!("{noun} failed: {diagnostic}"),
             _ => unreachable!(),
         };
         self.show_message(&origin, message, cx);

@@ -35,7 +35,11 @@ impl AppShell {
         }
         self.cancel_file_open();
         let prompt = kind.prompt();
-        self.mount_minibuffer(&prompt, initial, window, cx)?;
+        if kind.is_secret() {
+            self.mount_secret_minibuffer(&prompt, window, cx)?;
+        } else {
+            self.mount_minibuffer(&prompt, initial, window, cx)?;
+        }
         for view in self.all_views() {
             view.update(cx, |view, cx| view.suspend_input(cx));
         }
@@ -74,13 +78,39 @@ impl AppShell {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Option<Entity<Minibuffer>> {
+        self.mount_minibuffer_with(prompt, initial, false, window, cx)
+    }
+
+    fn mount_secret_minibuffer(
+        &mut self,
+        prompt: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Option<Entity<Minibuffer>> {
+        self.mount_minibuffer_with(prompt, "", true, window, cx)
+    }
+
+    fn mount_minibuffer_with(
+        &mut self,
+        prompt: &str,
+        initial: &str,
+        secret: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Option<Entity<Minibuffer>> {
         if self.session.is_some() {
             return None;
         }
         self.focused_editor(window, cx)
             .update(cx, |view, cx| view.end_input(cx));
         self.remove_minibuffer(cx);
-        let minibuffer = cx.new(|cx| Minibuffer::new(prompt, initial, window, cx));
+        let minibuffer = cx.new(|cx| {
+            if secret {
+                Minibuffer::new_secret(prompt, window, cx)
+            } else {
+                Minibuffer::new(prompt, initial, window, cx)
+            }
+        });
         let editor = minibuffer.read(cx).editor().clone();
         let feedback = cx.subscribe(&editor, Self::feedback);
         self.echo = None;
@@ -389,6 +419,27 @@ impl AppShell {
                     self.answer_commit_prompt(operation, request, input, &target, window, cx);
                 }
             }
+            ReadKind::CommitPassword {
+                operation, request, ..
+            } => {
+                let mut input = self.session_input(cx).unwrap_or_default();
+                if let Some(target) = self.end_session(id, window, cx) {
+                    #[cfg(unix)]
+                    self.answer_commit_prompt(operation, request, input, &target, window, cx);
+                    #[cfg(not(unix))]
+                    unsafe {
+                        for byte in input.as_bytes_mut() {
+                            std::ptr::write_volatile(byte, 0);
+                        }
+                    }
+                } else {
+                    unsafe {
+                        for byte in input.as_bytes_mut() {
+                            std::ptr::write_volatile(byte, 0);
+                        }
+                    }
+                }
+            }
             ReadKind::HistoryFileVersion { versions } => {
                 let input = self.session_input(cx).unwrap_or_default();
                 let Some(version) = versions.into_iter().find(|version| version.name == input)
@@ -416,6 +467,10 @@ impl AppShell {
             } => {
                 self.confirm_show_commit(id, repository, environment, default, window, cx);
             }
+            #[cfg(unix)]
+            ReadKind::PushSetRemote { .. }
+            | ReadKind::PushSetUpstream { .. }
+            | ReadKind::PushElsewhere { .. } => self.confirm_push_read(kind, id, window, cx),
             ReadKind::TreeRoot | ReadKind::TreeFile | ReadKind::TreeWidth => {
                 self.confirm_tree_read(kind, id, window, cx)
             }
@@ -685,7 +740,8 @@ impl AppShell {
         #[cfg(unix)]
         let process = match session.kind() {
             ReadKind::CommitYesNo { operation, .. }
-            | ReadKind::CommitUsername { operation, .. } => Some(*operation),
+            | ReadKind::CommitUsername { operation, .. }
+            | ReadKind::CommitPassword { operation, .. } => Some(*operation),
             _ => None,
         };
         self.cancel_save_confirmation(cx);

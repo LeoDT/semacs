@@ -52,18 +52,25 @@
   `tree-sitter-javascript` 0.25.0 (MIT, Copyright 2014 Max Brunsfeld),
   `tree-sitter-typescript` 0.23.2 (MIT, Copyright 2017 Max Brunsfeld),
   `tree-sitter-html` 0.23.2 (MIT, Copyright 2014 Max Brunsfeld),
-  `tree-sitter-css` 0.25.0 (MIT, Copyright 2018 Max Brunsfeld), and
-  `tree-sitter-md` 0.5.4 (MIT, Copyright 2021 Matthias Deiml).
-  JavaScript and CSS license texts were reviewed in the registry package.
-  The other three packages omit their top-level license file; their MIT
+  `tree-sitter-css` 0.25.0 (MIT, Copyright 2018 Max Brunsfeld),
+  `tree-sitter-md` 0.5.4 (MIT, Copyright 2021 Matthias Deiml),
+  `tree-sitter-json` 0.24.8 (MIT, Max Brunsfeld and Amaan Qureshi), and
+  `tree-sitter-json5-orchard` 0.1.1 (MIT, Copyright (c) 2021 Joaquín Andrés León Ulloa).
+  JavaScript, CSS, and JSON5 license texts were reviewed in the registry packages.
+  The other four packages omit their top-level license file; their MIT
   notices were reviewed at the exact upstream commits identified by
   `.cargo_vcs_info.json`:
   [TypeScript](https://github.com/tree-sitter/tree-sitter-typescript/blob/f975a621f4e7f532fe322e13c4f79495e0a7b2e7/LICENSE),
   [HTML](https://github.com/tree-sitter/tree-sitter-html/blob/5a5ca8551a179998360b4a4ca2c0f366a35acc03/LICENSE),
-  [Markdown](https://github.com/tree-sitter-grammars/tree-sitter-markdown/blob/41ff24a6c775492c543b09228aeb98d1cd2b3a0f/LICENSE).
+  [Markdown](https://github.com/tree-sitter-grammars/tree-sitter-markdown/blob/41ff24a6c775492c543b09228aeb98d1cd2b3a0f/LICENSE),
+  [JSON](https://github.com/tree-sitter/tree-sitter-json/blob/ee35a6ebefcef0c5c416c0d1ccec7370cfca5a24/LICENSE)
+  (JSON5 upstream: <https://codeberg.org/grammar-orchard/tree-sitter-json5-orchard/src/commit/adf634d17dca15ddd25e8e10c069daf94318b5c3/LICENSE>).
   Markdown's highlight queries credit nvim-treesitter; retain that upstream
   attribution in the distribution dependency audit.
-- E2 uses HTML's bundled script / style injection query.
+- E2 uses HTML's bundled script / style injection query, JSON's bundled
+  highlight query with local key precedence rules (`JSON_EXTRA_HIGHLIGHTS` in
+  `src/syntax/languages.rs`), and a local `src/syntax/json5.scm` highlight
+  query for JSON5 / JSONC.
   `src/syntax/markdown-injections.scm` independently declares the selected
   block-to-inline and fenced-code captures; other upstream injection rules
   are not imported. No parser, scanner, wrapper implementation or Zed

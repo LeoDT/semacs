@@ -340,7 +340,67 @@ impl Commit {
         let worker = thread::Builder::new()
             .name("git-commit".into())
             .spawn(move || {
-                run(master, bridge, &state, &send);
+                run(master, Some(bridge), &state, &send);
+            })
+            .map_err(|error| StartFailure {
+                started: true,
+                diagnostic: error.to_string(),
+            })?;
+        Ok((
+            Self {
+                control,
+                input,
+                worker: Some(worker),
+            },
+            Events {
+                receive,
+                control: event_control,
+                notification,
+            },
+        ))
+    }
+
+    /// Starts `git push -v` attached to a controlling PTY while inheriting the
+    /// parent environment (`SSH_AUTH_SOCK`, `SSH_ASKPASS`, etc.) so the system
+    /// SSH agent and interactive passphrase/host-key prompts work directly.
+    pub fn start_push(
+        repository: &Repository,
+        args: &[String],
+    ) -> Result<(Self, Events), StartFailure> {
+        let before_start = |error: io::Error| StartFailure {
+            started: false,
+            diagnostic: error.to_string(),
+        };
+        let terminal = Terminal::open().map_err(before_start)?;
+        let input = terminal.master.try_clone().map_err(before_start)?;
+        let mut command = Command::new("git");
+        command
+            .current_dir(&repository.root)
+            .arg("--git-dir")
+            .arg(&repository.git_dir)
+            .arg("--work-tree")
+            .arg(&repository.root)
+            .arg("push")
+            .arg("-v")
+            .args(args);
+        let child = terminal.spawn(&mut command).map_err(before_start)?;
+        let control = Arc::new(Control {
+            child: Mutex::new(Some(child)),
+            abandoned: AtomicBool::new(false),
+        });
+        let (send, receive) = mpsc::sync_channel(16);
+        let notification = Arc::new(Notification::default());
+        let send = EventSender {
+            send: Some(send),
+            notification: notification.clone(),
+        };
+        let event_control = Arc::downgrade(&control);
+        let state = control.clone();
+        let master = terminal.master;
+        let worker = thread::Builder::new()
+            .name("git-push".into())
+            .spawn(move || {
+                run(master, None, &state, &send);
             })
             .map_err(|error| StartFailure {
                 started: true,
@@ -447,8 +507,7 @@ fn output(master: &mut File, control: &Control, send: &EventSender) -> io::Resul
     Ok(Drain::Open)
 }
 
-fn run(mut master: File, bridge: Bridge, control: &Control, send: &EventSender) {
-    let mut bridge = Some(bridge);
+fn run(mut master: File, mut bridge: Option<Bridge>, control: &Control, send: &EventSender) {
     let mut readable = true;
     loop {
         if control.abandoned.load(Ordering::Acquire) {

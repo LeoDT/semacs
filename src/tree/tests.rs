@@ -187,3 +187,119 @@ fn non_utf8_names_have_distinct_keys_and_newlines_do_not_create_fake_rows() {
     assert_eq!(rendered.sections.visible_lines().len(), 2);
     assert!(rendered.text.contains("one\\ntwo"));
 }
+
+#[test]
+fn git_porcelain_parsing_bubbles_directory_states_and_keeps_styles_disjoint() {
+    let fixture = Fixture::new();
+    let root = fixture
+        .0
+        .canonicalize()
+        .unwrap_or_else(|_| fixture.0.clone());
+    fixture.directory(".git");
+    fixture.file("clean.txt");
+    fixture.file("modified.rs");
+    fixture.file("added.rs");
+    fixture.file("untracked.txt");
+    fixture.file("ignored.log");
+    fixture.file("target/debug/app");
+    fixture.file("src/sub/conflict.rs");
+    fixture.file("src/sub/renamed.rs");
+    fixture.file("new_dir/inside.txt");
+
+    let payload = b" M modified.rs\0\
+A  added.rs\0\
+R  src/sub/renamed.rs\0old_name.rs\0\
+UU src/sub/conflict.rs\0\
+?? untracked.txt\0\
+?? new_dir/\0\
+!! ignored.log\0\
+!! target/\0";
+
+    let git = TreeGitStatus::parse(fixture.0.clone(), &root, &root, payload);
+    let tree = fixture
+        .tree()
+        .expand(&fixture.0.join("target/debug"), &AtomicBool::new(false))
+        .unwrap()
+        .expand(&fixture.0.join("src/sub"), &AtomicBool::new(false))
+        .unwrap()
+        .expand(&fixture.0.join("new_dir"), &AtomicBool::new(false))
+        .unwrap();
+    let rendered = tree.render_with_git(None, None, Some(&git)).unwrap();
+
+    // Styles must be strictly ascending and non-overlapping.
+    let mut prev_end = ByteOffset(0);
+    for (range, _) in &rendered.styles {
+        assert!(range.start >= prev_end, "overlapping styles: {range:?}");
+        assert!(range.start < range.end);
+        prev_end = range.end;
+    }
+
+    let style_for_label = |label: &str| {
+        let start = ByteOffset(rendered.text.find(label).unwrap());
+        let end = ByteOffset(start.0 + label.len());
+        rendered
+            .styles
+            .iter()
+            .find(|(range, _)| *range == (start..end))
+            .map(|(_, role)| *role)
+            .unwrap_or_else(|| panic!("missing style for {label}"))
+    };
+
+    let root_name = fixture.0.file_name().unwrap().to_string_lossy().to_string();
+    assert_eq!(style_for_label(&root_name), StyleRole::TreeRoot);
+    assert_eq!(style_for_label("clean.txt"), StyleRole::TreeFile);
+    assert_eq!(style_for_label("modified.rs"), StyleRole::TreeGitModified);
+    assert_eq!(style_for_label("added.rs"), StyleRole::TreeGitAdded);
+    assert_eq!(
+        style_for_label("untracked.txt"),
+        StyleRole::TreeGitUntracked
+    );
+    assert_eq!(style_for_label("ignored.log"), StyleRole::TreeIgnored);
+    assert_eq!(style_for_label("target/debug"), StyleRole::TreeIgnored);
+    assert_eq!(style_for_label("app"), StyleRole::TreeIgnored);
+    assert_eq!(style_for_label("src/sub"), StyleRole::TreeGitConflict);
+    assert_eq!(style_for_label("conflict.rs"), StyleRole::TreeGitConflict);
+    assert_eq!(style_for_label("renamed.rs"), StyleRole::TreeGitAdded);
+    assert_eq!(style_for_label("new_dir"), StyleRole::TreeGitUntracked);
+    assert_eq!(style_for_label("inside.txt"), StyleRole::TreeGitUntracked);
+
+    // Ignored files/dirs do not pollute parent directories; unmodified subdir stays TreeDirectory.
+    assert_eq!(
+        git.state_for(&fixture.0.join("src"), &fixture.0.join("src"), true),
+        Some(GitNodeState::Conflict)
+    );
+    assert_eq!(
+        git.state_for(
+            &fixture.0.join("clean_dir"),
+            &fixture.0.join("clean_dir"),
+            true
+        ),
+        None
+    );
+}
+
+#[test]
+fn non_git_tree_renders_root_directory_and_file_styles_gracefully() {
+    let root = std::env::temp_dir().join(format!("semacs-non-git-tree-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(root.join("dir")).unwrap();
+    fs::write(root.join("dir/file.txt"), "").unwrap();
+    let tree = Tree::new(root.clone())
+        .refresh(&AtomicBool::new(false))
+        .unwrap();
+    assert!(TreeGitStatus::load(&root, &AtomicBool::new(false)).is_none());
+    let rendered = tree.render_with_git(None, None, None).unwrap();
+    assert!(
+        rendered
+            .styles
+            .iter()
+            .any(|(_, role)| *role == StyleRole::TreeRoot)
+    );
+    assert!(
+        rendered
+            .styles
+            .iter()
+            .any(|(_, role)| *role == StyleRole::TreeDirectory)
+    );
+    let _ = fs::remove_dir_all(&root);
+}

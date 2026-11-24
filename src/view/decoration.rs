@@ -310,11 +310,11 @@ impl RowPart {
                 let left = self
                     .line
                     .as_ref()
-                    .map_or(px(0.), |line| line.x_for_index(offset));
+                    .map_or(px(0.), |line| line.x_for_index(self.mask_index(offset)));
                 let right = self
                     .line
                     .as_ref()
-                    .map_or(self.width, |line| line.x_for_index(end));
+                    .map_or(self.width, |line| line.x_for_index(self.mask_index(end)));
                 window.paint_quad(fill(
                     Bounds::new(
                         point(origin.x + left, origin.y),
@@ -340,8 +340,14 @@ impl RowPart {
             return;
         };
         let mut runs = style.runs(self.range.start.0..self.range.end.0, cursors);
+        let mut real_pos = 0usize;
         for run in &mut runs {
             run.background_color = None;
+            let real_end = real_pos + run.len as usize;
+            if self.mask.is_some() {
+                run.len = (self.mask_index(real_end) - self.mask_index(real_pos)) as u32;
+            }
+            real_pos = real_end;
         }
         LineLayout::paint(
             line,

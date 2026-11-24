@@ -32,6 +32,7 @@ fn settings(cx: &TestAppContext, columns: f32) -> LayoutSettings {
         tab_size: 8,
         typography: Default::default(),
         visible_lines: None,
+        mask_from: None,
     };
     let mut metrics = FontMeasure::new(cx.text_system().clone(), settings.clone());
     settings.wrap_width = metrics.width("x") * columns;

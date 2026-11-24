@@ -230,3 +230,58 @@ fn prompt_cancellation_does_not_cancel_another_process_and_terminal_preserves_ot
         })
     });
 }
+
+#[gpui::test]
+fn password_prompt_activates_secret_read_and_never_logs_plaintext(cx: &mut TestAppContext) {
+    cx.background_executor.allow_parking();
+    cx.update(crate::app::init);
+    let window = cx.open_window(size(px(960.), px(640.)), |window, cx| {
+        AppShell::new(Buffer::named("origin"), window, cx)
+    });
+    let shell = window.entity(cx).unwrap();
+    let mut visual = VisualTestContext::from_window(window.into(), cx);
+    visual.update(|window, cx| {
+        window.activate_window();
+        window.draw(cx).clear(cx);
+        shell.update(cx, |shell, cx| {
+            let target = EditorTarget::capture(shell, cx);
+            shell
+                .commits
+                .push(session(1, repository("/one"), true, target));
+            output(
+                shell,
+                1,
+                b"Enter passphrase for key '/home/u/.ssh/id_ed25519': ",
+                window,
+                cx,
+            );
+            assert!(matches!(
+                shell.session().unwrap().kind(),
+                ReadKind::CommitPassword { operation: 1, .. }
+            ));
+            assert!(
+                shell
+                    .minibuffer()
+                    .unwrap()
+                    .read(cx)
+                    .editor()
+                    .read(cx)
+                    .is_secret()
+            );
+        });
+    });
+    visual.simulate_input("top-secret-pass");
+    visual.simulate_keystrokes("enter");
+    crate::app::git_test_support::until(&mut visual, &shell, |shell| {
+        !shell.commits[0].record.diagnostics.is_empty()
+    });
+    visual.read(|cx| {
+        let shell = shell.read(cx);
+        assert!(shell.session().is_none());
+        let messages = shell.messages.buffer.text().to_string();
+        assert!(!messages.contains("top-secret-pass"));
+        assert!(
+            !String::from_utf8_lossy(&shell.commits[0].record.output).contains("top-secret-pass")
+        );
+    });
+}

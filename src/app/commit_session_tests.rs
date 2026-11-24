@@ -26,6 +26,8 @@ fn session(operation: u64, repository: Repository, active: bool, target: EditorT
         intent: crate::commit::Intent::Create,
         record: CommitRecord {
             operation,
+            kind: ProcessKind::Commit,
+            label: "git commit".into(),
             repository,
             phase: if active {
                 CommitPhase::Running

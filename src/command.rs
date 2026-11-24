@@ -203,6 +203,10 @@ commands! {
     MagitCommitReword => "magit-commit-reword", Application, [];
     MagitCommitFixup => "magit-commit-fixup", Application, [];
     MagitCommitSquash => "magit-commit-squash", Application, [];
+    MagitPush => "magit-push", Application, [];
+    MagitPushCurrentToPushremote => "magit-push-current-to-pushremote", Application, [];
+    MagitPushCurrentToUpstream => "magit-push-current-to-upstream", Application, [];
+    MagitPushCurrent => "magit-push-current", Application, [];
     MagitLogCurrent => "magit-log-current", Application, [];
     MagitShowCommit => "magit-show-commit", Application, [];
     MagitVisitThing => "magit-visit-thing", Application("magit-status", "magit-log", "magit-log-select", "magit-revision"), [];

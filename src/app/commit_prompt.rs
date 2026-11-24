@@ -59,6 +59,11 @@ impl AppShell {
                     request,
                     prompt: prompt.clone(),
                 },
+                Prompt::Password(prompt) => ReadKind::CommitPassword {
+                    operation,
+                    request,
+                    prompt: prompt.clone(),
+                },
             };
             Some((kind, operation, session.target.is_current(self, cx)))
         });
@@ -107,16 +112,14 @@ impl AppShell {
         if pending.resume_target {
             session.target.resume_after_read(resumed_target);
         }
-        let answer = match pending.prompt {
+        let (answer, secret) = match pending.prompt {
             Prompt::YesNo { yes, no, .. } => {
-                if answer == "yes" {
-                    Some(yes)
-                } else {
-                    Some(no)
-                }
+                let value = if answer == "yes" { yes } else { no };
+                (Some(value), false)
             }
-            Prompt::Username(_) if answer.is_empty() => None,
-            Prompt::Username(_) => Some(answer),
+            Prompt::Username(_) if answer.is_empty() => (None, false),
+            Prompt::Username(_) => (Some(answer), false),
+            Prompt::Password(_) => (Some(answer), true),
         };
         session.interaction.scanner.answered(&session.record.output);
         let input = session
@@ -132,8 +135,21 @@ impl AppShell {
                 .background_executor()
                 .spawn(async move {
                     let input = input?;
-                    let answer = answer.unwrap_or_else(crate::commit::login_name);
-                    input.write_all(format!("{answer}\n").as_bytes())
+                    let mut answer = answer.unwrap_or_else(crate::commit::login_name);
+                    let mut payload = format!("{answer}\n");
+                    let written = input.write_all(payload.as_bytes());
+                    if secret {
+                        // Zeroize temporary secret buffers before dropping.
+                        unsafe {
+                            for byte in answer.as_bytes_mut() {
+                                std::ptr::write_volatile(byte, 0);
+                            }
+                            for byte in payload.as_bytes_mut() {
+                                std::ptr::write_volatile(byte, 0);
+                            }
+                        }
+                    }
+                    written
                 })
                 .await;
             shell
@@ -173,6 +189,9 @@ impl AppShell {
                     operation: owner, ..
                 }
                 | ReadKind::CommitUsername {
+                    operation: owner, ..
+                }
+                | ReadKind::CommitPassword {
                     operation: owner, ..
                 } if *owner == operation => Some(session.id()),
                 _ => None,

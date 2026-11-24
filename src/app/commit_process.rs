@@ -251,7 +251,7 @@ fn render<'a>(
                 }
             }
         };
-        writeln!(text, "{phase}  git commit  [{}]", record.operation).unwrap();
+        writeln!(text, "{phase}  {}  [{}]", record.label, record.operation).unwrap();
         let body = ByteOffset(text.len());
         append_output(&mut text, &record.output);
         if !text.ends_with('\n')

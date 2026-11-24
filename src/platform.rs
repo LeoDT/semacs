@@ -33,6 +33,25 @@ impl SystemClipboard for GpuiClipboard<'_> {
     }
 }
 
+/// Clipboard adapter for secret prompts: allows pasting via `yank` without
+/// writing secret text back to the system clipboard on `kill` or `copy`.
+pub(crate) struct ReadOnlyClipboard<'a>(&'a App);
+
+impl<'a> ReadOnlyClipboard<'a> {
+    pub(crate) fn new(cx: &'a App) -> Self {
+        Self(cx)
+    }
+}
+
+impl SystemClipboard for ReadOnlyClipboard<'_> {
+    fn read_text(&self) -> Option<String> {
+        let text = self.0.read_from_clipboard()?.text()?;
+        Some(text.replace("\r\n", "\n"))
+    }
+
+    fn write_text(&self, _text: &str) {}
+}
+
 pub(crate) enum InputOperation<'a> {
     Replace(Option<Range<OffsetUtf16>>, &'a str),
     Mark(
@@ -86,6 +105,13 @@ impl InputHandler for BufferInputHandler {
         cx: &mut App,
     ) -> Option<String> {
         *adjusted = None;
+        if self
+            .view
+            .upgrade()
+            .is_some_and(|view| view.read(cx).is_secret())
+        {
+            return None;
+        }
         let (text, range) = self.snapshot(window, cx)?.text_for_range(utf16(range))?;
         *adjusted = Some(units(range));
         Some(text)

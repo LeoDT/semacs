@@ -30,6 +30,8 @@ mod platform;
 #[cfg(feature = "native-profiler")]
 pub mod preparation_trace;
 pub mod project;
+#[cfg(unix)]
+pub mod push;
 mod saves;
 pub mod scripting;
 pub mod search;

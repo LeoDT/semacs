@@ -44,6 +44,8 @@ mod git_test_support;
 mod history;
 mod index_write;
 mod isearch;
+#[cfg(unix)]
+mod push;
 pub use git::records::{GitWritePhase, GitWriteRecord};
 pub use index_write::StatusWriteTarget;
 mod messages;
@@ -93,6 +95,7 @@ pub struct AppShell {
     next_pane: u64,
     tree_window: tree::TreeWindow,
     tree_work: Option<tree::TreeWork>,
+    tree_git_work: Option<tree::TreeGitWork>,
     project_scan_task: Option<project::ProjectScanWork>,
     search_work: Option<search::SearchWork>,
     last_search_buffer: Option<crate::buffer::BufferId>,
@@ -145,6 +148,7 @@ pub struct AppShell {
     file_task: Option<Task<()>>,
     opening: Option<documents::Opening>,
     _keys_subscription: Subscription,
+    _activation_subscription: Subscription,
 }
 
 impl AppShell {
@@ -196,6 +200,15 @@ impl AppShell {
                 .update(cx, |shell, cx| shell.request_close(window, cx))
                 .unwrap_or(true)
         });
+        let mut was_active = window.is_window_active();
+        let activation = cx.observe_window_activation(window, move |shell, window, cx| {
+            let active = window.is_window_active();
+            let regained = !was_active && active;
+            was_active = active;
+            if regained && shell.panes.side().is_some() {
+                shell.schedule_tree_git_refresh(200, window, cx);
+            }
+        });
         view.update(cx, |view, cx| view.restore_input(window, cx));
         let (configuration, script_host) = match loaded {
             Some(loaded) => (loaded.configuration, Some(loaded.host)),
@@ -210,6 +223,7 @@ impl AppShell {
             next_pane: 1,
             tree_window: tree::TreeWindow::default(),
             tree_work: None,
+            tree_git_work: None,
             project_scan_task: None,
             search_work: None,
             last_search_buffer: None,
@@ -262,6 +276,7 @@ impl AppShell {
             file_task: None,
             opening: None,
             _keys_subscription: keys,
+            _activation_subscription: activation,
         }
     }
 
@@ -379,6 +394,10 @@ impl AppShell {
                         if self.answer_commit_choice(stroke, window, cx) {
                             return true;
                         }
+                        #[cfg(unix)]
+                        if self.answer_push_choice(stroke, window, cx) {
+                            return true;
+                        }
                         self.answer_query(Answer::key(stroke), window, cx);
                     } else {
                         self.execute_session(command, window, cx);
@@ -488,6 +507,11 @@ impl AppShell {
             | Command::MagitLogSelectQuit => {
                 self.commit_action_command(command, origin, window, cx)
             }
+            #[cfg(unix)]
+            Command::MagitPush
+            | Command::MagitPushCurrentToPushremote
+            | Command::MagitPushCurrentToUpstream
+            | Command::MagitPushCurrent => self.push_command(command, origin, window, cx),
             Command::MagitVisitThing
             | Command::MagitDiffVisit
             | Command::MagitDiffVisitOtherWindow

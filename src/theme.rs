@@ -57,10 +57,18 @@ pub enum StyleRole {
     SearchFile,
     SearchLineNumber,
     SearchMatch,
+    TreeRoot,
+    TreeDirectory,
+    TreeFile,
+    TreeIgnored,
+    TreeGitModified,
+    TreeGitUntracked,
+    TreeGitAdded,
+    TreeGitConflict,
 }
 
 impl StyleRole {
-    pub const COUNT: usize = Self::SearchMatch as usize + 1;
+    pub const COUNT: usize = Self::TreeGitConflict as usize + 1;
     pub const ALL: [Self; Self::COUNT] = [
         Self::Default,
         Self::Cursor,
@@ -114,6 +122,14 @@ impl StyleRole {
         Self::SearchFile,
         Self::SearchLineNumber,
         Self::SearchMatch,
+        Self::TreeRoot,
+        Self::TreeDirectory,
+        Self::TreeFile,
+        Self::TreeIgnored,
+        Self::TreeGitModified,
+        Self::TreeGitUntracked,
+        Self::TreeGitAdded,
+        Self::TreeGitConflict,
     ];
 
     pub fn name(self) -> &'static str {
@@ -170,6 +186,14 @@ impl StyleRole {
             Self::SearchFile => "search.file",
             Self::SearchLineNumber => "search.line-number",
             Self::SearchMatch => "search.match",
+            Self::TreeRoot => "tree.root",
+            Self::TreeDirectory => "tree.directory",
+            Self::TreeFile => "tree.file",
+            Self::TreeIgnored => "tree.ignored",
+            Self::TreeGitModified => "tree.git.modified",
+            Self::TreeGitUntracked => "tree.git.untracked",
+            Self::TreeGitAdded => "tree.git.added",
+            Self::TreeGitConflict => "tree.git.conflict",
         }
     }
 
@@ -588,7 +612,8 @@ fn builtin_colors(mode: ThemeMode) -> [StyleColors; StyleRole::COUNT] {
         | StyleRole::SyntaxOperator
         | StyleRole::MarkupEmphasis
         | StyleRole::DiffContext
-        | StyleRole::DiffContextHighlight => pair(foreground, background),
+        | StyleRole::DiffContextHighlight
+        | StyleRole::TreeFile => pair(foreground, background),
         StyleRole::Cursor => pair(background, foreground),
         StyleRole::Region => pair(foreground, selection),
         StyleRole::IsearchMatch => {
@@ -614,19 +639,24 @@ fn builtin_colors(mode: ThemeMode) -> [StyleColors; StyleRole::COUNT] {
         | StyleRole::MagitHash => pair(muted, background),
         StyleRole::Separator => pair(separator, background),
         StyleRole::SyntaxKeyword | StyleRole::SectionHeading => pair(keyword, background),
-        StyleRole::SyntaxComment => pair(comment, background),
+        StyleRole::SyntaxComment | StyleRole::TreeIgnored => pair(comment, background),
         StyleRole::SyntaxString
         | StyleRole::MarkupRaw
         | StyleRole::MarkupLinkUrl
-        | StyleRole::DiffStatAdded => pair(string, background),
-        StyleRole::SyntaxNumber | StyleRole::SearchLineNumber => pair(number, background),
+        | StyleRole::DiffStatAdded
+        | StyleRole::TreeGitUntracked => pair(string, background),
+        StyleRole::SyntaxNumber | StyleRole::SearchLineNumber | StyleRole::TreeGitModified => {
+            pair(number, background)
+        }
         StyleRole::SyntaxType
         | StyleRole::MarkupHeading
         | StyleRole::MarkupStrong
         | StyleRole::DiffFile
         | StyleRole::DiffFileHighlight
         | StyleRole::MagitBranch
-        | StyleRole::SearchFile => pair(type_color, background),
+        | StyleRole::SearchFile
+        | StyleRole::TreeRoot
+        | StyleRole::TreeGitAdded => pair(type_color, background),
         StyleRole::SearchMatch => pair(
             accent,
             if mode == ThemeMode::Dark {
@@ -635,8 +665,12 @@ fn builtin_colors(mode: ThemeMode) -> [StyleColors; StyleRole::COUNT] {
                 0xfff2a8
             },
         ),
-        StyleRole::SyntaxFunction | StyleRole::SyntaxFunctionBuiltin => pair(function, background),
-        StyleRole::SyntaxConstant | StyleRole::DiffStatRemoved => pair(constant, background),
+        StyleRole::SyntaxFunction | StyleRole::SyntaxFunctionBuiltin | StyleRole::TreeDirectory => {
+            pair(function, background)
+        }
+        StyleRole::SyntaxConstant | StyleRole::DiffStatRemoved | StyleRole::TreeGitConflict => {
+            pair(constant, background)
+        }
         StyleRole::DiffHunk | StyleRole::DiffHunkHighlight => pair(function, inactive_bg),
         StyleRole::DiffAdded | StyleRole::DiffAddedHighlight => pair(
             string,
@@ -674,6 +708,8 @@ fn builtin_attributes(mode: ThemeMode) -> [StyleOverride; StyleRole::COUNT] {
     attributes[StyleRole::SectionHeading as usize].bold = Some(true);
     attributes[StyleRole::SearchFile as usize].bold = Some(true);
     attributes[StyleRole::SearchMatch as usize].bold = Some(true);
+    attributes[StyleRole::TreeRoot as usize].bold = Some(true);
+    attributes[StyleRole::TreeGitConflict as usize].bold = Some(true);
     for role in [
         StyleRole::DiffAdded,
         StyleRole::DiffRemoved,

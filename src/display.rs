@@ -34,6 +34,7 @@ pub struct LayoutSettings {
     pub tab_size: u32,
     pub typography: Typography,
     pub visible_lines: Option<Arc<[Range<ByteOffset>]>>,
+    pub mask_from: Option<usize>,
 }
 
 impl LayoutSettings {
@@ -46,6 +47,7 @@ impl LayoutSettings {
             && self.soft_wrap == other.soft_wrap
             && self.tab_size == other.tab_size
             && self.visible_lines == other.visible_lines
+            && self.mask_from == other.mask_from
     }
 
     fn compatible_after_edit(&self, other: &Self) -> bool {
@@ -593,6 +595,9 @@ impl FontMeasure {
     }
 
     pub fn width_at(&mut self, grapheme: &str, offset: usize) -> Pixels {
+        if self.settings.mask_from.is_some_and(|from| offset >= from) {
+            return self.width_with("•", self.settings.typography.base());
+        }
         self.width_with(grapheme, self.settings.typography.font_at(offset))
     }
 
@@ -838,7 +843,12 @@ impl<'a> RowScanner<'a> {
                     GraphemeRead::Done => unreachable!("EOF handled before scanning"),
                     GraphemeRead::Item(grapheme) => {
                         let newline = grapheme.text == "\n";
-                        let tab = grapheme.text == "\t";
+                        let masked = !newline
+                            && metrics
+                                .settings
+                                .mask_from
+                                .is_some_and(|from| grapheme.start >= from);
+                        let tab = !masked && grapheme.text == "\t";
                         let width = if newline {
                             px(0.)
                         } else if tab {

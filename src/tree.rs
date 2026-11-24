@@ -1,11 +1,16 @@
 //! Filesystem data and text/section projection for the folder tree.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::ops::Range;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::section::{Section, Sections};
 use crate::text::{ByteOffset, Rope};
+use crate::theme::StyleRole;
+
+mod git;
+pub use git::{GitNodeState, TreeGitStatus};
 
 #[cfg(test)]
 pub(crate) mod tests;
@@ -38,6 +43,7 @@ pub struct RenderedTree {
     pub text: String,
     pub sections: Sections,
     pub nodes: Vec<Node>,
+    pub styles: Vec<(Range<ByteOffset>, StyleRole)>,
 }
 
 impl Node {
@@ -192,6 +198,15 @@ impl Tree {
         previous: Option<&Sections>,
         fold: Option<(&Path, bool)>,
     ) -> Result<RenderedTree, String> {
+        self.render_with_git(previous, fold, None)
+    }
+
+    pub fn render_with_git(
+        &self,
+        previous: Option<&Sections>,
+        fold: Option<(&Path, bool)>,
+        git: Option<&TreeGitStatus>,
+    ) -> Result<RenderedTree, String> {
         let remembered: HashMap<_, _> = previous
             .into_iter()
             .flat_map(|sections| sections.nodes())
@@ -199,6 +214,7 @@ impl Tree {
             .collect();
         let mut projection = Projection {
             tree: self,
+            git,
             text: String::new(),
             sections: vec![Section {
                 key: "tree-buffer".into(),
@@ -209,6 +225,7 @@ impl Tree {
                 hunk: false,
             }],
             nodes: Vec::new(),
+            styles: Vec::new(),
             remembered,
             fold,
         };
@@ -225,15 +242,18 @@ impl Tree {
             text: projection.text,
             sections,
             nodes: projection.nodes,
+            styles: projection.styles,
         })
     }
 }
 
 struct Projection<'a> {
     tree: &'a Tree,
+    git: Option<&'a TreeGitStatus>,
     text: String,
     sections: Vec<Section>,
     nodes: Vec<Node>,
+    styles: Vec<(Range<ByteOffset>, StyleRole)>,
     remembered: HashMap<&'a str, bool>,
     fold: Option<(&'a Path, bool)>,
 }
@@ -255,6 +275,7 @@ impl Projection<'_> {
                 });
         let start = ByteOffset(self.text.len());
         self.text.push_str(&"  ".repeat(depth));
+        let marker_start = ByteOffset(self.text.len());
         if depth != 0 {
             self.text.push_str(if directory {
                 if collapsed { "+ " } else { "- " }
@@ -262,6 +283,7 @@ impl Projection<'_> {
                 " "
             });
         }
+        let marker_end = ByteOffset(self.text.len());
         let label = if depth == 0 {
             path.file_name().unwrap_or(path.as_os_str())
         } else {
@@ -270,9 +292,46 @@ impl Projection<'_> {
                 .unwrap_or(target)
                 .as_os_str()
         };
+        let label_start = ByteOffset(self.text.len());
         self.text
             .push_str(&label.to_string_lossy().escape_debug().to_string());
+        let label_end = ByteOffset(self.text.len());
         self.text.push('\n');
+        if depth == 0 {
+            if label_start < label_end {
+                self.styles
+                    .push((label_start..label_end, StyleRole::TreeRoot));
+            }
+        } else {
+            let state = self
+                .git
+                .and_then(|git| git.state_for(path, target, directory));
+            let label_role = match state {
+                Some(GitNodeState::Ignored) => StyleRole::TreeIgnored,
+                Some(GitNodeState::Conflict) => StyleRole::TreeGitConflict,
+                Some(GitNodeState::Modified) => StyleRole::TreeGitModified,
+                Some(GitNodeState::Added) => StyleRole::TreeGitAdded,
+                Some(GitNodeState::Untracked) => StyleRole::TreeGitUntracked,
+                None => {
+                    if directory {
+                        StyleRole::TreeDirectory
+                    } else {
+                        StyleRole::TreeFile
+                    }
+                }
+            };
+            if directory && marker_start < marker_end {
+                let marker_role = if state == Some(GitNodeState::Ignored) {
+                    StyleRole::TreeIgnored
+                } else {
+                    StyleRole::SyntaxPunctuation
+                };
+                self.styles.push((marker_start..marker_end, marker_role));
+            }
+            if label_start < label_end {
+                self.styles.push((label_start..label_end, label_role));
+            }
+        }
         self.nodes.push(Node {
             path: path.to_path_buf(),
             target: target.to_path_buf(),

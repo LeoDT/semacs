@@ -139,7 +139,7 @@ Markdown 块级、行内和围栏，以及 HTML script / style 使用同一受�
 
 - 主要投入是代码阅读与导航：diff / status / log 等查看流程、文件夹 tree viewer、基础 project 能力。文件树采用文本 buffer 与 Emacs 操作逻辑（参考 treemacs），使用独立于普通 split 的专用 side window，不引入 GUI 树控件；diff 以查看为主，优先补 revision / range，不继续扩展 Git 写工作流。具体阶段、交互细节与顺序由 [实施计划](plan.md) 确认，本决策不自动授权实现。
 - 基础编辑保留为产品能力，已交付行为不回退；自动 / 智能缩进只记录为后续需求，不追求 Emacs 编辑命令全集。
-- 已交付的 Git 写入能力（stage / unstage / commit / amend / reword 等）维持现有契约；本决策不承诺继续扩展为完整 Magit / Git 客户端，也不改写 F1–F5 的历史范围。
+- 已交付的 Git 写入能力（stage / unstage / commit / amend / reword 等）维持现有契约；本决策不承诺继续扩展为完整 Magit / Git 客户端，也不改写 F1–F5 的历史范围。（用户另确认在既有 PTY 进程基础设施上增补最小 `magit-push`（`P`：`p` pushRemote / `u` upstream / `e` elsewhere）及交互式保密口令 / passphrase 读入，契约见[忠实度文档](emacs-fidelity.md#magit-push-与保密密码读入)。）
 - 新的查看 / 导航能力沿用现有 buffer / view / section / mode 与 Rust 核心边界；不另建平行文本、项目或进程状态。tree viewer 使用独立文本 buffer + 专用 side window；基础 project 范围为根识别、项目切换与项目内文件查找；搜索与结构导航是已确认的增强方向，按实际使用排期。具体键位、布局、过滤与验收另行确认。
 - 脚本与配置仍遵循 D26 的 Rust 核心 / 脚本边界，按实际查看功能增量提供原语，不预建通用插件平台。
 

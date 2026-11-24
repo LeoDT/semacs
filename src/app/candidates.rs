@@ -400,6 +400,20 @@ impl AppShell {
                         Candidate::named(version.name.clone(), annotation)
                     })
                     .collect(),
+                #[cfg(unix)]
+                ReadKind::PushSetRemote { context } => context
+                    .remotes
+                    .iter()
+                    .map(|name| Candidate::named(name.clone(), String::new()))
+                    .collect(),
+                #[cfg(unix)]
+                ReadKind::PushSetUpstream { context } | ReadKind::PushElsewhere { context } => {
+                    context
+                        .targets
+                        .iter()
+                        .map(|name| Candidate::named(name.clone(), String::new()))
+                        .collect()
+                }
                 ReadKind::Theme => crate::theme::ThemeSettings::global(cx)
                     .names()
                     .map(|name| {

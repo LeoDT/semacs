@@ -156,6 +156,28 @@ const MODE_BINDINGS: &[(ModeId, &str, crate::command::Command)] = &[
     ),
     (
         ModeId::MAGIT_STATUS,
+        "P",
+        crate::command::Command::MagitPush,
+    ),
+    (ModeId::MAGIT_DIFF, "P", crate::command::Command::MagitPush),
+    (
+        ModeId::MAGIT_PROCESS,
+        "P",
+        crate::command::Command::MagitPush,
+    ),
+    (ModeId::MAGIT_LOG, "P", crate::command::Command::MagitPush),
+    (
+        ModeId::MAGIT_REVISION,
+        "P",
+        crate::command::Command::MagitPush,
+    ),
+    (
+        ModeId::MAGIT_LOG_SELECT,
+        "P",
+        crate::command::Command::MagitPush,
+    ),
+    (
+        ModeId::MAGIT_STATUS,
         "l l",
         crate::command::Command::MagitLogCurrent,
     ),

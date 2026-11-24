@@ -270,8 +270,10 @@
   | Markdown | `.md`、`.markdown` |
   | HTML | `.html`、`.htm` |
   | CSS | `.css` |
+  | JSON | `.json` |
+  | JSON5 / JSONC | `.json5`、`.jsonc` |
 
-- **Markdown**：块级与行内着色包含标题、强调、链接、行内代码及 grammar 默认 GFM 表格等结构；文字强调按下文 E3 使用独立角色，不改变字号、不提供预览。围栏语言接受上述后缀名及 `rust`、`javascript`、`typescript`、`markdown` 等完整语言名，别名忽略 ASCII 大小写。已注册语言的围栏内容使用子语言高亮；未知 / 缺失语言保持普通代码文本，不递归展开围栏内的进一步围栏注入。嵌入 Markdown 本身仍有块级 / 行内高亮。
+- **Markdown**：块级与行内着色包含标题、强调、链接、行内代码及 grammar 默认 GFM 表格等结构；文字强调按下文 E3 使用独立角色，不改变字号、不提供预览。围栏语言接受上述后缀名及 `rust`、`javascript`、`typescript`、`markdown`、`json`、`json5`、`jsonc` 等完整语言名，别名忽略 ASCII 大小写。已注册语言的围栏内容使用子语言高亮；未知 / 缺失语言保持普通代码文本，不递归展开围栏内的进一步围栏注入。嵌入 Markdown 本身仍有块级 / 行内高亮。
 - **HTML**：沿用 grammar 的 `script` / `style` 原始文本范围，分别按 JavaScript / CSS 着色，包括 Markdown HTML 围栏中的这两类范围。不依据 `type` 属性解释 MIME、TypeScript 或模板方言，不解析标签属性内的事件处理代码或 CSS。
 - **注入边界**：只执行 Markdown 行内 / 围栏与 HTML script / style 规则；不自动启用 Markdown 原生 HTML、元数据、LaTeX，或 JS tagged template、正则、JSDoc 等其他 injections。子解析使用 committed 文本的受限范围，排除 Markdown 引用 / 列表的续行标记；与主解析一并取消、按文本及语言身份提交。跨语言另存不复用旧语言树或暴露迟到高亮。
 - **覆盖与降级**：同层较内侧的 capture 优先，相同范围由后面的查询规则优先；子层仅在自身内容范围内覆盖宿主已有颜色，未着色位置保留宿主样式。`@none` 明确恢复普通前景色。标签及属性等适配到中性语法样式，标题 / 强调按 E3 使用独立角色；不引入完整 face 或语义绑定分析。每个快照最多 16,384 棵树，子层深度最多 4；超过边界的剩余子内容保留宿主颜色或普通文本，正文和编辑不受影响。解析或查询失败仍按 E1 暂用普通文本，不阻止编辑。
@@ -394,7 +396,7 @@ F2 仅提供 status 与单文件整文件级 index 操作，不包含 hunk / 批
 - 先启动真实 `git commit`；Git 请求 editor 时打开它给定的可编辑消息文件并显示提交 diff，尽量复用已有 Magit window。普通 staged 使用 index diff，`--all` 使用 HEAD → worktree（unborn 使用对应对象格式的空 tree）；查看不冻结提交内容。不能用“先编辑，再执行 `git commit -F`”替代。
 - `C-c C-c` 保存消息，成功结束 editor，让等待中的 Git 继续；`C-c C-k` 保存消息并以失败结束 editor，取消提交；`q` 仍输入文字。Git 自己处理消息 cleanup、hooks 时序、锁与最终提交。
 - **已批准差异：结束编辑期间的输入**。Emacs 同步执行结束编辑命令，后续输入等命令结束后再处理；semacs 继续使用异步保存，仅在 finish / cancel 的保存及 editor 答复期间暂时禁止该消息 buffer 的修改、重复结束及新保存 / 另存请求，覆盖所有共享 view。被拒绝的操作明确提示，不排队重放；已有保存 / 另存队列先完成，保存失败或确认被取消则恢复编辑、保留 editor 请求。GUI、导航、保存确认及进程输出不阻塞；普通保存不变，限制不延长到 Git 后续 hook / 签名或整个进程生命周期。理由是用户已明确结束编辑，避免为此引入输入暂存 / 重放机制；不以 commit 通常较快为时限依据。
-- **范围边界**：密码 / passphrase 提示与保密读入不属于 F3，不作为阶段完成条件；不以普通文本读入替代。F3 支持已知 yes/no 与用户名提示；需要 semacs 代收密码的路径不在本阶段验收范围，等待输入时仍可查看输出和主动中断。这不表示禁止外部工具自行处理密码。
+- **范围边界**：密码 / passphrase 提示与保密读入不属于 F3，不作为阶段完成条件；不以普通文本读入替代。F3 支持已知 yes/no 与用户名提示；需要 semacs 代收密码的路径不在本阶段验收范围，等待输入时仍可查看输出和主动中断。这不表示禁止外部工具自行处理密码。（后续用户已批准在 PTY 进程提示中补充保密密码 / passphrase 读入，见文末 [Magit push 与保密密码读入](#magit-push-与保密密码读入)。）
 - 正常运行 hooks、遵循签名配置、允许相关外部工具交互；不静默禁用 hooks / 签名，不给 commit 固定 15 秒或 120 秒超时。不冻结编辑开始时的 HEAD / index，也不在完成编辑时额外比较并拒绝；staged diff 不承诺是不可变化的提交快照。F2 的 index 操作限制不自动套给 commit。
 - 结束编辑后按局部 window 策略收起本次编辑界面并返回 status；Git 进程终态后刷新。完成消息编辑不等于提交成功；编辑前失败可能没有消息 window，编辑后失败不强制重新打开原 window，但保留消息供恢复 / 重试，并可查看诊断。
 - 提供进程输出查看与主动中断，以上游 `$` 查看进程 buffer、`k` 先 interrupt、再次调用 kill 为交互参照；中断不是回滚，不自动重放。取消编辑也不回滚此前 hook 副作用。
@@ -477,6 +479,7 @@ F2 仅提供 status 与单文件整文件级 index 操作，不包含 hunk / 批
 - 单链目录合并（上游 `treemacs-collapse-dirs` = 3）：某目录只有唯一子目录且自身不含文件时合并为 `a/b/c` 一行，止于含文件的目录。
 - 折叠状态归 buffer，point / scroll 归 view；`g` / `r` 刷新后 point 回到同一节点、展开状态保留；节点消失时按上游回退规则就近或上移到存活节点。
 - dotfiles 默认显示，`t h` 切换；`.git` / `.jj` 目录始终隐藏；gitignored 文件默认显示。
+- **节点着色与异步 Git 状态**：按 treemacs 语义使用命名样式区分根项目（`tree.root`）、目录（`tree.directory`）、普通文件（`tree.file`）、gitignored 项（`tree.ignored`）及 Git 状态（`tree.git.modified`、`tree.git.untracked`、`tree.git.added`、`tree.git.conflict`，冲突 > 修改 > 暂存新增 > 未跟踪，状态向上冒泡到祖先目录但不含 ignored）。文件树打开、`TAB` 展开与文件定位只执行本地文件系统读取，绝不阻塞等待 Git；Git 状态通过单槽 latest-wins 后台任务执行 `git status --porcelain=v1 --ignored=matching --untracked-files=normal -z`（对未跟踪/被忽略目录按目录级裁剪）异步贴上，非 Git 目录优雅退化为基本树配色。在首次打开树、`g` / `r` 手动刷新、保存文件完成、Git 写入 / commit / push 终态完成以及窗口重新获得焦点（200ms 防抖，不注册全局文件系统 watcher）时刷新 Git 状态。
 
 ### 根识别
 
@@ -508,7 +511,7 @@ F2 仅提供 status 与单文件整文件级 index 操作，不包含 hunk / 批
 
 ### 首版不提供的上游能力
 
-以下上游命令 / 能力在首版不实现，对应键位不绑定；它们是已确认的首版范围缺口，不是对上游行为的改写，也不额外添加上游没有的限制：排序选择 `s`、gitignored 隐藏 `t i` 与 git 状态注解（依赖仓库读取）、filewatch 与 `t a`、图标 / fringe / 序号等视觉开关（`t v` / `t n` / `t c` / `t d` / `t w` / `W`）、peek（`P`）、文件管理与 `d` / `R` / `m` / `c f` / `c d`、复制前缀 `y`、`b` 书签、`C` 清理、`!` / `M-!` 外部命令、`?` / `C-?` hydra、`M-m`、`o a *`（ace-window）与 `o x`（外部程序）、workspaces / 多根 / 项目前缀（`C-c C-w`、`C-c C-p`、`C-j` / `C-k`、`S-TAB`、`M-<up>` / `M-<down>`）、持久化与远程路径、鼠标动作。
+以下上游命令 / 能力在首版不实现，对应键位不绑定；它们是已确认的首版范围缺口，不是对上游行为的改写，也不额外添加上游没有的限制：排序选择 `s`、gitignored 隐藏 `t i`、filewatch 与 `t a`、图标 / fringe / 序号等视觉开关（`t v` / `t n` / `t c` / `t d` / `t w` / `W`）、peek（`P`）、文件管理与 `d` / `R` / `m` / `c f` / `c d`、复制前缀 `y`、`b` 书签、`C` 清理、`!` / `M-!` 外部命令、`?` / `C-?` hydra、`M-m`、`o a *`（ace-window）与 `o x`（外部程序）、workspaces / 多根 / 项目前缀（`C-c C-w`、`C-c C-p`、`C-j` / `C-k`、`S-TAB`、`M-<up>` / `M-<down>`）、持久化与远程路径、鼠标动作。
 
 ## 阶段 F7：基础 project
 
@@ -677,3 +680,19 @@ F2 仅提供 status 与单文件整文件级 index 操作，不包含 hunk / 批
 - 沿用 F5 单键菜单边界，`d` / `D` 不提供完整 transient / infix 参数（`-U`、`-b`、`--` 文件过滤等）、`d p`（`--no-index` 两文件对比）、`d t`（stash）与 `C-u` 前缀变体。
 - 因尚无 `C-u` 前缀参数，`magit-show-commit` 在 `magit-revision` 正文（非 `Parent N:` 行）弹出 `Show commit:` 读入（默认当前 revision OID）以便直接切换其他提交，而非像上游无前缀时直接重开当前提交。
 - `magit-diff-range` 固定解析后的 OID，后续 `g` 刷新不随分支 ref 移动而重解析（与上游差异，已按计划确认）；同时遵循 semacs 不自动保存编辑 buffer 的既有契约。
+
+## Magit push 与保密密码读入
+
+本节记录按用户确认新增的最小 `magit-push` 流程与 PTY 进程保密口令输入能力（范围说明见 [D29](decisions.md#29-产品重心调整为使用-emacs-操作逻辑的代码查看工具2026-11-08)）。
+
+### Push 菜单与执行模型
+
+- **默认绑定与命令**：在 Magit mode（`magit-status` / `magit-diff` / `magit-log` / `magit-log-select` / `magit-revision` / `magit-process`）中绑定 `P` → `magit-push`，打开单键菜单：`p` `magit-push-current-to-pushremote`、`u` `magit-push-current-to-upstream`、`e` `magit-push-current`（均亦可通过 `M-x` 直接调用），`C-g` 取消。
+- **目标解析与前置设置**：要求当前 HEAD 位于非 unborn 分支（detached HEAD 或无提交的 unborn 分支明确报错）。`p` 优先读取 `branch.<name>.pushRemote` 或 `remote.pushDefault`，未配置时提示选择已知 remote 写入 `branch.<name>.pushRemote` 并推送；`u` 读取 `branch.<name>.remote` 与 `branch.<name>.merge`，未配置时按 `<remote>/<branch>` 补全目标并以 `--set-upstream` 推送；`e` 读取显式 `<remote>/<branch>` 推送目标（不支持本地分支与无配置远端分支以外的复杂 transient infix 参数）。
+- **控制终端 PTY 与 SSH agent**：复用 commit 的控制终端 PTY 进程模型启动 `git push -v`，保留父进程环境变量（包括 `SSH_AUTH_SOCK`、`SSH_ASKPASS`、`DISPLAY`、`WAYLAND_DISPLAY` 等）以便复用系统 SSH key agent 或凭据助手；输出实时投影至 `$`（`magit-process`），支持 `k` 中断/强杀，终态后自动刷新所属仓库 status / log / diff 与 treemacs Git 状态。
+
+### 保密 passphrase / 密码 / PIN 读入
+
+- 当 PTY 进程（如 `git commit` 签名、`git push` SSH/HTTPS 认证）输出密码 / passphrase / PIN 提示时，识别为 `Prompt::Password` 并发起保密读入会话（`ReadKind::CommitPassword`），不使用普通文本读入替代。
+- **显示与剪贴板 / 历史隔离**：输入区开启遮蔽渲染（正文字符以 `'•'` 显示并对齐光标/选区测量），使用会话私有 kill ring 与只读剪贴板（允许 `C-y` 粘贴外部文本，禁止 copy / kill 将口令写入系统剪贴板或全局 kill ring）；平台 IME 的 `text_for_range` 返回 `None`；不写入 minibuffer 历史、`*Messages*` 或 `$ magit-process` 进程输出。
+- **内存清理与取消**：将答复写入 PTY 后立即以 `write_volatile` 清零临时口令缓冲；等待输入期间按 `C-g` 取消会话并按上游进程交互规则终止等待中的子进程，进程退出则自动收起所属未决提示。

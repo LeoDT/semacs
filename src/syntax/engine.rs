@@ -331,6 +331,7 @@ pub(super) fn capture_style(mut name: &str) -> Option<StyleRole> {
             "keyword" => StyleRole::SyntaxKeyword,
             "comment" => StyleRole::SyntaxComment,
             "string" | "escape" => StyleRole::SyntaxString,
+            "string.special.key" => StyleRole::SyntaxFunction,
             "number" => StyleRole::SyntaxNumber,
             "type" | "constructor" | "tag" => StyleRole::SyntaxType,
             "function.builtin" => StyleRole::SyntaxFunctionBuiltin,
@@ -338,7 +339,7 @@ pub(super) fn capture_style(mut name: &str) -> Option<StyleRole> {
             "variable.builtin" => StyleRole::SyntaxVariableBuiltin,
             "variable.special" => StyleRole::SyntaxVariableSpecial,
             "variable" | "property" | "label" | "attribute" => StyleRole::SyntaxVariable,
-            "constant" => StyleRole::SyntaxConstant,
+            "constant" | "boolean" => StyleRole::SyntaxConstant,
             "operator" => StyleRole::SyntaxOperator,
             "punctuation" => StyleRole::SyntaxPunctuation,
             _ => {

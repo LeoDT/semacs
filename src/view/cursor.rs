@@ -43,8 +43,8 @@ impl ShapedRow {
                 let end = part.cursor_stops.partition_point(|stop| *stop <= offset);
                 let start = part.cursor_stops[end - 1];
                 let end = part.cursor_stops[end];
-                let left = line.x_for_index(start);
-                let right = line.x_for_index(end);
+                let left = line.x_for_index(part.mask_index(start));
+                let right = line.x_for_index(part.mask_index(end));
                 return Some((
                     ByteOffset(part.range.start.0 + start)..ByteOffset(part.range.start.0 + end),
                     part.x + left,

@@ -51,6 +51,8 @@
 | `section.heading` | 前景 / 背景及全部文字属性，status 分组名及 diff 总览标题；不把 status 数量、路径或文件头混用为分组标题 |
 | `magit.branch` / `magit.hash` | 前景 / 背景及全部文字属性，status 中的本地分支名与 HEAD OID |
 | `search.file` / `search.line-number` / `search.match` | 前景 / 背景及全部文字属性，`*rg*` 搜索结果中的文件名 heading、行列号及命中子串高亮 |
+| `tree.root` / `tree.directory` / `tree.file` / `tree.ignored` | 前景 / 背景及全部文字属性，tree viewer 的根项目名、目录名、普通文件及 gitignored 条目样式 |
+| `tree.git.modified` / `tree.git.untracked` / `tree.git.added` / `tree.git.conflict` | 前景 / 背景及全部文字属性，tree viewer 中的 Git 状态着色（修改、未跟踪、暂存新增、合并冲突） |
 | `section.current` | 仅 `background`，当前 section 整行背景；该反馈独立于 region |
 
 当前 section 按各 view 的 point 分别合成，不改写共享样式范围；颜色变化仅重绘，当前字体变化参与该 view 的布局身份。逻辑行背景按行首对应角色决定，背景铺至视图右缘，文字 / region / 光标仍保留既有合成优先级。高亮角色到普通角色的回退是上述固定对应关系，不提供任意继承。配色由 semacs 主题直接控制，不运行 Delta；保留 `+` / `-`，不提供逐词差异高亮。

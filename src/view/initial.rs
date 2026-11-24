@@ -50,6 +50,7 @@ impl BufferView {
         settings.wrap_width = size.width;
         settings.soft_wrap = self.soft_wrap_at(self.scroll.x);
         settings.typography = self.typography(cx);
+        settings.mask_from = self.secret.then(|| self.buffer().read_only_prefix().0);
         InitialViewport {
             settings,
             size,

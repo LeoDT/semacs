@@ -18,14 +18,34 @@ pub struct Minibuffer {
 
 impl Minibuffer {
     pub fn new(prompt: &str, initial: &str, window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let target = EditTarget::with_kill_ring(
-            Buffer::minibuffer(prompt, initial),
+        Self::build(
+            prompt,
+            initial,
             cx.default_global::<KillRing>().clone(),
+            false,
+            window,
+            cx,
         )
-        .with_field_boundary(ByteOffset(prompt.len()))
-        .expect("valid prompt field boundary");
+    }
+
+    pub fn new_secret(prompt: &str, window: &mut Window, cx: &mut Context<Self>) -> Self {
+        Self::build(prompt, "", KillRing::default(), true, window, cx)
+    }
+
+    fn build(
+        prompt: &str,
+        initial: &str,
+        kill_ring: KillRing,
+        secret: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        let target = EditTarget::with_kill_ring(Buffer::minibuffer(prompt, initial), kill_ring)
+            .with_field_boundary(ByteOffset(prompt.len()))
+            .expect("valid prompt field boundary");
         let editor = cx.new(|cx| BufferView::with_target(target, cx));
         editor.update(cx, |view, cx| {
+            view.set_secret(secret, cx);
             view.enable_message_annotation();
             view.install_input_lifecycle(window, cx);
         });
