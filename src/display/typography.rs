@@ -97,7 +97,7 @@ impl Typography {
         let mask = syntax.as_ref().map_or(0, |syntax| syntax.role_mask());
         let roles = StyleRole::ALL.map(|role| {
             let patch = theme.patch(role);
-            if mask & (1 << role as usize) != 0 {
+            if mask & (1u128 << role as usize) != 0 {
                 (patch.bold, patch.italic)
             } else {
                 (None, None)

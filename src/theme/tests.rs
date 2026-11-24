@@ -70,6 +70,34 @@ fn syntax_substyles_inherit_parent_attributes_and_override_independently() {
     theme.select("dark").unwrap();
     assert_eq!(theme.attributes(child), theme.attributes(parent));
     assert_eq!(
+        theme.attributes(StyleRole::SyntaxVariableParameter),
+        theme.attributes(StyleRole::SyntaxVariable)
+    );
+    assert_eq!(
+        theme.attributes(StyleRole::SyntaxTypeBuiltin),
+        theme.attributes(StyleRole::SyntaxType)
+    );
+    assert_eq!(
+        theme.attributes(StyleRole::SyntaxConstructor),
+        theme.attributes(StyleRole::SyntaxType)
+    );
+    assert_eq!(
+        theme.attributes(StyleRole::SyntaxFunctionMethod),
+        theme.attributes(StyleRole::SyntaxFunction)
+    );
+    assert_eq!(
+        theme.attributes(StyleRole::SyntaxFunctionMacro),
+        theme.attributes(StyleRole::SyntaxFunction)
+    );
+    assert_eq!(
+        theme.attributes(StyleRole::SyntaxFunctionMethodCall),
+        theme.attributes(StyleRole::SyntaxFunctionCall)
+    );
+    assert_eq!(
+        theme.attributes(StyleRole::SyntaxBoolean),
+        theme.attributes(StyleRole::SyntaxConstant)
+    );
+    assert_eq!(
         theme.attributes(StyleRole::MarkupLinkUrl),
         theme.attributes(StyleRole::SyntaxString)
     );
@@ -77,6 +105,73 @@ fn syntax_substyles_inherit_parent_attributes_and_override_independently() {
         theme.attributes(StyleRole::MarkupRaw),
         theme.attributes(StyleRole::SyntaxString)
     );
+}
+
+#[test]
+fn builtin_syntax_defaults_follow_emacs_hierarchy_and_support_independent_overrides() {
+    for mode in ["light", "dark"] {
+        let mut theme = ThemeSettings::default();
+        theme.select(mode).unwrap();
+        let default_fg = theme.style(StyleRole::Default).foreground;
+        assert_eq!(theme.attributes(StyleRole::SyntaxKeyword).bold, Some(true));
+        assert_eq!(theme.attributes(StyleRole::SyntaxVariable).bold, Some(true));
+        assert_eq!(
+            theme.attributes(StyleRole::SyntaxVariableParameter).bold,
+            Some(true)
+        );
+        assert_eq!(theme.attributes(StyleRole::SyntaxProperty).bold, None);
+        assert_eq!(theme.attributes(StyleRole::SyntaxAttribute).bold, None);
+        assert_eq!(theme.attributes(StyleRole::SyntaxLabel).bold, None);
+        assert_eq!(theme.attributes(StyleRole::MarkupLinkLabel).bold, None);
+        assert_eq!(theme.attributes(StyleRole::SyntaxType).italic, Some(true));
+        assert_eq!(
+            theme.attributes(StyleRole::SyntaxTypeBuiltin).italic,
+            Some(true)
+        );
+        assert_eq!(
+            theme.attributes(StyleRole::SyntaxConstructor).italic,
+            Some(true)
+        );
+        assert_eq!(theme.attributes(StyleRole::SyntaxTag).italic, None);
+        assert_eq!(theme.attributes(StyleRole::SyntaxTagError).italic, None);
+        assert_ne!(
+            theme.style(StyleRole::SyntaxFunction).foreground,
+            default_fg
+        );
+        assert_eq!(
+            theme.style(StyleRole::SyntaxFunctionCall).foreground,
+            default_fg
+        );
+        assert_eq!(
+            theme.style(StyleRole::SyntaxFunctionMethodCall).foreground,
+            default_fg
+        );
+
+        theme.set_style(
+            StyleRole::SyntaxProperty,
+            StyleOverride::default()
+                .with_text_attributes(StyleRole::SyntaxProperty, Some("bold"), None, None, None)
+                .unwrap(),
+        );
+        assert_eq!(theme.attributes(StyleRole::SyntaxProperty).bold, Some(true));
+        theme.set_style(
+            StyleRole::SyntaxVariableParameter,
+            StyleOverride::default()
+                .with_text_attributes(
+                    StyleRole::SyntaxVariableParameter,
+                    Some("normal"),
+                    None,
+                    None,
+                    None,
+                )
+                .unwrap(),
+        );
+        assert_eq!(
+            theme.attributes(StyleRole::SyntaxVariableParameter).bold,
+            Some(false)
+        );
+        assert_eq!(theme.attributes(StyleRole::SyntaxVariable).bold, Some(true));
+    }
 }
 
 #[test]

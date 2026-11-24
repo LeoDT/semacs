@@ -39,12 +39,22 @@
 | `completion-match` | 仅 `foreground`，优先于候选行文字颜色 |
 | `completion-annotation` | 仅 `foreground`，候选注释及计数 |
 | `separator` | 仅 `foreground`，分屏分隔线 |
-| `syntax.keyword` / `syntax.comment` / `syntax.string` / `syntax.number` | 前景 / 背景及全部文字属性，语法关键字 / 注释 / 字符串 / 数字 |
-| `syntax.type` / `syntax.function` / `syntax.variable` / `syntax.constant` | 前景 / 背景及全部文字属性，语法类型 / 函数 / 变量 / 常量 |
-| `syntax.operator` / `syntax.punctuation` | 前景 / 背景及全部文字属性，语法运算符 / 标点 |
-| `syntax.function.builtin` / `syntax.variable.builtin` / `syntax.variable.special` | 内置函数 / 内置变量 / 实例关键字（如 `this`、`self`），未指定的属性沿用 `syntax.function` 或 `syntax.variable` |
+| `syntax.keyword` | 前景 / 背景及全部文字属性，语法关键字；内置加粗 |
+| `syntax.comment` / `syntax.comment.documentation` | 语法注释 / 文档注释；子角色未指定的属性沿用 `syntax.comment` |
+| `syntax.string` / `syntax.string.escape` / `syntax.string.special` | 语法字符串 / 转义序列 / 特殊字面量（如正则、CSS 颜色）；子角色未指定的属性沿用 `syntax.string` |
+| `syntax.string.special.key` | 键名字符串（如 JSON / JSON5 key） |
+| `syntax.number` | 语法数字字面量 |
+| `syntax.type` / `syntax.type.builtin` / `syntax.constructor` | 语法类型 / 内置类型 / 构造器；内置斜体，子角色未指定的属性沿用 `syntax.type` |
+| `syntax.tag` / `syntax.tag.error` | HTML / JSX / CSS 标签名及错误标签；`syntax.tag.error` 未指定的属性沿用 `syntax.tag`，不继承 `syntax.type` 斜体 |
+| `syntax.function` / `syntax.function.builtin` / `syntax.function.method` / `syntax.function.macro` | 函数定义、内置函数、方法定义及宏调用；子角色未指定的属性沿用 `syntax.function` |
+| `syntax.function.call` / `syntax.function.method.call` | 普通函数调用 / 方法调用；内置默认使用正文前景色降噪，`syntax.function.method.call` 沿用 `syntax.function.call` |
+| `syntax.variable` / `syntax.variable.builtin` / `syntax.variable.special` / `syntax.variable.parameter` | 普通变量、内置变量、实例关键字（如 `this`、`self`）及函数参数；内置加粗，子角色未指定的属性沿用 `syntax.variable` |
+| `syntax.property` / `syntax.attribute` / `syntax.label` | 成员属性、注解 / HTML 属性及标签 / 生命周期；不继承 `syntax.variable` 加粗 |
+| `syntax.constant` / `syntax.constant.builtin` / `syntax.boolean` | 常量、内置常量（如 `null`、`undefined`）及布尔值；`syntax.boolean` 沿用 `syntax.constant.builtin`，后者沿用 `syntax.constant` |
+| `syntax.operator` | 语法运算符 |
+| `syntax.punctuation` / `syntax.punctuation.bracket` / `syntax.punctuation.delimiter` / `syntax.punctuation.special` | 语法标点 / 括号 / 分隔符 / 特殊标点；子角色未指定的属性沿用 `syntax.punctuation` |
 | `markup.heading` / `markup.strong` / `markup.emphasis` | 前景 / 背景及全部文字属性，Markdown 标题 / 强强调 / 强调；内置分别为加粗 / 加粗 / 斜体 |
-| `markup.raw` / `markup.link.label` / `markup.link.url` | Markdown 字面内容（如行内代码）、链接文字、链接地址；未指定的属性分别沿用 `syntax.string`、`syntax.variable`、`syntax.string` |
+| `markup.raw` / `markup.link.label` / `markup.link.url` | Markdown 字面内容（如行内代码）、链接文字、链接地址；`markup.raw` / `markup.link.url` 未指定的属性沿用 `syntax.string`，`markup.link.label` 独立于 `syntax.variable` |
 | `diff.file` / `diff.hunk` / `diff.added` / `diff.removed` / `diff.context` | 前景 / 背景及全部文字属性，diff 文件头、hunk 头、增删行及上下文；heading 默认加粗，显式背景铺满逻辑行 |
 | `diff.file-highlight` / `diff.hunk-highlight` / `diff.added-highlight` / `diff.removed-highlight` / `diff.context-highlight` | 当前 section 内对应 diff 角色的样式；缺省沿用普通角色的有效属性，再使用 `section.current` 背景，文件 / hunk 头默认加粗；可独立覆盖，包括 `weight: "normal"` |
 | `diffstat.added` / `diffstat.removed` | 前景 / 背景及全部文字属性，diffstat 的增删计数 |

@@ -21,17 +21,38 @@ pub enum StyleRole {
     Separator,
     SyntaxKeyword,
     SyntaxComment,
+    SyntaxCommentDocumentation,
     SyntaxString,
+    SyntaxStringEscape,
+    SyntaxStringSpecial,
+    SyntaxStringSpecialKey,
     SyntaxNumber,
     SyntaxType,
+    SyntaxTypeBuiltin,
+    SyntaxConstructor,
+    SyntaxTag,
+    SyntaxTagError,
     SyntaxFunction,
-    SyntaxVariable,
-    SyntaxConstant,
-    SyntaxOperator,
-    SyntaxPunctuation,
     SyntaxFunctionBuiltin,
+    SyntaxFunctionMethod,
+    SyntaxFunctionMacro,
+    SyntaxFunctionCall,
+    SyntaxFunctionMethodCall,
+    SyntaxVariable,
     SyntaxVariableBuiltin,
     SyntaxVariableSpecial,
+    SyntaxVariableParameter,
+    SyntaxProperty,
+    SyntaxAttribute,
+    SyntaxLabel,
+    SyntaxConstant,
+    SyntaxConstantBuiltin,
+    SyntaxBoolean,
+    SyntaxOperator,
+    SyntaxPunctuation,
+    SyntaxPunctuationBracket,
+    SyntaxPunctuationDelimiter,
+    SyntaxPunctuationSpecial,
     MarkupRaw,
     MarkupLinkLabel,
     MarkupLinkUrl,
@@ -86,17 +107,38 @@ impl StyleRole {
         Self::Separator,
         Self::SyntaxKeyword,
         Self::SyntaxComment,
+        Self::SyntaxCommentDocumentation,
         Self::SyntaxString,
+        Self::SyntaxStringEscape,
+        Self::SyntaxStringSpecial,
+        Self::SyntaxStringSpecialKey,
         Self::SyntaxNumber,
         Self::SyntaxType,
+        Self::SyntaxTypeBuiltin,
+        Self::SyntaxConstructor,
+        Self::SyntaxTag,
+        Self::SyntaxTagError,
         Self::SyntaxFunction,
-        Self::SyntaxVariable,
-        Self::SyntaxConstant,
-        Self::SyntaxOperator,
-        Self::SyntaxPunctuation,
         Self::SyntaxFunctionBuiltin,
+        Self::SyntaxFunctionMethod,
+        Self::SyntaxFunctionMacro,
+        Self::SyntaxFunctionCall,
+        Self::SyntaxFunctionMethodCall,
+        Self::SyntaxVariable,
         Self::SyntaxVariableBuiltin,
         Self::SyntaxVariableSpecial,
+        Self::SyntaxVariableParameter,
+        Self::SyntaxProperty,
+        Self::SyntaxAttribute,
+        Self::SyntaxLabel,
+        Self::SyntaxConstant,
+        Self::SyntaxConstantBuiltin,
+        Self::SyntaxBoolean,
+        Self::SyntaxOperator,
+        Self::SyntaxPunctuation,
+        Self::SyntaxPunctuationBracket,
+        Self::SyntaxPunctuationDelimiter,
+        Self::SyntaxPunctuationSpecial,
         Self::MarkupRaw,
         Self::MarkupLinkLabel,
         Self::MarkupLinkUrl,
@@ -150,17 +192,38 @@ impl StyleRole {
             Self::Separator => "separator",
             Self::SyntaxKeyword => "syntax.keyword",
             Self::SyntaxComment => "syntax.comment",
+            Self::SyntaxCommentDocumentation => "syntax.comment.documentation",
             Self::SyntaxString => "syntax.string",
+            Self::SyntaxStringEscape => "syntax.string.escape",
+            Self::SyntaxStringSpecial => "syntax.string.special",
+            Self::SyntaxStringSpecialKey => "syntax.string.special.key",
             Self::SyntaxNumber => "syntax.number",
             Self::SyntaxType => "syntax.type",
+            Self::SyntaxTypeBuiltin => "syntax.type.builtin",
+            Self::SyntaxConstructor => "syntax.constructor",
+            Self::SyntaxTag => "syntax.tag",
+            Self::SyntaxTagError => "syntax.tag.error",
             Self::SyntaxFunction => "syntax.function",
-            Self::SyntaxVariable => "syntax.variable",
-            Self::SyntaxConstant => "syntax.constant",
-            Self::SyntaxOperator => "syntax.operator",
-            Self::SyntaxPunctuation => "syntax.punctuation",
             Self::SyntaxFunctionBuiltin => "syntax.function.builtin",
+            Self::SyntaxFunctionMethod => "syntax.function.method",
+            Self::SyntaxFunctionMacro => "syntax.function.macro",
+            Self::SyntaxFunctionCall => "syntax.function.call",
+            Self::SyntaxFunctionMethodCall => "syntax.function.method.call",
+            Self::SyntaxVariable => "syntax.variable",
             Self::SyntaxVariableBuiltin => "syntax.variable.builtin",
             Self::SyntaxVariableSpecial => "syntax.variable.special",
+            Self::SyntaxVariableParameter => "syntax.variable.parameter",
+            Self::SyntaxProperty => "syntax.property",
+            Self::SyntaxAttribute => "syntax.attribute",
+            Self::SyntaxLabel => "syntax.label",
+            Self::SyntaxConstant => "syntax.constant",
+            Self::SyntaxConstantBuiltin => "syntax.constant.builtin",
+            Self::SyntaxBoolean => "syntax.boolean",
+            Self::SyntaxOperator => "syntax.operator",
+            Self::SyntaxPunctuation => "syntax.punctuation",
+            Self::SyntaxPunctuationBracket => "syntax.punctuation.bracket",
+            Self::SyntaxPunctuationDelimiter => "syntax.punctuation.delimiter",
+            Self::SyntaxPunctuationSpecial => "syntax.punctuation.special",
             Self::MarkupRaw => "markup.raw",
             Self::MarkupLinkLabel => "markup.link.label",
             Self::MarkupLinkUrl => "markup.link.url",
@@ -221,10 +284,22 @@ impl StyleRole {
 
     fn syntax_parent(self) -> Option<Self> {
         match self {
-            Self::SyntaxFunctionBuiltin => Some(Self::SyntaxFunction),
-            Self::SyntaxVariableBuiltin | Self::SyntaxVariableSpecial | Self::MarkupLinkLabel => {
-                Some(Self::SyntaxVariable)
-            }
+            Self::SyntaxCommentDocumentation => Some(Self::SyntaxComment),
+            Self::SyntaxStringEscape | Self::SyntaxStringSpecial => Some(Self::SyntaxString),
+            Self::SyntaxTypeBuiltin | Self::SyntaxConstructor => Some(Self::SyntaxType),
+            Self::SyntaxTagError => Some(Self::SyntaxTag),
+            Self::SyntaxFunctionBuiltin
+            | Self::SyntaxFunctionMethod
+            | Self::SyntaxFunctionMacro => Some(Self::SyntaxFunction),
+            Self::SyntaxFunctionMethodCall => Some(Self::SyntaxFunctionCall),
+            Self::SyntaxVariableBuiltin
+            | Self::SyntaxVariableSpecial
+            | Self::SyntaxVariableParameter => Some(Self::SyntaxVariable),
+            Self::SyntaxConstantBuiltin => Some(Self::SyntaxConstant),
+            Self::SyntaxBoolean => Some(Self::SyntaxConstantBuiltin),
+            Self::SyntaxPunctuationBracket
+            | Self::SyntaxPunctuationDelimiter
+            | Self::SyntaxPunctuationSpecial => Some(Self::SyntaxPunctuation),
             Self::MarkupRaw | Self::MarkupLinkUrl => Some(Self::SyntaxString),
             _ => None,
         }
@@ -605,9 +680,15 @@ fn builtin_colors(mode: ThemeMode) -> [StyleColors; StyleRole::COUNT] {
     StyleRole::ALL.map(|role| match role {
         StyleRole::Default
         | StyleRole::Completion
+        | StyleRole::SyntaxFunctionCall
+        | StyleRole::SyntaxFunctionMethodCall
         | StyleRole::SyntaxVariable
         | StyleRole::SyntaxVariableBuiltin
         | StyleRole::SyntaxVariableSpecial
+        | StyleRole::SyntaxVariableParameter
+        | StyleRole::SyntaxProperty
+        | StyleRole::SyntaxAttribute
+        | StyleRole::SyntaxLabel
         | StyleRole::MarkupLinkLabel
         | StyleRole::SyntaxOperator
         | StyleRole::MarkupEmphasis
@@ -636,11 +717,18 @@ fn builtin_colors(mode: ThemeMode) -> [StyleColors; StyleRole::COUNT] {
         StyleRole::EchoArea
         | StyleRole::CompletionAnnotation
         | StyleRole::SyntaxPunctuation
+        | StyleRole::SyntaxPunctuationBracket
+        | StyleRole::SyntaxPunctuationDelimiter
+        | StyleRole::SyntaxPunctuationSpecial
         | StyleRole::MagitHash => pair(muted, background),
         StyleRole::Separator => pair(separator, background),
         StyleRole::SyntaxKeyword | StyleRole::SectionHeading => pair(keyword, background),
-        StyleRole::SyntaxComment | StyleRole::TreeIgnored => pair(comment, background),
+        StyleRole::SyntaxComment
+        | StyleRole::SyntaxCommentDocumentation
+        | StyleRole::TreeIgnored => pair(comment, background),
         StyleRole::SyntaxString
+        | StyleRole::SyntaxStringEscape
+        | StyleRole::SyntaxStringSpecial
         | StyleRole::MarkupRaw
         | StyleRole::MarkupLinkUrl
         | StyleRole::DiffStatAdded
@@ -649,6 +737,10 @@ fn builtin_colors(mode: ThemeMode) -> [StyleColors; StyleRole::COUNT] {
             pair(number, background)
         }
         StyleRole::SyntaxType
+        | StyleRole::SyntaxTypeBuiltin
+        | StyleRole::SyntaxConstructor
+        | StyleRole::SyntaxTag
+        | StyleRole::SyntaxTagError
         | StyleRole::MarkupHeading
         | StyleRole::MarkupStrong
         | StyleRole::DiffFile
@@ -665,12 +757,17 @@ fn builtin_colors(mode: ThemeMode) -> [StyleColors; StyleRole::COUNT] {
                 0xfff2a8
             },
         ),
-        StyleRole::SyntaxFunction | StyleRole::SyntaxFunctionBuiltin | StyleRole::TreeDirectory => {
-            pair(function, background)
-        }
-        StyleRole::SyntaxConstant | StyleRole::DiffStatRemoved | StyleRole::TreeGitConflict => {
-            pair(constant, background)
-        }
+        StyleRole::SyntaxFunction
+        | StyleRole::SyntaxFunctionBuiltin
+        | StyleRole::SyntaxFunctionMethod
+        | StyleRole::SyntaxFunctionMacro
+        | StyleRole::SyntaxStringSpecialKey
+        | StyleRole::TreeDirectory => pair(function, background),
+        StyleRole::SyntaxConstant
+        | StyleRole::SyntaxConstantBuiltin
+        | StyleRole::SyntaxBoolean
+        | StyleRole::DiffStatRemoved
+        | StyleRole::TreeGitConflict => pair(constant, background),
         StyleRole::DiffHunk | StyleRole::DiffHunkHighlight => pair(function, inactive_bg),
         StyleRole::DiffAdded | StyleRole::DiffAddedHighlight => pair(
             string,
@@ -701,6 +798,9 @@ fn builtin_colors(mode: ThemeMode) -> [StyleColors; StyleRole::COUNT] {
 
 fn builtin_attributes(mode: ThemeMode) -> [StyleOverride; StyleRole::COUNT] {
     let mut attributes = [StyleOverride::default(); StyleRole::COUNT];
+    attributes[StyleRole::SyntaxKeyword as usize].bold = Some(true);
+    attributes[StyleRole::SyntaxType as usize].italic = Some(true);
+    attributes[StyleRole::SyntaxVariable as usize].bold = Some(true);
     attributes[StyleRole::MarkupHeading as usize].bold = Some(true);
     attributes[StyleRole::MarkupStrong as usize].bold = Some(true);
     attributes[StyleRole::DiffFile as usize].bold = Some(true);

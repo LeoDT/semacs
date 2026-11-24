@@ -49,22 +49,24 @@ pub(super) fn style_at(parsed: &Parsed, offset: usize) -> Option<StyleRole> {
 
 #[test]
 fn bundled_query_colors_rust_categories_and_tolerates_incomplete_syntax() {
-    let text = "// 中🙂\nconst answer: i32 = 42;\nfn greet(name: String) { let s = r#\"fn false\"#; let b = true; greet(name); }\nfn incomplete(";
+    let text = "// 中🙂\nconst answer: i32 = 42;\nfn greet(name: String) { let s = r#\"fn false\"#; let b = true; greet(name); s.len(); }\nfn incomplete(";
     let buffer = buffer(text);
     let parsed = parsed(&buffer);
     for (token, style) in [
         ("//", StyleRole::SyntaxComment),
         ("const", StyleRole::SyntaxKeyword),
         ("answer", StyleRole::SyntaxConstant),
-        ("i32", StyleRole::SyntaxType),
+        ("i32", StyleRole::SyntaxTypeBuiltin),
         ("42", StyleRole::SyntaxNumber),
-        ("greet", StyleRole::SyntaxFunction),
-        ("name", StyleRole::SyntaxVariable),
+        ("greet(name: String)", StyleRole::SyntaxFunction),
+        ("name: String", StyleRole::SyntaxVariableParameter),
         ("String", StyleRole::SyntaxType),
         ("r#", StyleRole::SyntaxString),
-        ("true", StyleRole::SyntaxConstant),
+        ("true", StyleRole::SyntaxConstantBuiltin),
+        ("greet(name);", StyleRole::SyntaxFunctionCall),
+        ("len()", StyleRole::SyntaxFunctionMethodCall),
         ("=", StyleRole::SyntaxOperator),
-        (";", StyleRole::SyntaxPunctuation),
+        (";", StyleRole::SyntaxPunctuationDelimiter),
     ] {
         assert_eq!(
             style_at(&parsed, text.find(token).unwrap()),

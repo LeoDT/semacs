@@ -43,7 +43,29 @@ fn asynchronous_highlights_and_recoloring_preserve_shaping_scroll_and_input_geom
         assert!(view.read(cx).viewport_layout().is_some());
     });
     redraw(&mut visual);
-    let syntax = visual.read(|cx| view.read(cx).buffer().syntax_highlights().unwrap());
+    redraw(&mut visual);
+    let (syntax, settled) = visual.read(|cx| {
+        let view = view.read(cx);
+        assert!(view.syntax_ready());
+        assert!(view.layout_ready());
+        assert_eq!(
+            (
+                view.buffer().snapshot_id(),
+                view.buffer().point(),
+                view.buffer().mark(),
+                view.scroll,
+            ),
+            (before.0, before.1, before.2, before.3)
+        );
+        (
+            view.buffer().syntax_highlights().unwrap(),
+            (
+                view.cache.clone(),
+                view.index.as_ref().unwrap().key().clone(),
+                view.geometry_refreshes,
+            ),
+        )
+    });
     visual.update(|window, cx| {
         let mut theme = ThemeSettings::global(cx).clone();
         theme.select("dark").unwrap();
@@ -63,13 +85,13 @@ fn asynchronous_highlights_and_recoloring_preserve_shaping_scroll_and_input_geom
                 view.index.as_ref().unwrap().key().clone(),
                 view.geometry_refreshes
             ),
-            (before.0, before.1, before.2, before.3, before.5, before.6)
+            (before.0, before.1, before.2, before.3, settled.1, settled.2)
         );
         assert!(!view.buffer().is_modified());
         assert!(
             view.cache
                 .iter()
-                .all(|(row, shaped)| Arc::ptr_eq(shaped, &before.4[row]))
+                .all(|(row, shaped)| Arc::ptr_eq(shaped, &settled.0[row]))
         );
         assert!(Arc::ptr_eq(
             &view.buffer().syntax_highlights().unwrap(),

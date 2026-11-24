@@ -116,7 +116,7 @@ impl DisplayHighlights {
         self.in_display_range(0..end, marked)
     }
 
-    pub(crate) fn role_mask(&self) -> u64 {
+    pub(crate) fn role_mask(&self) -> u128 {
         self.source.role_mask
     }
 

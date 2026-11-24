@@ -173,11 +173,11 @@ pub(super) fn parse(
         language,
         highlights: Arc::new(Highlights {
             snapshot: snapshot.id(),
-            role_mask: spans.iter().fold(0, |mask, span| {
+            role_mask: spans.iter().fold(0u128, |mask, span| {
                 span.modifiers
                     .iter()
-                    .fold(mask | (1 << span.style as usize), |mask, role| {
-                        mask | (1 << *role as usize)
+                    .fold(mask | (1u128 << span.style as usize), |mask, role| {
+                        mask | (1u128 << *role as usize)
                     })
             }),
             spans,
@@ -330,18 +330,38 @@ pub(super) fn capture_style(mut name: &str) -> Option<StyleRole> {
             "text.literal" => StyleRole::MarkupRaw,
             "keyword" => StyleRole::SyntaxKeyword,
             "comment" => StyleRole::SyntaxComment,
-            "string" | "escape" => StyleRole::SyntaxString,
-            "string.special.key" => StyleRole::SyntaxFunction,
+            "comment.documentation" => StyleRole::SyntaxCommentDocumentation,
+            "string" => StyleRole::SyntaxString,
+            "string.escape" | "escape" => StyleRole::SyntaxStringEscape,
+            "string.special" => StyleRole::SyntaxStringSpecial,
+            "string.special.key" => StyleRole::SyntaxStringSpecialKey,
             "number" => StyleRole::SyntaxNumber,
-            "type" | "constructor" | "tag" => StyleRole::SyntaxType,
-            "function.builtin" => StyleRole::SyntaxFunctionBuiltin,
+            "type" => StyleRole::SyntaxType,
+            "type.builtin" => StyleRole::SyntaxTypeBuiltin,
+            "constructor" => StyleRole::SyntaxConstructor,
+            "tag" => StyleRole::SyntaxTag,
+            "tag.error" => StyleRole::SyntaxTagError,
             "function" => StyleRole::SyntaxFunction,
+            "function.builtin" => StyleRole::SyntaxFunctionBuiltin,
+            "function.method" => StyleRole::SyntaxFunctionMethod,
+            "function.macro" => StyleRole::SyntaxFunctionMacro,
+            "function.call" => StyleRole::SyntaxFunctionCall,
+            "function.method.call" => StyleRole::SyntaxFunctionMethodCall,
+            "variable" => StyleRole::SyntaxVariable,
             "variable.builtin" => StyleRole::SyntaxVariableBuiltin,
             "variable.special" => StyleRole::SyntaxVariableSpecial,
-            "variable" | "property" | "label" | "attribute" => StyleRole::SyntaxVariable,
-            "constant" | "boolean" => StyleRole::SyntaxConstant,
+            "variable.parameter" => StyleRole::SyntaxVariableParameter,
+            "property" => StyleRole::SyntaxProperty,
+            "attribute" => StyleRole::SyntaxAttribute,
+            "label" => StyleRole::SyntaxLabel,
+            "constant" => StyleRole::SyntaxConstant,
+            "constant.builtin" => StyleRole::SyntaxConstantBuiltin,
+            "boolean" => StyleRole::SyntaxBoolean,
             "operator" => StyleRole::SyntaxOperator,
             "punctuation" => StyleRole::SyntaxPunctuation,
+            "punctuation.bracket" => StyleRole::SyntaxPunctuationBracket,
+            "punctuation.delimiter" => StyleRole::SyntaxPunctuationDelimiter,
+            "punctuation.special" => StyleRole::SyntaxPunctuationSpecial,
             _ => {
                 name = name.rsplit_once('.')?.0;
                 continue;

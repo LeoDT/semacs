@@ -33,10 +33,10 @@ pub(crate) struct Span {
 pub(crate) struct Highlights {
     pub snapshot: SnapshotId,
     spans: Vec<Span>,
-    role_mask: u64,
+    role_mask: u128,
 }
 
-const _: () = assert!(StyleRole::COUNT <= u64::BITS as usize);
+const _: () = assert!(StyleRole::COUNT <= u128::BITS as usize);
 
 impl Highlights {
     pub fn in_range(&self, range: Range<usize>) -> impl Iterator<Item = Span> + '_ {

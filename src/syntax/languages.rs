@@ -81,7 +81,33 @@ impl Definition {
 
 use LanguageId::*;
 
-const JS_INSTANCE_HIGHLIGHTS: &str = "[(this) (super)] @variable.special";
+const JS_PARAM_HIGHLIGHTS: &str = r#"
+(formal_parameters
+  [
+    (identifier) @variable.parameter
+    (array_pattern
+      (identifier) @variable.parameter)
+    (object_pattern
+      [
+        (pair_pattern value: (identifier) @variable.parameter)
+        (shorthand_property_identifier_pattern) @variable.parameter
+      ])
+  ])
+"#;
+const JS_EXTRA_HIGHLIGHTS: &str = r#"
+[(this) (super)] @variable.special
+(arrow_function
+  parameter: (identifier) @variable.parameter)
+(call_expression
+  function: (identifier) @function.call)
+(call_expression
+  function: (member_expression
+    property: (property_identifier) @function.method.call))
+((call_expression
+  function: (identifier) @function.builtin)
+ (#eq? @function.builtin "require")
+ (#is-not? local))
+"#;
 const JSON_EXTRA_HIGHLIGHTS: &str = r#"
 (pair
   key: (_) @string.special.key)
@@ -109,7 +135,8 @@ pub(super) static LANGUAGES: [Definition; 10] = [
         &[
             tree_sitter_javascript::HIGHLIGHT_QUERY,
             tree_sitter_javascript::JSX_HIGHLIGHT_QUERY,
-            JS_INSTANCE_HIGHLIGHTS,
+            JS_PARAM_HIGHLIGHTS,
+            JS_EXTRA_HIGHLIGHTS,
         ],
         "",
     ),
@@ -121,7 +148,7 @@ pub(super) static LANGUAGES: [Definition; 10] = [
         &[
             tree_sitter_javascript::HIGHLIGHT_QUERY,
             tree_sitter_typescript::HIGHLIGHTS_QUERY,
-            JS_INSTANCE_HIGHLIGHTS,
+            JS_EXTRA_HIGHLIGHTS,
         ],
         "",
     ),
@@ -134,7 +161,7 @@ pub(super) static LANGUAGES: [Definition; 10] = [
             tree_sitter_javascript::HIGHLIGHT_QUERY,
             tree_sitter_typescript::HIGHLIGHTS_QUERY,
             tree_sitter_javascript::JSX_HIGHLIGHT_QUERY,
-            JS_INSTANCE_HIGHLIGHTS,
+            JS_EXTRA_HIGHLIGHTS,
         ],
         "",
     ),

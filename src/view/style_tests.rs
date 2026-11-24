@@ -122,7 +122,8 @@ fn mapped_fonts_keep_local_reflow_during_pending_syntax(cx: &mut TestAppContext)
     visual.read(|cx| {
         let view = view.read(cx);
         assert!(view.layout_ready());
-        assert_eq!(view.settings.typography.font_at(1).bold, None);
+        assert_eq!(view.settings.typography.font_at(1).bold, Some(true));
+        assert_eq!(view.settings.typography.font_at(1).italic, None);
         assert!(view.index.as_ref().unwrap().scanned_bytes() < PREVIEW_BYTES);
     });
 }
@@ -138,7 +139,7 @@ fn syntax_publication_without_emphasis_change_keeps_shaped_rows(cx: &mut TestApp
     redraw(&mut visual);
     let mut input = handler(&view, &visual);
     let before = visual.update(|window, cx| {
-        input.replace_text_in_range(None, "x", window, cx);
+        input.replace_text_in_range(None, " ", window, cx);
         window.draw(cx).clear(cx);
         let view = view.read(cx);
         assert!(!view.syntax_ready());

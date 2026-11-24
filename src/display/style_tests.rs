@@ -23,6 +23,18 @@ fn settings() -> LayoutSettings {
 fn bold_keyword_theme() -> ThemeSettings {
     let mut theme = ThemeSettings::default();
     theme.set_style(
+        StyleRole::Default,
+        StyleOverride::default()
+            .with_text_attributes(StyleRole::Default, Some("normal"), None, None, None)
+            .unwrap(),
+    );
+    theme.set_style(
+        StyleRole::SyntaxVariable,
+        StyleOverride::default()
+            .with_text_attributes(StyleRole::SyntaxVariable, Some("normal"), None, None, None)
+            .unwrap(),
+    );
+    theme.set_style(
         StyleRole::SyntaxKeyword,
         StyleOverride::default()
             .with_text_attributes(StyleRole::SyntaxKeyword, Some("bold"), None, None, None)
@@ -132,7 +144,7 @@ fn syntax_emphasis_change_reports_local_keyword_loss(cx: &mut TestAppContext) {
     cx.update(|cx| syntax.prepare(observer.downgrade().into(), cx));
     cx.run_until_parked();
     let published = typography(syntax.display_highlights().unwrap());
-    assert_eq!(published.font_at(1).bold, None);
+    assert_eq!(published.font_at(1).bold, Some(false));
     assert_eq!(
         projected.syntax_emphasis_change(&published),
         Some(EmphasisChange::Changed(1..3))
@@ -609,6 +621,13 @@ fn markdown_nested_emphasis_and_headings_compose_without_leaking_into_code(
     }
     assert_eq!(
         typography.font_at(text.find("fn main").unwrap()),
+        FontEmphasis {
+            bold: Some(true),
+            italic: None,
+        }
+    );
+    assert_eq!(
+        typography.font_at(text.find("main").unwrap()),
         FontEmphasis::default()
     );
     let mut theme = theme;

@@ -97,31 +97,52 @@ fn javascript_jsx_typescript_and_tsx_combine_queries() {
         assert!(!parsed.layers[0].tree.root_node().has_error());
         for (token, style) in [
             ("const", StyleRole::SyntaxKeyword),
-            ("div", StyleRole::SyntaxType),
-            ("title", StyleRole::SyntaxVariable),
+            ("div", StyleRole::SyntaxTag),
+            ("title", StyleRole::SyntaxAttribute),
             ("hi", StyleRole::SyntaxString),
-            ("call", StyleRole::SyntaxFunction),
+            ("call", StyleRole::SyntaxFunctionCall),
             ("42", StyleRole::SyntaxNumber),
             ("//", StyleRole::SyntaxComment),
-            ("<", StyleRole::SyntaxPunctuation),
+            ("<", StyleRole::SyntaxPunctuationBracket),
         ] {
             assert_token(&parsed, text, token, style);
         }
     }
-    let text = "interface User { name: string }\nfunction greet(user: User): number { return 42; }";
-    let parsed = parsed("a.ts", text);
+    let text = "interface User { name: string }\nfunction greet(user: User): number { return 42; }\nconst list = [1]; list.map(c => c.x);";
+    let ts_parsed = parsed("a.ts", text);
     for (token, style) in [
         ("interface", StyleRole::SyntaxKeyword),
         ("User", StyleRole::SyntaxType),
-        ("string", StyleRole::SyntaxType),
+        ("string", StyleRole::SyntaxTypeBuiltin),
         ("greet", StyleRole::SyntaxFunction),
-        ("user:", StyleRole::SyntaxVariable),
-        ("number", StyleRole::SyntaxType),
+        ("user:", StyleRole::SyntaxVariableParameter),
+        ("number", StyleRole::SyntaxTypeBuiltin),
         ("return", StyleRole::SyntaxKeyword),
         ("42", StyleRole::SyntaxNumber),
+        ("map", StyleRole::SyntaxFunctionMethodCall),
+        ("c =>", StyleRole::SyntaxVariableParameter),
+        ("x);", StyleRole::SyntaxProperty),
     ] {
-        assert_token(&parsed, text, token, style);
+        assert_token(&ts_parsed, text, token, style);
     }
+
+    let js_text = "function foo(a) { return a; }\nconst inc = x => x + 1;";
+    let js_parsed = parsed("a.js", js_text);
+    assert_token(&js_parsed, js_text, "foo", StyleRole::SyntaxFunction);
+    assert_token(
+        &js_parsed,
+        js_text,
+        "a)",
+        StyleRole::SyntaxVariableParameter,
+    );
+    assert_token(&js_parsed, js_text, "a;", StyleRole::SyntaxVariable);
+    assert_token(
+        &js_parsed,
+        js_text,
+        "x =>",
+        StyleRole::SyntaxVariableParameter,
+    );
+    assert_token(&js_parsed, js_text, "x +", StyleRole::SyntaxVariable);
 }
 
 #[test]
@@ -132,9 +153,12 @@ fn specialized_captures_preserve_instance_keywords_and_builtins() {
         assert!(!parsed.layers[0].tree.root_node().has_error());
         for (token, style) in [
             ("console", StyleRole::SyntaxVariableBuiltin),
+            ("log(", StyleRole::SyntaxFunctionMethodCall),
             ("this", StyleRole::SyntaxVariableSpecial),
+            ("name,", StyleRole::SyntaxProperty),
             ("super", StyleRole::SyntaxVariableSpecial),
-            ("name", StyleRole::SyntaxVariable),
+            ("act() {", StyleRole::SyntaxFunctionMethod),
+            ("act(),", StyleRole::SyntaxFunctionMethodCall),
             ("require", StyleRole::SyntaxFunctionBuiltin),
         ] {
             assert_token(&parsed, text, token, style);
@@ -145,14 +169,16 @@ fn specialized_captures_preserve_instance_keywords_and_builtins() {
     let result = parsed("a.rs", text);
     assert_token(&result, text, "self)", StyleRole::SyntaxVariableSpecial);
     assert_token(&result, text, "self.feed", StyleRole::SyntaxVariableSpecial);
+    assert_token(&result, text, "feed()", StyleRole::SyntaxFunctionMethodCall);
     assert_token(&result, text, "self::", StyleRole::SyntaxVariable);
+    assert_token(&result, text, "other()", StyleRole::SyntaxFunctionCall);
     assert_eq!(
         capture_style("function.builtin.static"),
         Some(StyleRole::SyntaxFunctionBuiltin)
     );
     assert_eq!(
         capture_style("function.method.static"),
-        Some(StyleRole::SyntaxFunction)
+        Some(StyleRole::SyntaxFunctionMethod)
     );
 }
 
@@ -161,7 +187,7 @@ fn template_substitutions_override_the_enclosing_string() {
     let text = "const s = `hello ${call(42)}!`;";
     let parsed = parsed("a.js", text);
     assert_token(&parsed, text, "hello", StyleRole::SyntaxString);
-    assert_token(&parsed, text, "call", StyleRole::SyntaxFunction);
+    assert_token(&parsed, text, "call", StyleRole::SyntaxFunctionCall);
     assert_token(&parsed, text, "42", StyleRole::SyntaxNumber);
     assert_token(&parsed, text, "!", StyleRole::SyntaxString);
 }
@@ -173,13 +199,13 @@ fn html_script_and_style_use_native_injection_ranges() {
     assert_eq!(parsed.layers.len(), 3);
     for (token, style) in [
         ("<!--", StyleRole::SyntaxComment),
-        ("div", StyleRole::SyntaxType),
-        ("class", StyleRole::SyntaxVariable),
+        ("div", StyleRole::SyntaxTag),
+        ("class", StyleRole::SyntaxAttribute),
         ("a\"", StyleRole::SyntaxString),
         ("const", StyleRole::SyntaxKeyword),
-        ("call", StyleRole::SyntaxFunction),
+        ("call", StyleRole::SyntaxFunctionCall),
         ("42", StyleRole::SyntaxNumber),
-        ("color", StyleRole::SyntaxVariable),
+        ("color", StyleRole::SyntaxProperty),
         ("12", StyleRole::SyntaxNumber),
         ("px", StyleRole::SyntaxType),
     ] {
@@ -196,12 +222,12 @@ fn css_representative_syntax_is_colored() {
     for (token, style) in [
         ("/*", StyleRole::SyntaxComment),
         ("@media", StyleRole::SyntaxKeyword),
-        ("box", StyleRole::SyntaxVariable),
-        ("hover", StyleRole::SyntaxVariable),
-        ("width", StyleRole::SyntaxVariable),
+        ("box", StyleRole::SyntaxProperty),
+        ("hover", StyleRole::SyntaxAttribute),
+        ("width", StyleRole::SyntaxProperty),
         ("12", StyleRole::SyntaxNumber),
         ("px", StyleRole::SyntaxType),
-        ("fff", StyleRole::SyntaxString),
+        ("fff", StyleRole::SyntaxStringSpecial),
         ("hi", StyleRole::SyntaxString),
     ] {
         assert_token(&parsed, text, token, style);
@@ -214,12 +240,12 @@ fn json_and_json5_highlight_keys_values_comments_and_booleans() {
     let json = parsed("config.json", json_text);
     assert!(!json.layers[0].tree.root_node().has_error());
     for (token, style) in [
-        ("name", StyleRole::SyntaxFunction),
+        ("name", StyleRole::SyntaxStringSpecialKey),
         ("semacs", StyleRole::SyntaxString),
         ("42", StyleRole::SyntaxNumber),
-        ("true", StyleRole::SyntaxConstant),
-        ("null", StyleRole::SyntaxConstant),
-        ("{", StyleRole::SyntaxPunctuation),
+        ("true", StyleRole::SyntaxConstantBuiltin),
+        ("null", StyleRole::SyntaxConstantBuiltin),
+        ("{", StyleRole::SyntaxPunctuationBracket),
     ] {
         assert_token(&json, json_text, token, style);
     }
@@ -229,14 +255,14 @@ fn json_and_json5_highlight_keys_values_comments_and_booleans() {
     assert!(!json5.layers[0].tree.root_node().has_error());
     for (token, style) in [
         ("// comment", StyleRole::SyntaxComment),
-        ("unquotedKey", StyleRole::SyntaxFunction),
+        ("unquotedKey", StyleRole::SyntaxStringSpecialKey),
         ("'val'", StyleRole::SyntaxString),
-        ("quotedKey", StyleRole::SyntaxFunction),
+        ("quotedKey", StyleRole::SyntaxStringSpecialKey),
         ("0x2A", StyleRole::SyntaxNumber),
-        ("false", StyleRole::SyntaxConstant),
-        ("null", StyleRole::SyntaxConstant),
+        ("false", StyleRole::SyntaxBoolean),
+        ("null", StyleRole::SyntaxConstantBuiltin),
         ("/* block */", StyleRole::SyntaxComment),
-        ("{", StyleRole::SyntaxPunctuation),
+        ("{", StyleRole::SyntaxPunctuationBracket),
     ] {
         assert_token(&json5, json5_text, token, style);
     }
@@ -274,7 +300,7 @@ fn markdown_fences_support_every_registered_public_language_and_html_children() 
     for (alias, code, token, style) in [
         ("rust", "fn main() {}", "fn", StyleRole::SyntaxKeyword),
         ("JS", "const n = 42;", "const", StyleRole::SyntaxKeyword),
-        ("jsx", "const n = <div/>;", "div", StyleRole::SyntaxType),
+        ("jsx", "const n = <div/>;", "div", StyleRole::SyntaxTag),
         (
             "typescript",
             "interface User {}",
@@ -299,8 +325,13 @@ fn markdown_fences_support_every_registered_public_language_and_html_children() 
             "const",
             StyleRole::SyntaxKeyword,
         ),
-        ("json", r#"{"key": 42}"#, "key", StyleRole::SyntaxFunction),
-        ("json5", "{ key: true }", "true", StyleRole::SyntaxConstant),
+        (
+            "json",
+            r#"{"key": 42}"#,
+            "key",
+            StyleRole::SyntaxStringSpecialKey,
+        ),
+        ("json5", "{ key: true }", "true", StyleRole::SyntaxBoolean),
         ("markdown", "# Heading", "Heading", StyleRole::MarkupHeading),
     ] {
         let text = format!("中🙂\n\n```{alias}\n{code}\n```\n");
@@ -320,7 +351,7 @@ fn markdown_excluded_block_continuations_never_receive_inline_or_code_colors() {
     for (offset, _) in text.match_indices("> ") {
         assert_eq!(
             style_at(&parsed, offset),
-            Some(StyleRole::SyntaxPunctuation)
+            Some(StyleRole::SyntaxPunctuationSpecial)
         );
     }
 }
