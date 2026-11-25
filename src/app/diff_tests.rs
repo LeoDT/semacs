@@ -16,13 +16,15 @@ mod state;
 fn open(repo: &Repository, cx: &mut TestAppContext) -> (VisualTestContext, Entity<AppShell>) {
     cx.background_executor.allow_parking();
     cx.update(crate::app::init);
+    let path = repo.0.join("a");
     let buffer = Buffer::new(
-        Some(repo.0.join("a")),
+        Some(path.clone()),
         DecodedFile {
             text: "old\n".into(),
             format: FileFormat::default(),
         },
-    );
+    )
+    .with_disk_stamp(crate::files::stamp(&path).ok().flatten());
     let window = cx.open_window(size(px(960.), px(640.)), |window, cx| {
         AppShell::new(buffer, window, cx)
     });

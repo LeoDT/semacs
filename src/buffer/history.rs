@@ -224,6 +224,50 @@ impl History {
         }
         true
     }
+
+    /// Marks every state other than the current `undo` tip as dirty relative to
+    /// the newly reverted disk contents.
+    pub(super) fn mark_only_current_clean(&mut self) {
+        for group in self.undo.iter_mut().chain(self.redo.iter_mut()) {
+            group.modified_before = true;
+            group.modified_after = true;
+        }
+        if let Some(last) = self.undo.last_mut() {
+            last.modified_after = false;
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn record_revert(
+        &mut self,
+        start: ByteOffset,
+        removed: Rope,
+        inserted: Rope,
+        point_before: ByteOffset,
+        point_after: ByteOffset,
+        undo_mark: Option<(usize, usize)>,
+        origin: u64,
+    ) {
+        self.merging = false;
+        self.record(Group {
+            id: GroupId(0),
+            kind: EditGroup::Isolated,
+            entries: vec![EditEntry {
+                start,
+                removed,
+                inserted,
+            }],
+            primary_entry: None,
+            point_before,
+            point_after,
+            undo_mark,
+            redo_mark: None,
+            modified_before: true,
+            modified_after: false,
+            origin,
+        });
+        self.mark_only_current_clean();
+    }
 }
 
 impl Buffer {

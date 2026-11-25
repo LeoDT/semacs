@@ -567,3 +567,51 @@ fn no_external_io_apis_are_installed() {
         "undefined,undefined,undefined,undefined,undefined,undefined"
     );
 }
+
+#[test]
+fn set_auto_revert_merges_valid_settings_and_rejects_invalid_inputs() {
+    let (_, defaults) = load("").unwrap();
+    assert_eq!(
+        defaults.auto_revert,
+        crate::revert::AutoRevertSettings::default()
+    );
+
+    let (_, configured) = load(
+        r#"
+        semacs.setAutoRevert({ enabled: false, intervalMs: 500 });
+        semacs.setAutoRevert({ verbose: false });
+    "#,
+    )
+    .unwrap();
+    assert!(!configured.auto_revert.enabled);
+    assert_eq!(configured.auto_revert.interval_ms, 500);
+    assert!(!configured.auto_revert.verbose);
+
+    for invalid in [
+        "semacs.setAutoRevert(null);",
+        "semacs.setAutoRevert({ unknown: true });",
+        "semacs.setAutoRevert({ enabled: 'yes' });",
+        "semacs.setAutoRevert({ verbose: 1 });",
+        "semacs.setAutoRevert({ intervalMs: 500.5 });",
+        "semacs.setAutoRevert({ intervalMs: -100 });",
+        "semacs.setAutoRevert({ intervalMs: 100 });",
+        "semacs.setAutoRevert({ intervalMs: 60001 });",
+    ] {
+        assert!(load(invalid).is_err(), "expected error for: {invalid}");
+    }
+
+    let (mut engine, configuration) = load(
+        r#"
+        semacs.registerCommand("late", () => {
+            semacs.setAutoRevert({ enabled: false });
+            return "";
+        });
+    "#,
+    )
+    .unwrap();
+    assert!(
+        engine
+            .transform(script(&configuration, "late"), "")
+            .is_err()
+    );
+}

@@ -268,6 +268,9 @@ commands! {
     FindFile => "find-file", Application, ["ctrl-x ctrl-f" => "C-x C-f"];
     SaveBuffer => "save-buffer", Application, ["ctrl-x ctrl-s" => "C-x C-s"];
     WriteFile => "write-file", Application, ["ctrl-x ctrl-w" => "C-x C-w"];
+    RevertBuffer => "revert-buffer", Application, [];
+    AutoRevertMode => "auto-revert-mode", Application, [];
+    GlobalAutoRevertMode => "global-auto-revert-mode", Application, [];
     SwitchToBuffer => "switch-to-buffer", Application, ["ctrl-x b" => "C-x b"];
     PreviousBuffer => "previous-buffer", Application, ["ctrl-x left" => "C-x <left>", "ctrl-x ctrl-left" => "C-x C-<left>"];
     NextBuffer => "next-buffer", Application, ["ctrl-x right" => "C-x <right>", "ctrl-x ctrl-right" => "C-x C-<right>"];

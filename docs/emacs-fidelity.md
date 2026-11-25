@@ -696,3 +696,32 @@ F2 仅提供 status 与单文件整文件级 index 操作，不包含 hunk / 批
 - 当 PTY 进程（如 `git commit` 签名、`git push` SSH/HTTPS 认证）输出密码 / passphrase / PIN 提示时，识别为 `Prompt::Password` 并发起保密读入会话（`ReadKind::CommitPassword`），不使用普通文本读入替代。
 - **显示与剪贴板 / 历史隔离**：输入区开启遮蔽渲染（正文字符以 `'•'` 显示并对齐光标/选区测量），使用会话私有 kill ring 与只读剪贴板（允许 `C-y` 粘贴外部文本，禁止 copy / kill 将口令写入系统剪贴板或全局 kill ring）；平台 IME 的 `text_for_range` 返回 `None`；不写入 minibuffer 历史、`*Messages*` 或 `$ magit-process` 进程输出。
 - **内存清理与取消**：将答复写入 PTY 后立即以 `write_volatile` 清零临时口令缓冲；等待输入期间按 `C-g` 取消会话并按上游进程交互规则终止等待中的子进程，进程退出则自动收起所属未决提示。
+
+## 文件 Revert 与可见 Buffer 自动刷新
+
+本节记录 `revert-buffer`、`auto-revert-mode` 与 `global-auto-revert-mode` 的行为契约及已确认的可见-only 性能策略。
+
+### 手动 `M-x revert-buffer`
+
+- 无关联文件时报错 `Buffer does not seem to be associated with any file`，不打开确认会话；正在异步保存或受编辑抑制时拒绝并提示。
+- 走 minibuffer 完整 `yes` / `no` + `RET` 确认（`C-g` 取消）：
+  - clean：`Revert buffer from file <path>? (yes or no) `
+  - dirty：`Discard edits and reread from <path>? (yes or no) `
+- 按公共前后缀差异计算最小 UTF-8 替换范围：保留未改动前后缀内的 point 与增量语法/布局上下文；只读 buffer 也可 revert 并保持只读状态；内容字节未变时仅更新文件格式与 `FileStamp`。
+- revert 作为独立 undo 组进入线性历史并清空后续 `redo`，将当前状态标为 clean，此前全部历史状态相对新磁盘内容转为 dirty（可 `undo` 回退到 revert 前内容、`redo` 恢复）。
+- 目标文件不存在、不可读或解码失败时在 echo 区报错并完整保留当前正文；确认成功后显示 `Reverted <path>`（如有 treemacs 侧栏则触发防抖 Git 状态刷新）。
+
+### `auto-revert-mode` 与 `global-auto-revert-mode`
+
+- 仅对**关联普通文件、clean（未修改）、非活动保存、非编辑抑制且非 commit 编辑器的 buffer**生效；绝不自动覆盖 dirty buffer（dirty buffer 保存时仍走 `ExternalChange` 确认）。
+- 正常自动 revert 保留未改动前后缀 point 与 EOB 尾随（point 位于文件末尾的 view 随文件增长继续停在末尾并保持可见）；若 `verbose` 为 true 则回显 `Reverting buffer ‘<name>’`。
+- 磁盘文件删除、不可读或半写导致编码失败时静默保留现有正文，并记住失败 `FileStamp` 直到磁盘再次变化，不清空、不关闭 buffer，也不刷屏报错。
+- 当存在活动 minibuffer、进行中的 `isearch`、活动 IME 预编辑（D17 屏障）或进行中的异步 Git / 脚本 / 文件打开 / 配置重载任务时推迟自动 revert，并在这些屏障结束后立即补检。
+- `M-x auto-revert-mode` 切换当前 buffer 的局部覆盖（局部启用时 mode line 显示 `ARev`）；`M-x global-auto-revert-mode` 切换全局开关，默认全局开启，可通过 `semacs.setAutoRevert(...)` 配置。
+
+### 已确认偏差（Scheme B1，防 agentic 批量写入卡顿）
+
+- **可见-only 作用域与低频 `stat` 轮询**：为避免后台数十上百个文件在批量修改时引发 I/O、解码、重排和重绘风暴，不注册全局 OS 文件监听，也不对不可见 buffer 定时轮询或后台读盘；仅当窗口存在可见文件 buffer 且开启自动 revert 时，才以默认 1000 ms 间隔对当前可见 pane 文件执行后台 `stat`（无变化不触发 `cx.notify()` / 绘制），发现 `FileStamp` 变化后经 250 ms 防抖合并再异步读盘；切换到隐藏 buffer、再次访问已有 buffer 或窗口重获焦点（150 ms 防抖）时立即补检目标可见 buffer。
+- **默认全局开启**：与上游默认关闭不同，本实现默认启用全局可见 buffer 自动 revert，仍可通过 `M-x global-auto-revert-mode` 或 `init.js` 关闭。
+- **文件 buffer 限定**：不提供 `global-auto-revert-non-file-buffers`（Magit / `*rg*` / treemacs 维持手动 `g` 及已有焦点刷新）、`auto-revert-tail-mode`、auto-save 文件恢复、`revert-without-query` 正则、远程路径以及 `before-revert-hook` / `after-revert-hook` / 逐文件 `vc-refresh-state`。
+- **编辑前不作同步 `stat` 拦截**：clean → dirty 首次编辑前不执行 Emacs 上游的 `ask-user-about-supersession-threat` 检查，外部修改保护保留在 `C-x C-s` 保存确认、可见 buffer 自动 revert 与手动 `revert-buffer`，见[实施计划](plan.md#未排期需求)。

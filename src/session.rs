@@ -129,6 +129,11 @@ pub enum ReadKind {
     Overwrite(PathBuf),
     /// A visited file changed on disk since it was read or saved.
     ExternalChange(PathBuf),
+    /// `M-x revert-buffer`: confirm rereading the visited file from disk.
+    RevertBuffer {
+        path: PathBuf,
+        modified: bool,
+    },
     /// `C-x k`: read the name of the buffer to kill.
     KillBuffer {
         default: String,
@@ -419,6 +424,16 @@ impl ReadKind {
                 "{} has changed since visited or saved.  Save anyway? (yes or no) ",
                 path.display()
             ),
+            ReadKind::RevertBuffer { path, modified } => {
+                if *modified {
+                    format!(
+                        "Discard edits and reread from {}? (yes or no) ",
+                        path.display()
+                    )
+                } else {
+                    format!("Revert buffer from file {}? (yes or no) ", path.display())
+                }
+            }
             ReadKind::KillBuffer { default } => {
                 format!("Kill buffer (default {default}): ")
             }

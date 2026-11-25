@@ -55,6 +55,7 @@ impl AppShell {
         self.commands = loaded.configuration.commands;
         self.body_keymap = loaded.configuration.body_keymap;
         self.mode_keymaps = loaded.configuration.mode_keymaps;
+        self.auto_revert = loaded.configuration.auto_revert;
         self.script_host = Some(loaded.host);
         cx.set_global(loaded.configuration.font);
         loaded.configuration.theme.install(cx);
@@ -73,6 +74,7 @@ impl AppShell {
             mount.candidate_snapshot = None;
         }
         self.refresh_candidates(window, cx);
+        self.sync_auto_revert_after_config(cx);
         cx.notify();
     }
 
@@ -125,6 +127,7 @@ impl AppShell {
                     }
                     Err(error) => shell.show_message(&origin, format!("Configuration unchanged: {error}"), cx),
                 }
+                shell.flush_deferred_auto_revert(cx);
             }).ok();
         }));
     }
@@ -206,6 +209,7 @@ impl AppShell {
                     if let Err(error) = result {
                         shell.show_message(&origin, error, cx);
                     }
+                    shell.flush_deferred_auto_revert(cx);
                 })
                 .ok();
         }));

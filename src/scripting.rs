@@ -34,6 +34,7 @@ pub struct Configuration {
     pub mode_keymaps: std::collections::HashMap<crate::mode::ModeId, Keymap>,
     pub font: FontSettings,
     pub theme: crate::theme::ThemeSettings,
+    pub auto_revert: crate::revert::AutoRevertSettings,
 }
 
 impl Default for Configuration {
@@ -56,6 +57,7 @@ impl Default for Configuration {
             mode_keymaps,
             font: FontSettings::default(),
             theme: crate::theme::ThemeSettings::default(),
+            auto_revert: crate::revert::AutoRevertSettings::default(),
         }
     }
 }

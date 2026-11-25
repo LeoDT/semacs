@@ -107,6 +107,7 @@ impl AppShell {
             AfterSave::Message => self.show_message(view, message, cx),
         }
         self.schedule_repository_refresh(window, cx);
+        self.flush_deferred_auto_revert(cx);
     }
 
     pub(super) fn save_then_kill(

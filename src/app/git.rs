@@ -86,6 +86,7 @@ impl AppShell {
         }
         self.git_task = None;
         self.schedule_repository_refresh(window, cx);
+        self.flush_deferred_auto_revert(cx);
         true
     }
 

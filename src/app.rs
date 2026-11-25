@@ -51,6 +51,7 @@ pub use index_write::StatusWriteTarget;
 mod messages;
 mod project;
 mod reads;
+mod revert;
 mod scripting;
 #[cfg(test)]
 mod scripting_tests;
@@ -140,6 +141,15 @@ pub struct AppShell {
     tree_read_gate: Option<futures_channel::oneshot::Receiver<()>>,
     #[cfg(test)]
     project_files_gate: Option<futures_channel::oneshot::Receiver<()>>,
+    #[cfg(test)]
+    revert_read_gate: Option<futures_channel::oneshot::Receiver<()>>,
+    auto_revert: crate::revert::AutoRevertSettings,
+    auto_revert_poll: Option<Task<()>>,
+    auto_revert_poll_interval_ms: u64,
+    auto_revert_focus_task: Option<Task<()>>,
+    auto_revert_stat_in_flight: bool,
+    visible_buffers: std::collections::HashSet<crate::buffer::BufferId>,
+    window_handle: AnyWindowHandle,
     startup_directory: PathBuf,
     minibuffer: Option<MinibufferMount>,
     session: Option<ReadSession>,
@@ -205,8 +215,11 @@ impl AppShell {
             let active = window.is_window_active();
             let regained = !was_active && active;
             was_active = active;
-            if regained && shell.panes.side().is_some() {
-                shell.schedule_tree_git_refresh(200, window, cx);
+            if regained {
+                if shell.panes.side().is_some() {
+                    shell.schedule_tree_git_refresh(200, window, cx);
+                }
+                shell.schedule_focus_auto_revert(cx);
             }
         });
         view.update(cx, |view, cx| view.restore_input(window, cx));
@@ -214,7 +227,8 @@ impl AppShell {
             Some(loaded) => (loaded.configuration, Some(loaded.host)),
             None => (crate::scripting::Configuration::default(), None),
         };
-        Self {
+        let auto_revert = configuration.auto_revert;
+        let mut shell = Self {
             buffers: BufferSet::new(BufferSlot::new(registry_buffer)),
             messages: crate::messages::Messages::default(),
             echo: None,
@@ -268,6 +282,15 @@ impl AppShell {
             tree_read_gate: None,
             #[cfg(test)]
             project_files_gate: None,
+            #[cfg(test)]
+            revert_read_gate: None,
+            auto_revert,
+            auto_revert_poll: None,
+            auto_revert_poll_interval_ms: 0,
+            auto_revert_focus_task: None,
+            auto_revert_stat_in_flight: false,
+            visible_buffers: std::collections::HashSet::from([buffer_id]),
+            window_handle: owner,
             startup_directory: std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
             minibuffer: None,
             session: None,
@@ -277,7 +300,9 @@ impl AppShell {
             opening: None,
             _keys_subscription: keys,
             _activation_subscription: activation,
-        }
+        };
+        shell.sync_auto_revert_timer(cx);
+        shell
     }
 
     fn create_view(
@@ -617,6 +642,9 @@ impl AppShell {
             Command::WriteFile => {
                 self.begin_file_read(ReadKind::WriteFile, origin, window, cx);
             }
+            Command::RevertBuffer => self.revert_buffer_command(origin, window, cx),
+            Command::AutoRevertMode => self.toggle_auto_revert_mode(origin, cx),
+            Command::GlobalAutoRevertMode => self.toggle_global_auto_revert_mode(origin, cx),
             Command::SwitchToBuffer => {
                 let default = self
                     .buffers

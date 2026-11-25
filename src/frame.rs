@@ -4,12 +4,14 @@ use crate::theme::{StyleRole, ThemeSettings};
 use gpui_kit::component::{h_flex, v_flex};
 use gpui_kit::*;
 
+#[allow(clippy::too_many_arguments)]
 pub fn mode_line(
     name: String,
     format: crate::files::FileFormat,
     modified: bool,
     position: (u32, usize),
     cursor_count: usize,
+    auto_revert_lighter: bool,
     selected: bool,
     cx: &App,
 ) -> impl IntoElement + Styled {
@@ -37,6 +39,11 @@ pub fn mode_line(
         .child(name)
         .child(format)
         .child(position);
+    let row = if auto_revert_lighter {
+        row.child("ARev")
+    } else {
+        row
+    };
     if cursor_count > 1 {
         row.child(format!("mc:{cursor_count}"))
     } else {
@@ -91,6 +98,7 @@ mod tests {
                     false,
                     (1, 0),
                     1,
+                    false,
                     true,
                     cx,
                 );
@@ -100,6 +108,7 @@ mod tests {
                     false,
                     (1, 0),
                     1,
+                    false,
                     false,
                     cx,
                 );

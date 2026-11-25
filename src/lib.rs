@@ -32,6 +32,7 @@ pub mod preparation_trace;
 pub mod project;
 #[cfg(unix)]
 pub mod push;
+pub mod revert;
 mod saves;
 pub mod scripting;
 pub mod search;

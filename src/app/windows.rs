@@ -102,6 +102,7 @@ impl AppShell {
             self.refresh_isearch_viewport(source.entity_id(), cx);
             cx.notify();
         }
+        self.flush_deferred_auto_revert(cx);
     }
 
     pub(super) fn refresh_buffer(&mut self, id: BufferId, cx: &mut Context<Self>) {
@@ -128,6 +129,7 @@ impl AppShell {
             }
         }
         self.schedule_tree_follow(window, cx);
+        self.on_visible_buffers_updated(cx);
     }
 
     pub(super) fn select_pane(&mut self, pane: u64, window: &mut Window, cx: &mut Context<Self>) {
@@ -278,6 +280,10 @@ impl AppShell {
             Pane::Leaf(id) => {
                 let editor = self.body_panes[id].active_view().clone();
                 let buffer = editor.read(cx).buffer();
+                let auto_revert_lighter = self
+                    .buffers
+                    .index_of(buffer.snapshot_id().buffer)
+                    .is_some_and(|index| self.buffers[index].revert.local.shows_lighter());
                 let selected = *id == *self.panes.selected();
                 let mode_line = frame::mode_line(
                     if buffer.git_is_stale() {
@@ -289,6 +295,7 @@ impl AppShell {
                     buffer.is_modified(),
                     buffer.line_column(),
                     editor.read(cx).cursor_count(),
+                    auto_revert_lighter,
                     selected,
                     cx,
                 );

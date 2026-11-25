@@ -215,6 +215,7 @@ impl Engine {
             mode_keymaps.insert(*mode, map);
         }
         let theme = Self::theme(ctx, &manifest)?;
+        let auto_revert = Self::auto_revert(ctx, &manifest)?;
         Ok(Configuration {
             generation,
             commands: registry,
@@ -222,7 +223,44 @@ impl Engine {
             mode_keymaps,
             font,
             theme,
+            auto_revert,
         })
+    }
+
+    fn auto_revert(
+        ctx: &Ctx<'_>,
+        manifest: &Object<'_>,
+    ) -> Result<crate::revert::AutoRevertSettings, String> {
+        let config: Object = manifest
+            .get("autoRevert")
+            .map_err(|error| js_error(ctx, error))?;
+        let mut settings = crate::revert::AutoRevertSettings::default();
+        if let Some(enabled) = config
+            .get::<_, Option<bool>>("enabled")
+            .map_err(|error| js_error(ctx, error))?
+        {
+            settings.enabled = enabled;
+        }
+        if let Some(interval_ms) = config
+            .get::<_, Option<i64>>("intervalMs")
+            .map_err(|error| js_error(ctx, error))?
+        {
+            let ms = u64::try_from(interval_ms).map_err(|_| {
+                format!(
+                    "Auto-revert interval must be between {} and {} ms",
+                    crate::revert::MIN_INTERVAL_MS,
+                    crate::revert::MAX_INTERVAL_MS
+                )
+            })?;
+            settings.interval_ms = crate::revert::AutoRevertSettings::validate_interval_ms(ms)?;
+        }
+        if let Some(verbose) = config
+            .get::<_, Option<bool>>("verbose")
+            .map_err(|error| js_error(ctx, error))?
+        {
+            settings.verbose = verbose;
+        }
+        Ok(settings)
     }
 
     fn theme(ctx: &Ctx<'_>, manifest: &Object<'_>) -> Result<ThemeSettings, String> {

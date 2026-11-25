@@ -211,6 +211,8 @@ impl AppShell {
         if let Some(visit) = options.tree {
             self.finish_tree_visit(visit, window, cx);
         }
+        let id = self.buffers[index].id();
+        self.check_auto_revert_buffers(vec![id], 0, cx);
     }
 
     pub(super) fn visit_file_with(
@@ -291,6 +293,7 @@ impl AppShell {
                         Err(message) => {
                             shell.cancel_file_open();
                             shell.show_message(&origin, message, cx);
+                            shell.flush_deferred_auto_revert(cx);
                         }
                     }
                 })
@@ -533,6 +536,10 @@ impl AppShell {
         if !saved {
             self.buffers[index].save.take_pending();
         } else {
+            self.buffers[index].revert.failed_stamp = None;
+            if self.buffers[index].buffer.path().is_some() {
+                self.sync_auto_revert_timer(cx);
+            }
             self.schedule_tree_git_refresh(200, window, cx);
         }
         let view = self.buffer_target(index, window, cx);

@@ -6,6 +6,7 @@
     const themes = [];
     let theme = "light";
     const styles = [];
+    let autoRevert = {};
     const object = value => value !== null && typeof value === "object" && !Array.isArray(value);
     const copyStyle = (name, value) => {
         const attributes = ["foreground", "background", "weight", "italic", "underline", "strikethrough"];
@@ -96,12 +97,26 @@
                 throw new TypeError("Font size must be a number");
             font = {...font, ...settings};
         },
+        setAutoRevert(settings) {
+            check();
+            if (!object(settings) ||
+                Object.keys(settings).some(key => key !== "enabled" && key !== "intervalMs" && key !== "verbose"))
+                throw new TypeError("setAutoRevert accepts only enabled, intervalMs, and verbose");
+            if (settings.enabled !== undefined && typeof settings.enabled !== "boolean")
+                throw new TypeError("Auto-revert enabled must be a boolean");
+            if (settings.intervalMs !== undefined &&
+                (typeof settings.intervalMs !== "number" || !Number.isInteger(settings.intervalMs)))
+                throw new TypeError("Auto-revert intervalMs must be an integer");
+            if (settings.verbose !== undefined && typeof settings.verbose !== "boolean")
+                throw new TypeError("Auto-revert verbose must be a boolean");
+            autoRevert = {...autoRevert, ...settings};
+        },
     });
     return {
         api,
         finish() {
             open = false;
-            return {commands, bindings, font, themes, theme, styles};
+            return {commands, bindings, font, themes, theme, styles, autoRevert};
         },
     };
 })

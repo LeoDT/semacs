@@ -8,6 +8,7 @@ use crate::saves::SaveState;
 pub(crate) struct BufferSlot {
     pub buffer: Buffer,
     pub save: SaveState,
+    pub revert: crate::revert::RevertState,
 }
 
 impl BufferSlot {
@@ -15,6 +16,7 @@ impl BufferSlot {
         Self {
             buffer,
             save: SaveState::default(),
+            revert: crate::revert::RevertState::default(),
         }
     }
 

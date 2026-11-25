@@ -16,6 +16,10 @@
 
 声明启动和重载时的字体基准。可多次调用，后一次提供的字段覆盖前一次字段；整份配置中未声明的字段使用默认值。未指定 `family` 时使用随包 Lilex，只调整字号不必显式填写字体族。默认字体与自定义具体族名的边界见[显示设置契约](emacs-fidelity.md#字体与字号)。字体族按既有规则去除首尾空白、拒绝空白和控制字符，平台仍可能回退；字号为 8–72 逻辑像素，作为 `reset-font-size` 的基准。
 
+### `semacs.setAutoRevert({ enabled?, intervalMs?, verbose? })`
+
+声明启动和重载时的全局自动 revert 设置；可多次调用并按字段覆盖，未声明字段使用默认值（`enabled: true`、`intervalMs: 1000`、`verbose: true`）。`enabled` 和 `verbose` 须为布尔值；`intervalMs` 须为 `250`–`60000` 之间的整数毫秒值。仅在加载 `init.js` 阶段可用，重载配置后按新设置更新可见 buffer 轮询行为；交互式命令 `M-x global-auto-revert-mode` 与 `M-x auto-revert-mode` 可在运行期临时切换全局与当前 buffer 状态，见[文件 Revert 与可见 Buffer 自动刷新](emacs-fidelity.md#文件-revert-与可见-buffer-自动刷新)。
+
 ### 主题与命名样式
 
 `semacs.defineTheme(name, { appearance, styles })` 定义一个主题；`appearance` 为 `"light"` 或 `"dark"`，未指定的属性从该模式的内置主题补齐，不从上次主题继承。名称为 1–64 个小写 ASCII 字母、数字或连字符，不能重复或覆盖内置 `light` / `dark`。不加载 elisp 主题，不使用 Emacs font-lock / face 接口。

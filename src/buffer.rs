@@ -642,6 +642,102 @@ impl Buffer {
         }
     }
 
+    /// Reverts a file-visiting buffer to `loaded` using a minimal diff replacement
+    /// while preserving point, undo history, and read-only state.
+    pub(crate) fn revert_visited(
+        &mut self,
+        loaded: crate::files::LoadedFile,
+        preserve_eob: bool,
+    ) -> crate::revert::RevertOutcome {
+        self.break_history_group();
+        let old_text = self.text();
+        let old_len = old_text.len();
+        let new_len = loaded.file.text.len();
+
+        let Some((old_range, new_mid)) = crate::revert::diff_range(&old_text, &loaded.file.text)
+        else {
+            let mut doc = self.document.borrow_mut();
+            let format_changed = doc.format != loaded.file.format;
+            let was_modified = doc.modified;
+            doc.format = loaded.file.format;
+            doc.disk_stamp = loaded.stamp;
+            doc.identity = loaded.stamp.and_then(FileStamp::identity);
+            if was_modified {
+                doc.history.mark_only_current_clean();
+                doc.modified = false;
+            }
+            if format_changed || was_modified {
+                doc.touch();
+            }
+            return crate::revert::RevertOutcome::Unchanged;
+        };
+
+        let delta = new_mid.len() as isize - (old_range.end.0 - old_range.start.0) as isize;
+        let (points, point_before, removed, undo_mark) = {
+            let mut doc = self.document.borrow_mut();
+            doc.points.retain(|point| point.strong_count() > 0);
+            let points: Vec<_> = doc
+                .points
+                .iter()
+                .filter_map(Weak::upgrade)
+                .map(|point| {
+                    let old_offset = point.get();
+                    (point, old_offset, old_offset == old_len)
+                })
+                .collect();
+            let point_before = self.point();
+            let removed = old_text.slice(old_range.start.0..old_range.end.0);
+            let undo_mark = doc.mark.position().and_then(|m| {
+                (m > old_range.start && m <= old_range.end).then(|| (0, m.0 - old_range.start.0))
+            });
+            (points, point_before, removed, undo_mark)
+        };
+
+        let inserted = Rope::from(new_mid);
+        self.apply_validated_batch(
+            &[BatchEdit {
+                range: old_range.clone(),
+                text: new_mid,
+            }],
+            EditSource::Command,
+            None,
+        );
+
+        for (point, old_offset, was_eob) in points {
+            let next_offset = if preserve_eob && was_eob {
+                new_len
+            } else if old_offset <= old_range.start.0 {
+                old_offset
+            } else if old_offset >= old_range.end.0 {
+                (old_offset as isize + delta) as usize
+            } else {
+                loaded
+                    .file
+                    .text
+                    .floor_char_boundary(old_offset.min(new_len))
+            };
+            point.set(next_offset);
+        }
+
+        let point_after = self.point();
+        let mut doc = self.document.borrow_mut();
+        doc.history.record_revert(
+            old_range.start,
+            removed,
+            inserted,
+            point_before,
+            point_after,
+            undo_mark,
+            self.view_id,
+        );
+        doc.modified = false;
+        doc.format = loaded.file.format;
+        doc.disk_stamp = loaded.stamp;
+        doc.identity = loaded.stamp.and_then(FileStamp::identity);
+        doc.touch();
+        crate::revert::RevertOutcome::Reverted
+    }
+
     pub fn format(&self) -> FileFormat {
         self.document.borrow().format
     }
@@ -973,5 +1069,120 @@ mod shared_tests {
         assert!(second.is_modified());
         first.undo().unwrap();
         assert!(!second.is_modified());
+    }
+
+    #[test]
+    fn revert_visited_preserves_prefix_suffix_and_eob_points_and_updates_undo() {
+        let loaded = |text: &str, format: FileFormat| crate::files::LoadedFile {
+            file: DecodedFile {
+                text: text.to_owned(),
+                format,
+            },
+            stamp: None,
+        };
+        let mut prefix_view = Buffer::visiting(
+            PathBuf::from("file.txt"),
+            DecodedFile {
+                text: "alpha\nbeta\ngamma\n".into(),
+                format: FileFormat::default(),
+            },
+            None,
+        );
+        let mut suffix_view = prefix_view.new_view();
+        let mut interior_view = prefix_view.new_view();
+        let mut eob_view = prefix_view.new_view();
+
+        prefix_view.set_point(ByteOffset(2)).unwrap();
+        suffix_view.set_point(ByteOffset(13)).unwrap();
+        interior_view.set_point(ByteOffset(9)).unwrap();
+        eob_view.set_point(ByteOffset(17)).unwrap();
+
+        assert_eq!(
+            prefix_view.revert_visited(loaded("alpha\nB\ngamma\n", FileFormat::default()), true),
+            crate::revert::RevertOutcome::Reverted
+        );
+        assert_eq!(prefix_view.text().to_string(), "alpha\nB\ngamma\n");
+        assert!(!prefix_view.is_modified());
+        assert_eq!(prefix_view.point(), ByteOffset(2));
+        assert_eq!(suffix_view.point(), ByteOffset(10));
+        // Interior offset 9 lands in the middle of multi-byte or past replacement -> valid boundary.
+        assert!(prefix_view.text().is_char_boundary(interior_view.point().0));
+        assert_eq!(eob_view.point(), ByteOffset(14));
+
+        // Undo restores pre-revert text and marks buffer modified relative to disk.
+        prefix_view.undo().unwrap().unwrap();
+        assert_eq!(prefix_view.text().to_string(), "alpha\nbeta\ngamma\n");
+        assert!(prefix_view.is_modified());
+        assert_eq!(prefix_view.point(), ByteOffset(2));
+
+        // Redo restores reverted text and returns to clean.
+        prefix_view.redo().unwrap().unwrap();
+        assert_eq!(prefix_view.text().to_string(), "alpha\nB\ngamma\n");
+        assert!(!prefix_view.is_modified());
+    }
+
+    #[test]
+    fn revert_visited_handles_unchanged_text_saved_history_and_read_only() {
+        let loaded = |text: &str, format: FileFormat| crate::files::LoadedFile {
+            file: DecodedFile {
+                text: text.to_owned(),
+                format,
+            },
+            stamp: None,
+        };
+        let mut buffer = Buffer::visiting(
+            PathBuf::from("file.txt"),
+            DecodedFile {
+                text: "v1\n".into(),
+                format: FileFormat::default(),
+            },
+            None,
+        );
+        let initial_version = buffer.snapshot_id().version;
+
+        // Identical clean revert leaves text version untouched.
+        assert_eq!(
+            buffer.revert_visited(loaded("v1\n", FileFormat::default()), false),
+            crate::revert::RevertOutcome::Unchanged
+        );
+        assert_eq!(buffer.snapshot_id().version, initial_version);
+
+        // User edit -> save -> edit -> revert to external v2.
+        replace(&mut buffer, 3..3, "saved\n");
+        let point = buffer.begin_save();
+        buffer.mark_saved_at(point).unwrap();
+        assert!(!buffer.is_modified());
+        replace(&mut buffer, 9..9, "draft\n");
+        assert!(buffer.is_modified());
+
+        let crlf = FileFormat {
+            bom: true,
+            line_ending: crate::files::LineEnding::Crlf,
+        };
+        assert_eq!(
+            buffer.revert_visited(loaded("external\n", crlf), false),
+            crate::revert::RevertOutcome::Reverted
+        );
+        assert!(!buffer.is_modified());
+        assert_eq!(buffer.format(), crlf);
+
+        // Undoing back through earlier saved state keeps modified = true because disk has "external\n".
+        buffer.undo().unwrap().unwrap();
+        assert!(buffer.is_modified());
+        buffer.undo().unwrap().unwrap();
+        assert!(buffer.is_modified());
+        buffer.redo().unwrap().unwrap();
+        buffer.redo().unwrap().unwrap();
+        assert!(!buffer.is_modified());
+
+        // Read-only buffer can still be reverted while staying read-only.
+        buffer.set_read_only(true);
+        assert_eq!(
+            buffer.revert_visited(loaded("external2\n", FileFormat::default()), false),
+            crate::revert::RevertOutcome::Reverted
+        );
+        assert!(buffer.is_read_only());
+        assert!(!buffer.is_modified());
+        assert_eq!(buffer.text().to_string(), "external2\n");
     }
 }

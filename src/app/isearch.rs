@@ -982,6 +982,7 @@ impl AppShell {
                 self.echo = None;
                 cx.notify();
             }
+            self.flush_deferred_auto_revert(cx);
             return;
         }
 
@@ -1018,6 +1019,7 @@ impl AppShell {
             self.echo = None;
             cx.notify();
         }
+        self.flush_deferred_auto_revert(cx);
     }
 
     pub(super) fn finish_isearch_if_buffer(

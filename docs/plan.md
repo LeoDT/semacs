@@ -64,6 +64,7 @@ R0–F11（含基础编辑、主题与多语言语法、Magit diff / status / co
 - **任务持久化与恢复**：认可核心 Job、跨 reload 存活和分级恢复的方向，尚未批准实现或存储方案；具体待决项见[调研](work/scripting-extension-research.md#9-待确认事项)。先由实际任务推动，不能把自动重跑视为安全恢复。
 - **鼠标多击 / Shift / 右键交互**：基础选区已交付；双击选词、三击选行（含行尾换行）、Shift 调整 region、右键 `mouse-save-then-kill` / `mouse-drag-copy-region`、拖动移动文本尚未实现。该交互不属于当前查看优先方向，暂缓；Emacs 参照边界见 [M3 记录](../tests/emacs/RESULTS.md#m3鼠标选区与文件读入预填参照)，实施前再确认范围。
 - **自动保存与备份**：保留为数据安全增强需求；排期前先确认触发、写入位置与恢复行为。
+- **编辑前磁盘变化拦截（`ask-user-about-supersession-threat`）**：clean buffer 在磁盘已变更但尚未自动 revert（或关闭 auto-revert）时，首次开始编辑（clean → dirty）不会像 Emacs 上游那样弹出 `<file> changed on disk; really edit the buffer? (y, n, r or C-h)`，仅在 `C-x C-s` 保存时检查外部修改（注：已 dirty 后外部再修改继续编辑不提示与 Emacs 上游一致）。为避免在普通按键热路径上同步执行磁盘 `stat` 影响输入延迟、且默认可见 buffer 自动 revert 已覆盖绝大多数查看与切回场景而暂缓；若实际使用中频繁出现关闭 auto-revert 后误编过时 clean buffer，再评估非阻塞检测或首编辑提示方案。
 - **更完整的 Emacs 编辑命令**：`M-y`、`C-u`、更完整的 kill / mark 交互等不在当前方向；实际使用受阻时再单独确认最小范围，不因既有 v1 列表自动补齐。
 
 ## 完成标准

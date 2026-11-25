@@ -3,6 +3,12 @@ interface SemacsFontSettings {
     size?: number;
 }
 
+interface SemacsAutoRevertSettings {
+    enabled?: boolean;
+    intervalMs?: number;
+    verbose?: boolean;
+}
+
 type SemacsStyleName =
     | "default" | "cursor" | "region" | "isearch" | "isearch.lazy" | "mode-line" | "mode-line-inactive"
     | "minibuffer-prompt" | "echo-area" | "completion" | "completion-selected"
@@ -81,6 +87,7 @@ interface SemacsConfigurationApi {
     loadTheme(name: string): void;
     setStyle<N extends SemacsStyleName>(name: N, colors: SemacsStyleColors<N>): void;
     setFont(settings: SemacsFontSettings): void;
+    setAutoRevert(settings: SemacsAutoRevertSettings): void;
     registerCommand(name: string, transform: (text: string) => string): void;
     registerWorkflowCommand(name: string, definition: SemacsWorkflowCommandDefinition): void;
     bindKey(keys: string, commandName: string | null, options?: {mode: SemacsMode}): void;

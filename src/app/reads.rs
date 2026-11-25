@@ -645,6 +645,13 @@ impl AppShell {
                     self.decline_save(&target, window, cx);
                 }
             }
+            ReadKind::RevertBuffer { .. } => {
+                if answer == Answer::Yes {
+                    self.start_manual_revert(&target, cx);
+                } else {
+                    self.show_message(&target, "Canceled", cx);
+                }
+            }
             ReadKind::KillBufferConfirm { batch, .. } => match answer {
                 Answer::Yes => {
                     if let Some(index) = self.buffer_index(&target, cx) {
