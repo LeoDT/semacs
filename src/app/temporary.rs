@@ -71,10 +71,20 @@ impl AppShell {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.display_temporary_with(index, true, window, cx);
+    }
+
+    pub(super) fn display_temporary_with(
+        &mut self,
+        index: usize,
+        select: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         if self.minibuffer.is_some() {
             return;
         }
-        if self.panes.side() == Some(self.panes.selected()) {
+        if select && self.panes.side() == Some(self.panes.selected()) {
             let pane = self.panes.ordinary_leaves()[0];
             self.select_pane(pane, window, cx);
         }
@@ -89,7 +99,9 @@ impl AppShell {
             .into_iter()
             .find(|pane| self.body_panes[pane].current == buffer)
         {
-            self.select_pane(pane, window, cx);
+            if select {
+                self.select_pane(pane, window, cx);
+            }
             return;
         }
         if let Some(other) = self
@@ -99,7 +111,7 @@ impl AppShell {
             .find(|pane| *pane != source)
         {
             let previous = self.body_panes[&other].current;
-            if self.show_buffer_in_pane(other, index, true, window, cx) {
+            if self.show_buffer_in_pane(other, index, select, window, cx) {
                 let pane = self.body_panes.get_mut(&other).unwrap();
                 pane.quit_restore.retain(|restore| restore.buffer != buffer);
                 pane.quit_restore.push(QuitRestore {
@@ -127,7 +139,9 @@ impl AppShell {
                     previous: None,
                     source,
                 });
-            self.select_pane(pane, window, cx);
+            if select {
+                self.select_pane(pane, window, cx);
+            }
         } else {
             self.activate(index, window, cx);
             let pane = self.body_panes.get_mut(&source).unwrap();

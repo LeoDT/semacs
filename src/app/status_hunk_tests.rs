@@ -81,7 +81,7 @@ fn status_hunk_keys_stage_only_that_hunk_and_restore_both_views_without_stealing
         let buffer = second.read(cx).buffer();
         let sections = buffer.sections().unwrap();
         let node = &sections.nodes()[sections.current(buffer.point())];
-        assert!(node.key.starts_with("unstaged/file/") && !node.key.contains("/@@ "));
+        assert!(node.key.starts_with("unstaged/file/") && node.key.contains("/@@ "));
         assert!(!node.collapsed);
         assert_eq!(
             shell.git_write_records().last().unwrap().outcome,

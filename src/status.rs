@@ -17,7 +17,7 @@ mod render;
 mod tests;
 
 pub use render::{RenderedStatus, StatusLocation};
-pub(crate) use render::{StatusAction, StatusVisitSpan};
+pub(crate) use render::{StatusAction, StatusPreviewTarget, StatusVisitSpan};
 
 pub const MAX_RECORDS: usize = 4096;
 pub const MAX_BYTES: usize = 16 * 1024 * 1024;
@@ -125,6 +125,60 @@ impl Entry {
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RefHeader {
+    pub label: String,
+    pub target: String,
+    pub oid: Option<String>,
+    pub summary: Option<String>,
+    pub warning: Option<String>,
+    pub is_remote: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TagInfo {
+    pub name: String,
+    pub count: usize,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CommitSummary {
+    pub oid: String,
+    pub short: String,
+    pub summary: String,
+    pub decorations: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CommitSection {
+    pub key: String,
+    pub title: String,
+    pub range: Option<String>,
+    pub commits: Vec<CommitSummary>,
+    pub show_count: bool,
+    pub collapsed_by_default: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct StashSummary {
+    pub ref_name: String,
+    pub oid: String,
+    pub summary: String,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct StatusMeta {
+    pub head_short: Option<String>,
+    pub head_summary: Option<String>,
+    pub upstream: Option<RefHeader>,
+    pub push: Option<RefHeader>,
+    pub current_tag: Option<TagInfo>,
+    pub next_tag: Option<TagInfo>,
+    pub merge_section: Option<CommitSection>,
+    pub stashes: Vec<StashSummary>,
+    pub log_sections: Vec<CommitSection>,
+}
+
 #[derive(Clone, Debug)]
 pub struct Status {
     repository: Repository,
@@ -134,6 +188,7 @@ pub struct Status {
         Group,
         std::collections::HashMap<PathBuf, std::sync::Arc<crate::diff::FileDiff>>,
     >,
+    meta: Box<StatusMeta>,
 }
 
 impl Status {
@@ -160,6 +215,10 @@ impl Status {
 
     pub fn entries(&self) -> &[Entry] {
         &self.entries
+    }
+
+    pub fn meta(&self) -> &StatusMeta {
+        &self.meta
     }
 
     pub fn group(&self, group: Group) -> impl Iterator<Item = (usize, &Entry)> {

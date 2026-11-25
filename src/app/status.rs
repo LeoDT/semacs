@@ -297,6 +297,64 @@ impl AppShell {
         true
     }
 
+    pub(super) fn answer_status_jump_menu(
+        &mut self,
+        stroke: &gpui_kit::Keystroke,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let Some(session) = &self.session else {
+            return false;
+        };
+        let id = session.id();
+        let crate::session::ReadKind::StatusJumpMenu { prefix } = session.kind().clone() else {
+            return false;
+        };
+        let key = stroke.key.as_str();
+        if prefix.is_none() && matches!(key, "p" | "f") {
+            let next = key.chars().next();
+            if let Some(origin) = self.end_session(id, window, cx) {
+                self.begin_read(
+                    crate::session::ReadKind::StatusJumpMenu { prefix: next },
+                    &origin,
+                    "",
+                    window,
+                    cx,
+                );
+            }
+            return true;
+        }
+        let target: Option<(&'static str, &'static [&'static str])> = match (prefix, key) {
+            (None, "n") => Some(("Untracked files", &["untracked"])),
+            (None, "u") => Some(("Unstaged changes", &["unstaged"])),
+            (None, "s") => Some(("Staged changes", &["staged"])),
+            (None, "m") => Some(("Unmerged paths", &["unmerged"])),
+            (None, "z") => Some(("Stashes", &["stashes"])),
+            (Some('p'), "u") => Some(("Unpushed to @{upstream}", &["unpushed-upstream", "recent"])),
+            (Some('p'), "p") => Some(("Unpushed to pushremote", &["unpushed-pushremote"])),
+            (Some('f'), "u") => Some(("Unpulled from @{upstream}", &["unpulled-upstream"])),
+            (Some('f'), "p") => Some(("Unpulled from pushremote", &["unpulled-pushremote"])),
+            _ => None,
+        };
+        let Some((label, keys)) = target else {
+            self.message_minibuffer(
+                crate::session::ReadKind::StatusJumpMenu { prefix }.answer_hint(),
+                cx,
+            );
+            return true;
+        };
+        if let Some(origin) = self.end_session(id, window, cx) {
+            let point = origin.read(cx).buffer().sections().and_then(|sections| {
+                keys.iter().find_map(|candidate| sections.find_key(candidate))
+            });
+            match point {
+                Some(point) => origin.update(cx, |view, cx| view.show_location(point, window, cx)),
+                None => self.show_message(&origin, format!("Section \"{label}\" wasn't found"), cx),
+            }
+        }
+        true
+    }
+
     pub(super) fn visit_status(
         &mut self,
         thing: bool,
@@ -305,8 +363,68 @@ impl AppShell {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        match origin.read(cx).buffer().status_visit(thing) {
+        let action = origin.read(cx).buffer().status_visit(thing);
+        self.apply_status_action(action, other_window, origin, window, cx);
+    }
+
+    pub(super) fn visit_status_worktree(
+        &mut self,
+        origin: &Entity<BufferView>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let action = origin.read(cx).buffer().status_visit_worktree();
+        self.apply_status_action(action, false, origin, window, cx);
+    }
+
+    fn apply_status_action(
+        &mut self,
+        action: Result<StatusAction, String>,
+        other_window: bool,
+        origin: &Entity<BufferView>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match action {
             Ok(StatusAction::Diff(kind)) => self.open_diff(kind, origin, window, cx),
+            Ok(StatusAction::DiffRange(spec)) => {
+                if let Some(repository) = origin.read(cx).buffer().status_repository() {
+                    self.open_diff_range(
+                        repository,
+                        crate::diff::ReadEnvironment::Projection,
+                        spec,
+                        origin,
+                        window,
+                        cx,
+                    );
+                }
+            }
+            Ok(StatusAction::Commit(oid)) => {
+                if let Some(repository) = origin.read(cx).buffer().status_repository() {
+                    self.open_revision(
+                        crate::history::Query::Revision {
+                            repository,
+                            oid,
+                            environment: crate::git::ReadEnvironment::Projection,
+                        },
+                        origin,
+                        window,
+                        cx,
+                    );
+                }
+            }
+            Ok(StatusAction::Rev(rev)) => {
+                if let Some(repository) = origin.read(cx).buffer().status_repository() {
+                    self.resolve_and_open_revision(
+                        repository,
+                        crate::git::ReadEnvironment::Projection,
+                        rev,
+                        origin,
+                        window,
+                        cx,
+                    );
+                }
+            }
             Ok(StatusAction::Visit(visit)) => {
                 self.visit_git_location(visit, other_window, origin, window, cx)
             }

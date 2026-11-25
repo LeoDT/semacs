@@ -56,7 +56,7 @@ fn status_opens_reuses_contextual_commands_and_fixed_repository_diff(cx: &mut Te
     command(&mut visual, &shell, Command::MagitStatus);
     wait(&mut visual, &shell);
     visual.read(|cx| assert_eq!(shell.read(cx).active_buffer_id(), id));
-    visual.simulate_keystrokes("n n tab");
+    visual.simulate_keystrokes("tab");
     visual.read(|cx| {
         assert!(
             status
@@ -465,7 +465,7 @@ fn failed_export_and_configuration_reload_preserve_status_session(cx: &mut TestA
     command(&mut visual, &shell, Command::MagitStatus);
     wait(&mut visual, &shell);
     let status = visual.read(|cx| shell.read(cx).active_view().clone());
-    visual.simulate_keystrokes("n n tab");
+    visual.simulate_keystrokes("tab");
     let before = visual.read(|cx| {
         (
             status.read(cx).buffer().snapshot_id(),
@@ -527,7 +527,7 @@ fn failed_export_and_configuration_reload_preserve_status_session(cx: &mut TestA
             sections
                 .nodes()
                 .iter()
-                .find(|node| node.key == "untracked")
+                .find(|node| node.key == "header/head")
                 .unwrap()
                 .range
                 .start
@@ -616,15 +616,22 @@ fn status_ret_visits_untracked_unstaged_staged_and_group_diffs_like_magit(cx: &m
         });
     };
 
-    // Root header has nothing to visit.
-    move_to(&mut visual, "Status: ", 0);
+    // Head header opens HEAD revision buffer, and q closes it back to status.
+    move_to(&mut visual, "Head:     ", 0);
     visual.simulate_keystrokes("enter");
+    wait(&mut visual, &shell);
     visual.read(|cx| {
-        assert_eq!(
-            status.read(cx).message(),
-            Some("There is no thing at point that could be visited")
-        );
+        assert!(matches!(
+            shell
+                .read(cx)
+                .active_view()
+                .read(cx)
+                .buffer()
+                .history_query(),
+            Some(crate::history::Query::Revision { .. })
+        ));
     });
+    visual.simulate_keystrokes("q");
 
     // Untracked group heading has nothing to visit.
     move_to(&mut visual, "Untracked files", 0);
@@ -638,7 +645,7 @@ fn status_ret_visits_untracked_unstaged_staged_and_group_diffs_like_magit(cx: &m
 
     // Untracked regular file opens editable worktree buffer in the same pane.
     let panes_before = visual.read(|cx| shell.read(cx).panes.leaves().len());
-    move_to(&mut visual, "?? new.txt", 0);
+    move_to(&mut visual, "new.txt", 0);
     visual.simulate_keystrokes("enter");
     wait(&mut visual, &shell);
     visual.read(|cx| {
@@ -654,7 +661,7 @@ fn status_ret_visits_untracked_unstaged_staged_and_group_diffs_like_magit(cx: &m
     });
 
     // Untracked plain directory reports missing dired cleanly.
-    move_to(&mut visual, "?? plain_dir/", 0);
+    move_to(&mut visual, "plain_dir/", 0);
     visual.simulate_keystrokes("enter");
     visual.read(|cx| {
         assert!(
@@ -667,7 +674,7 @@ fn status_ret_visits_untracked_unstaged_staged_and_group_diffs_like_magit(cx: &m
     });
 
     // Collapsed unstaged file heading opens editable worktree file at the first changed line (line 3).
-    move_to(&mut visual, "MM both.txt", 0);
+    move_to(&mut visual, "modified   both.txt", 0);
     visual.simulate_keystrokes("enter");
     wait(&mut visual, &shell);
     visual.read(|cx| {
@@ -682,7 +689,7 @@ fn status_ret_visits_untracked_unstaged_staged_and_group_diffs_like_magit(cx: &m
 
     // Expand unstaged both.txt: RET on +worktree visits worktree at line 3 col 2;
     // RET on -indexed visits read-only index blob at line 3 col 2.
-    move_to(&mut visual, "MM both.txt", 0);
+    move_to(&mut visual, "modified   both.txt", 0);
     visual.simulate_keystrokes("tab");
     move_to(&mut visual, "+worktree", 3);
     visual.simulate_keystrokes("enter");
@@ -708,7 +715,7 @@ fn status_ret_visits_untracked_unstaged_staged_and_group_diffs_like_magit(cx: &m
     });
 
     // Unstaged deleted file visits read-only index blob.
-    move_to(&mut visual, ".D del.txt", 0);
+    move_to(&mut visual, "deleted    del.txt", 0);
     visual.simulate_keystrokes("enter");
     wait(&mut visual, &shell);
     visual.read(|cx| {
@@ -726,7 +733,7 @@ fn status_ret_visits_untracked_unstaged_staged_and_group_diffs_like_magit(cx: &m
         status.update(cx, |view, cx| {
             let text = view.buffer().text().to_string();
             let staged_pos = text.find("Staged changes").unwrap();
-            let file_pos = staged_pos + text[staged_pos..].find("MM both.txt").unwrap();
+            let file_pos = staged_pos + text[staged_pos..].find("modified   both.txt").unwrap();
             view.show_location(crate::text::ByteOffset(file_pos), window, cx);
         });
     });
@@ -746,7 +753,7 @@ fn status_ret_visits_untracked_unstaged_staged_and_group_diffs_like_magit(cx: &m
         status.update(cx, |view, cx| {
             let text = view.buffer().text().to_string();
             let staged_pos = text.find("Staged changes").unwrap();
-            let file_pos = staged_pos + text[staged_pos..].find("MM both.txt").unwrap();
+            let file_pos = staged_pos + text[staged_pos..].find("modified   both.txt").unwrap();
             view.show_location(crate::text::ByteOffset(file_pos), window, cx);
         });
     });
@@ -830,7 +837,7 @@ fn visit_file_other_window_keeps_status_visible_and_supports_init_js_rebinding(
                 .buffer()
                 .text()
                 .to_string()
-                .find("?? untracked.txt")
+                .find("untracked.txt")
                 .unwrap();
             view.show_location(crate::text::ByteOffset(offset), window, cx);
         });
@@ -857,7 +864,7 @@ fn visit_file_other_window_keeps_status_visible_and_supports_init_js_rebinding(
         active.update(cx, |view, cx| {
             let text = view.buffer().text().to_string();
             let staged_pos = text.find("Staged changes").unwrap();
-            let offset = staged_pos + text[staged_pos..].find("M. staged.txt").unwrap();
+            let offset = staged_pos + text[staged_pos..].find("modified   staged.txt").unwrap();
             view.show_location(crate::text::ByteOffset(offset), window, cx);
         });
     });
@@ -889,7 +896,7 @@ fn visit_file_other_window_keeps_status_visible_and_supports_init_js_rebinding(
                 .buffer()
                 .text()
                 .to_string()
-                .find("?? untracked.txt")
+                .find("untracked.txt")
                 .unwrap();
             view.show_location(crate::text::ByteOffset(offset), window, cx);
         });
@@ -929,5 +936,462 @@ fn visit_file_other_window_keeps_status_visible_and_supports_init_js_rebinding(
             shell.active_view().read(cx).buffer().path().as_deref(),
             Some(repo.0.join("untracked.txt").as_path())
         );
+    });
+}
+
+#[gpui::test]
+fn status_cx_g_initial_point_jump_menu_sibling_and_level_folding(cx: &mut TestAppContext) {
+    let repo = repo();
+    repo.write("staged.txt", "v1\n");
+    repo.commit();
+    repo.git(&["tag", "v1"]);
+    repo.write("stash.txt", "wip\n");
+    repo.git(&["add", "stash.txt"]);
+    repo.git(&["stash", "push", "-q", "-m", "wip stash"]);
+    repo.write("a", "disk modified\n");
+    repo.write("staged.txt", "v2\n");
+    repo.git(&["add", "staged.txt"]);
+    repo.write("untracked.txt", "new\n");
+
+    let (mut visual, shell) = open(&repo, cx);
+    visual.simulate_keystrokes("ctrl-x g");
+    wait(&mut visual, &shell);
+
+    let status = visual.read(|cx| shell.read(cx).active_view().clone());
+    visual.read(|cx| {
+        let buf = status.read(cx).buffer();
+        assert_eq!(buf.mode(), ModeId::MAGIT_STATUS);
+        assert!(buf.display_name().starts_with("magit: "), "{}", buf.display_name());
+        let text = buf.text().to_string();
+        assert!(text.contains("Head:     "));
+        assert!(text.contains("Tag:      v1"));
+        let sections = buf.sections().unwrap();
+        let untracked = sections.nodes().iter().find(|n| n.key == "untracked").unwrap();
+        assert!(!untracked.collapsed);
+        assert_eq!(buf.point(), untracked.range.start);
+    });
+
+    // `j` jump menu jumps to sections or echoes missing section.
+    visual.simulate_keystrokes("j z");
+    visual.read(|cx| {
+        let buf = status.read(cx).buffer();
+        let stashes = buf
+            .sections()
+            .unwrap()
+            .nodes()
+            .iter()
+            .find(|n| n.key == "stashes")
+            .unwrap()
+            .range
+            .start;
+        assert_eq!(buf.point(), stashes);
+    });
+    visual.simulate_keystrokes("j u");
+    visual.read(|cx| {
+        let buf = status.read(cx).buffer();
+        let unstaged = buf
+            .sections()
+            .unwrap()
+            .nodes()
+            .iter()
+            .find(|n| n.key == "unstaged")
+            .unwrap()
+            .range
+            .start;
+        assert_eq!(buf.point(), unstaged);
+    });
+    visual.simulate_keystrokes("j n");
+    visual.read(|cx| {
+        let buf = status.read(cx).buffer();
+        let untracked = buf
+            .sections()
+            .unwrap()
+            .nodes()
+            .iter()
+            .find(|n| n.key == "untracked")
+            .unwrap()
+            .range
+            .start;
+        assert_eq!(buf.point(), untracked);
+    });
+    visual.simulate_keystrokes("j m");
+    visual.read(|cx| {
+        assert!(status.read(cx).message().unwrap().contains("Unmerged"));
+    });
+
+    // `M-n` / `M-p` skip children to sibling/next section, `1`..`4` / `M-1` / `C-tab` / `M-tab` control visibility.
+    visual.simulate_keystrokes("alt-n");
+    visual.read(|cx| {
+        let buf = status.read(cx).buffer();
+        let unstaged = buf
+            .sections()
+            .unwrap()
+            .nodes()
+            .iter()
+            .find(|n| n.key == "unstaged")
+            .unwrap()
+            .range
+            .start;
+        assert_eq!(buf.point(), unstaged);
+    });
+    visual.simulate_keystrokes("alt-p");
+    visual.read(|cx| {
+        let buf = status.read(cx).buffer();
+        let untracked = buf
+            .sections()
+            .unwrap()
+            .nodes()
+            .iter()
+            .find(|n| n.key == "untracked")
+            .unwrap()
+            .range
+            .start;
+        assert_eq!(buf.point(), untracked);
+    });
+    visual.simulate_keystrokes("alt-n 2");
+    visual.read(|cx| {
+        let sections = status.read(cx).buffer().sections().unwrap();
+        assert!(!sections.nodes().iter().find(|n| n.key == "unstaged").unwrap().collapsed);
+        assert!(
+            sections
+                .nodes()
+                .iter()
+                .find(|n| n.key.starts_with("unstaged/file/"))
+                .unwrap()
+                .collapsed
+        );
+    });
+    visual.simulate_keystrokes("3");
+    visual.read(|cx| {
+        let sections = status.read(cx).buffer().sections().unwrap();
+        assert!(
+            !sections
+                .nodes()
+                .iter()
+                .find(|n| n.key.starts_with("unstaged/file/"))
+                .unwrap()
+                .collapsed
+        );
+        assert!(
+            sections
+                .nodes()
+                .iter()
+                .find(|n| n.key.contains("/@@ "))
+                .unwrap()
+                .collapsed
+        );
+    });
+    visual.simulate_keystrokes("4");
+    visual.read(|cx| {
+        let sections = status.read(cx).buffer().sections().unwrap();
+        assert!(
+            !sections
+                .nodes()
+                .iter()
+                .find(|n| n.key.contains("/@@ "))
+                .unwrap()
+                .collapsed
+        );
+    });
+    visual.simulate_keystrokes("alt-1");
+    visual.read(|cx| {
+        let sections = status.read(cx).buffer().sections().unwrap();
+        assert!(sections.nodes().iter().find(|n| n.key == "unstaged").unwrap().collapsed);
+        assert!(sections.nodes().iter().find(|n| n.key == "untracked").unwrap().collapsed);
+    });
+    visual.simulate_keystrokes("ctrl-tab");
+    visual.read(|cx| {
+        let sections = status.read(cx).buffer().sections().unwrap();
+        assert!(!sections.nodes().iter().find(|n| n.key == "unstaged").unwrap().collapsed);
+        assert!(
+            sections
+                .nodes()
+                .iter()
+                .find(|n| n.key.starts_with("unstaged/file/"))
+                .unwrap()
+                .collapsed
+        );
+    });
+    visual.simulate_keystrokes("alt-tab");
+    visual.read(|cx| {
+        let sections = status.read(cx).buffer().sections().unwrap();
+        assert!(
+            !sections
+                .nodes()
+                .iter()
+                .find(|n| n.key.starts_with("unstaged/file/"))
+                .unwrap()
+                .collapsed
+        );
+    });
+}
+
+#[gpui::test]
+fn status_successor_worktree_visit_copy_preview_scroll_and_double_click(cx: &mut TestAppContext) {
+    let repo = repo();
+    repo.write(
+        "long.txt",
+        format!(
+            "{}\n",
+            (1..=120)
+                .map(|n| format!("line {n}"))
+                .collect::<Vec<_>>()
+                .join("\n")
+        ),
+    );
+    repo.commit();
+    repo.write("b.txt", "b0\n");
+    repo.write("c.txt", "c0\n");
+    repo.commit();
+    repo.write("a", "disk modified\n");
+    repo.write("b.txt", "b1\n");
+    repo.write("c.txt", "c1\n");
+    repo.git(&["add", "c.txt"]);
+
+    let (mut visual, shell) = open(&repo, cx);
+    command(&mut visual, &shell, Command::MagitStatus);
+    wait(&mut visual, &shell);
+    let status = visual.read(|cx| shell.read(cx).active_view().clone());
+    let status_pane = visual.read(|cx| *shell.read(cx).panes.selected());
+
+    // Staging first unstaged file (`a`) moves point to next sibling (`b.txt`);
+    // staging last unstaged file (`b.txt`) moves point to paired `Staged changes`.
+    visual.simulate_keystrokes("n");
+    visual.simulate_keystrokes("s");
+    wait(&mut visual, &shell);
+    visual.read(|cx| {
+        let buf = status.read(cx).buffer();
+        let sections = buf.sections().unwrap();
+        assert_eq!(
+            sections.nodes()[sections.current(buf.point())].key,
+            sections
+                .nodes()
+                .iter()
+                .find(|n| n.key.starts_with("unstaged/file/") && n.key.ends_with("622e747874"))
+                .unwrap()
+                .key
+        );
+    });
+    visual.simulate_keystrokes("s");
+    wait(&mut visual, &shell);
+    visual.read(|cx| {
+        let buf = status.read(cx).buffer();
+        let sections = buf.sections().unwrap();
+        assert_eq!(sections.nodes()[sections.current(buf.point())].key, "staged");
+    });
+
+    // Double-click heading toggles collapsed state without leaving a mark/region.
+    let heading_pos = visual.read(|cx| {
+        let view = status.read(cx);
+        let staged = view
+            .buffer()
+            .sections()
+            .unwrap()
+            .nodes()
+            .iter()
+            .find(|n| n.key == "staged")
+            .unwrap()
+            .range
+            .start;
+        let bounds = view
+            .viewport_layout()
+            .unwrap()
+            .bounds_for_range(staged..staged, view.wrap_index().unwrap())
+            .unwrap();
+        gpui_kit::point(bounds.left() + gpui_kit::px(4.), bounds.top() + gpui_kit::px(4.))
+    });
+    visual.simulate_event(gpui_kit::MouseDownEvent {
+        position: heading_pos,
+        button: gpui_kit::MouseButton::Left,
+        modifiers: gpui_kit::Modifiers::default(),
+        click_count: 2,
+        first_mouse: false,
+    });
+    visual.update(|window, cx| window.draw(cx).clear(cx));
+    visual.read(|cx| {
+        let buf = status.read(cx).buffer();
+        assert!(
+            buf.sections()
+                .unwrap()
+                .nodes()
+                .iter()
+                .find(|n| n.key == "staged")
+                .unwrap()
+                .collapsed
+        );
+        assert!(!buf.mark_active());
+    });
+    visual.simulate_keystrokes("tab");
+
+    // `C-w` copies current branch / file path to KillRing.
+    visual.update(|window, cx| {
+        status.update(cx, |view, cx| {
+            let head = view
+                .buffer()
+                .sections()
+                .unwrap()
+                .nodes()
+                .iter()
+                .find(|n| n.key == "header/head")
+                .unwrap()
+                .range
+                .start;
+            view.show_location(head, window, cx);
+        });
+    });
+    visual.simulate_keystrokes("ctrl-w");
+    visual.read(|cx| {
+        let copied = cx
+            .global::<crate::editing::KillRing>()
+            .current_kill(None)
+            .unwrap()
+            .to_string();
+        assert!(!copied.is_empty());
+        assert_eq!(status.read(cx).message(), Some(copied.as_str()));
+    });
+
+    // `C-<return>` on staged `c.txt` visits editable worktree buffer instead of index blob.
+    visual.update(|window, cx| {
+        status.update(cx, |view, cx| {
+            let offset = view
+                .buffer()
+                .text()
+                .to_string()
+                .find("modified   c.txt")
+                .unwrap();
+            view.show_location(crate::text::ByteOffset(offset), window, cx);
+        });
+    });
+    visual.simulate_keystrokes("ctrl-enter");
+    wait(&mut visual, &shell);
+    visual.read(|cx| {
+        let buf = shell.read(cx).active_view().read(cx).buffer();
+        assert_eq!(buf.path().as_deref(), Some(repo.0.join("c.txt").as_path()));
+        assert!(!buf.is_read_only());
+    });
+
+    // Switch back to status, expand `Recent commits`, move to the commit touching `long.txt`,
+    // and press SPC twice: opens commit preview in the other pane without stealing focus,
+    // and second SPC scrolls the preview forward.
+    visual.update(|window, cx| {
+        shell.update(cx, |shell, cx| {
+            let idx = shell.buffer_index(&status, cx).unwrap();
+            shell.activate(idx, window, cx);
+        });
+        status.update(cx, |view, cx| {
+            let text = view.buffer().text().to_string();
+            let recent = text.find("Recent commits").unwrap();
+            view.show_location(crate::text::ByteOffset(recent), window, cx);
+        });
+    });
+    visual.simulate_keystrokes("tab");
+    visual.update(|window, cx| {
+        status.update(cx, |view, cx| {
+            let text = view.buffer().text().to_string();
+            let recent = text.find("Recent commits").unwrap();
+            let next_line = recent + text[recent..].find('\n').unwrap() + 1;
+            let second_commit = next_line + text[next_line..].find('\n').unwrap() + 1;
+            view.show_location(crate::text::ByteOffset(second_commit), window, cx);
+        });
+    });
+    visual.simulate_keystrokes("space");
+    wait(&mut visual, &shell);
+    let preview_scroll_1 = visual.read(|cx| {
+        let shell = shell.read(cx);
+        assert_eq!(*shell.panes.selected(), status_pane);
+        let preview = shell
+            .all_views()
+            .into_iter()
+            .find(|v| {
+                *v != status
+                    && matches!(
+                        v.read(cx).buffer().history_query(),
+                        Some(crate::history::Query::Revision { .. })
+                    )
+            })
+            .expect("preview revision view open");
+        preview.read(cx).buffer().point()
+    });
+    visual.simulate_keystrokes("space");
+    visual.update(|window, cx| window.draw(cx).clear(cx));
+    visual.read(|cx| {
+        let shell = shell.read(cx);
+        assert_eq!(*shell.panes.selected(), status_pane);
+        let preview = shell
+            .all_views()
+            .into_iter()
+            .find(|v| {
+                *v != status
+                    && matches!(
+                        v.read(cx).buffer().history_query(),
+                        Some(crate::history::Query::Revision { .. })
+                    )
+            })
+            .unwrap();
+        assert!(preview.read(cx).buffer().point() > preview_scroll_1);
+    });
+}
+
+#[gpui::test]
+fn status_remote_jump_keys_and_range_heading_open_diff_range(cx: &mut TestAppContext) {
+    let remote = crate::diff::tests::Repository::new();
+    remote.write("base.txt", "1\n");
+    remote.commit();
+    let branch = String::from_utf8(remote.git(&["branch", "--show-current"]))
+        .unwrap()
+        .trim()
+        .to_owned();
+    remote.git(&["config", "receive.denyCurrentBranch", "ignore"]);
+
+    let local = crate::diff::tests::Repository::new();
+    local.git(&["remote", "add", "origin", remote.0.to_str().unwrap()]);
+    local.git(&["fetch", "-q", "origin"]);
+    local.git(&["checkout", "-qb", &branch, &format!("origin/{branch}")]);
+    local.git(&["branch", "--set-upstream-to", &format!("origin/{branch}")]);
+    local.git(&["config", &format!("branch.{branch}.pushRemote"), "origin"]);
+
+    remote.write("up.txt", "remote\n");
+    remote.commit();
+    local.git(&["fetch", "-q", "origin"]);
+    local.write("loc.txt", "local\n");
+    local.commit();
+
+    let (mut visual, shell) = open(&local, cx);
+    command(&mut visual, &shell, Command::MagitStatus);
+    wait(&mut visual, &shell);
+    let status = visual.read(|cx| shell.read(cx).active_view().clone());
+
+    visual.simulate_keystrokes("j p u");
+    visual.read(|cx| {
+        let buf = status.read(cx).buffer();
+        let sections = buf.sections().unwrap();
+        assert_eq!(
+            sections.nodes()[sections.current(buf.point())].key,
+            "unpushed-upstream"
+        );
+    });
+    visual.simulate_keystrokes("j f u");
+    visual.read(|cx| {
+        let buf = status.read(cx).buffer();
+        let sections = buf.sections().unwrap();
+        assert_eq!(
+            sections.nodes()[sections.current(buf.point())].key,
+            "unpulled-upstream"
+        );
+    });
+    visual.simulate_keystrokes("enter");
+    wait(&mut visual, &shell);
+    visual.read(|cx| {
+        assert!(matches!(
+            shell
+                .read(cx)
+                .active_view()
+                .read(cx)
+                .buffer()
+                .comparison()
+                .unwrap()
+                .kind,
+            crate::diff::DiffKind::Range { .. }
+        ));
     });
 }

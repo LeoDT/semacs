@@ -353,11 +353,11 @@ F2 仅提供 status 与单文件整文件级 index 操作，不包含 hunk / 批
 
 ### Status 与投影
 
-- `M-x magit-status` 打开只读生成 buffer，无新增全局绑定、不自动 split / 保存文件。普通文件从所在目录发现仓库，无文件路径时用窗口启动目录；status / diff 沿用固定仓库。规范化的完整 `(worktree root, git-dir)` 标识仓库，linked worktree 独立；同窗口复用唯一 status，bare 拒绝、固定目标失效不回落父仓库，不识别整体替换路径的历史身份。
-- 头部显示转义 worktree 路径、分支和完整 HEAD OID，明确 detached / unborn；不查询 commit message、upstream 或 remote。固定依次显示 `Untracked files`、`Unstaged changes`、`Staged changes`、`Unmerged paths` 和条目数量（空组仍显示）。未跟踪目录用 Git normal 粒度，不递归展开；两侧变化可重复列项，冲突单列。保留记录顺序和原始路径，显示 XY、rename 旧 → 新及 submodule 状态；非法 UTF-8 按字节转义，不以显示文本充当身份。
-- 组默认展开、文件为无正文叶节点，root 不可折叠，叶节点 TAB / C-i 无操作；section 导航、可见行翻页、水平查看和当前 section 样式复用 F1，长行不软换行。折叠共享，point / scroll 各 view 独立；刷新按组、路径及父链恢复，rename 旧节点消失，无匹配回退最近存活祖先。reload 不重建投影。
+- `C-x g` / `M-x magit-status` 打开只读生成 buffer（`magit: <目录名>`），沿用 [F3](#阶段-f3临时-window-与普通-commit) 临时窗口策略显示，不自动 split / 保存文件。普通文件从所在目录发现仓库，无文件路径时用窗口启动目录；status / diff 沿用固定仓库。规范化的完整 `(worktree root, git-dir)` 标识仓库，linked worktree 独立；同窗口复用唯一 status，bare 拒绝、固定目标失效不回落父仓库，不识别整体替换路径的历史身份。
+- 头部按上游 10 列对齐格式显示 `Head:`（unborn 时显示 `In the beginning there was darkness`）、上游 `Merge:` / `Rebase:`、`Push:`、`Tag:` / `Tags:`；首次打开将 point 定位至首个内容区段（跳过头部）。动态显示非空的 `Untracked files`、`Unstaged changes`、`Staged changes`、`Unmerged paths`、`Merging`、`Stashes`、`Unpushed to ...`、`Unmerged into ...` / `Recent commits`、`Unpulled from ...`，省略空组并在顶级区段之间以空行分隔。未跟踪目录用 Git normal 粒度，不递归展开；变更条目采用 11 列状态词与 `old -> new` rename 格式（Untracked 不带 `?? ` 前缀）；非法 UTF-8 按字节转义，不以显示文本充当身份。
+- **已批准偏离**：`Untracked files` 默认展开（上游 Magit 4.3+ 默认折叠），以保持代码/工作区文件查看直接可达；root 不可折叠，可折叠标题在左侧渲染折叠/展开状态指示条并支持双击标题切换。`TAB` / `C-i`、`S-TAB` / `<backtab>`、`C-c TAB` / `C-<tab>`（`magit-section-cycle`）、`M-<tab>`（`magit-section-cycle-diffs`）、`M-n` / `M-p`（`magit-section-forward/backward-sibling`）与 `1`–`4` / `M-1`–`M-4`（`magit-section-show-level*`）对齐上游树形层级折叠模型；`j` 提供 `magit-status-jump` 单键跳转菜单（`n`/`u`/`s`/`m`/`z`/`p u`/`p p`/`f u`/`f p`）。折叠共享，point / scroll 各 view 独立；刷新及 `s` / `u` 后按上游 `magit-section-goto-successor` 逻辑恢复光标（优先精确键、同父下同 index hunk、配对组 `staged` ↔ `unstaged` / `unpushed` ↔ `unpulled`、相邻兄弟，最后回退最近存活祖先）。reload 不重建投影。
 - 确认仓库后、读取前在主线程绑定既有 buffer / 会话或新建意图；目标失效或新建冲突时丢弃，不在完成时重查并复活会话。打开还绑定发起 pane / buffer / 输入会话，目标变化、读入或 IME 时不抢焦点、不更新已有 status。`g` / `magit-refresh` 按当前 status 或 diff 类型刷新，按会话 / 请求号安装，无需仍选中，不切焦点；读取失败保留旧内容，不冒充 clean。
-- status 中的 staged / unstaged diff 命令查看整个固定仓库比较，不隐式按 point 过滤；F1 diff 不能 stage / unstage。status 不增加 `j`（F2 历史边界；后续窗口恢复式 `q` 见 F3，内嵌 hunk 见 F4，status `RET` 文件访问对齐见 F4）。
+- status 中的 staged / unstaged diff 命令查看整个固定仓库比较，不隐式按 point 过滤；F1 diff 不能 stage / unstage。`C-w`（`magit-copy-section-value`）在 Magit buffer 中复制当前分支名、commit 短 hash 或文件路径到 kill ring；`SPC` / `DEL`（`magit-diff-show-or-scroll-up/down`）在另一窗口预览并翻页提交详情但不抢走 status / log 焦点。
 - 关闭 view 不杀 buffer，kill 禁止迟到投影。status 另存成功后解除会话、section、mode 和只读限制，成为普通文件；保存失败不脱离。保存 V1 期间若已刷新到 V2，成功后磁盘为 V1、内存保留 V2 且 modified；若另存成功在先，迟到刷新拒绝安装。
 
 ### 单文件写入与脚本
@@ -425,11 +425,11 @@ F2 仅提供 status 与单文件整文件级 index 操作，不包含 hunk / 批
 
 - status 的 staged / unstaged 文件包含所属比较的文件正文与 hunk sections，文件默认折叠，hunk 默认展开；untracked / unmerged 保持现有清单，不提供冲突 hunk 写入。文件头沿用 XY / 原始路径身份，正文使用既有 diff 语义样式。binary、非 UTF-8 正文、symlink / 类型变化等明确显示摘要，metadata-only 明示；不伪造可操作文本 hunk。其他 F1 / F2 支持边界不扩大。
 - `TAB`、section 导航、当前 section 高亮、共享折叠与独立 view point / scroll 沿用既有 section 模型。刷新以组 / 原始路径 / hunk heading / 父链恢复，hunk 消失或身份变化回退最近存活祖先；不保证内容变化后仍命中原 hunk。
-- status 中 `RET` / `C-m`（`magit-visit-thing`）、`M-x magit-diff-visit-file` 与 `C-x 4 RET` / `C-x 4 C-m`（`magit-diff-visit-file-other-window`）对齐上游 Magit（`942d61d5`）：
-  - `Unstaged changes` / `Staged changes` 组标题上 `RET` 分别打开 `magit-diff-unstaged` / `magit-diff-staged`；`Untracked files` / `Unmerged paths` 标题与头部无目标时回显 `There is no thing at point that could be visited`。
+- status 中 `RET` / `C-m`（`magit-visit-thing`）、`M-x magit-diff-visit-file` 与 `C-x 4 RET` / `C-x 4 C-m`（`magit-diff-visit-file-other-window`）、`C-<return>` / `C-j`（`magit-diff-visit-worktree-file`）对齐上游 Magit（`942d61d5`）：
+  - `Unstaged changes` / `Staged changes` 组标题上 `RET` 分别打开 `magit-diff-unstaged` / `magit-diff-staged`；`Head:`/`Merge:`/`Push:`/`Tag:`、commit / stash 行与 `Unpushed`/`Unmerged`/`Unpulled` 范围标题上 `RET` 分别打开对应提交修订或区间 diff；`Untracked files` / `Unmerged paths` 等无目标标题上回显 `There is no thing at point that could be visited`。
   - `Untracked` / `Unmerged` 普通文件上 `RET` 在当前窗口打开 worktree 文件；submodule 与含 `.git` 的嵌套目录打开对应目录的 `magit-status`；普通未跟踪目录因无 dired 提示无法访问目录。
   - `Unstaged` 文件 / hunk / 行上 `RET` 按上游规则访问对应侧并在当前窗口打开：新增 / 上下文行及文件 / hunk 标题访问 worktree 文件（折叠或展开的文件 / hunk 标题定位至首个 hunk / 当前 hunk 的首处变更行，复用已有 buffer 并保留未保存编辑），删除行与已删除文件访问 index 只读 blob 快照。
-  - `Staged` 文件 / hunk / 行上 `RET` 按上游默认（`magit-diff-visit-prefer-worktree = nil`）访问只读快照：新增 / 上下文行及标题访问 index blob，删除行与已删除文件访问 HEAD blob。
+  - `Staged` 文件 / hunk / 行上 `RET` 按上游默认（`magit-diff-visit-prefer-worktree = nil`）访问只读快照：新增 / 上下文行及标题访问 index blob，删除行与已删除文件访问 HEAD blob；`C-<return>` / `C-j` 则按工作区优先访问可读写的 worktree 文件。
 - 文件 heading 的 `s` / `u` 保留 F2 整文件行为；hunk heading 或正文的同一命令仅对当前一个普通文本 hunk 操作。仍不支持非空活动 region、部分行、多 section、组级批量或 discard；独立 diff 仍只读。
 - hunk stage 将捕获的 patch 以 `git apply --cached -p0 -C3 --ignore-space-change` 应用到 index；unstage 增加 `--reverse`。保留 Git 路径引用、原始正文及无末尾换行标记，独立应用时调整新侧起始行号；普通内容 hunk 不顺带应用独立 chmod metadata。不读取未保存 buffer、不写 worktree / HEAD / refs，无额外确认、自动备份 / undo / 重试或回滚。
 - hunk patch 由 Git 按上下文匹配并报告失败，不增加 HEAD / index OID / XY 快照一致性检查，也不把整文件 stage 的执行时磁盘语义冒充 hunk 语义。现有特殊 index / sparse / 路径类型 / 外部 filter 范围限制仍适用，不通过 patch 绕过。失败保留诊断，沿用核心终态重读，不把刷新成功误报为写入成功。

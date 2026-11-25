@@ -167,8 +167,8 @@ fn local_prefixes_fall_through_but_commands_and_null_mask_lower_subtrees() {
         semacs.bindKey('ctrl-x z', 'forward-char', {mode: 'magit-diff'});
         semacs.bindKey('ctrl-h', null, {mode: 'magit-diff'});
         semacs.bindKey('ctrl-f a', 'backward-char', {mode: 'magit-diff'});
-        semacs.bindKey('ctrl-c a', 'forward-char');
-        semacs.bindKey('ctrl-c', 'backward-char', {mode: 'magit-diff'});
+        semacs.bindKey('ctrl-o a', 'forward-char');
+        semacs.bindKey('ctrl-o', 'backward-char', {mode: 'magit-diff'});
     "#,
     )
     .unwrap();
@@ -182,7 +182,7 @@ fn local_prefixes_fall_through_but_commands_and_null_mask_lower_subtrees() {
         ("ctrl-h e", Lookup::Unbound),
         ("ctrl-f", Lookup::Prefix),
         ("ctrl-f a", Lookup::Command(Command::BackwardChar)),
-        ("ctrl-c a", Lookup::Unbound),
+        ("ctrl-o a", Lookup::Unbound),
     ] {
         assert_eq!(
             lookup(&layers, &parse_sequence(key).unwrap()),

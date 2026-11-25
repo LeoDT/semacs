@@ -75,9 +75,43 @@ impl AppShell {
             Command::MagitShowCommit => {
                 if let Some(oid) = origin.read(cx).buffer().history_commit_at_point() {
                     self.show_history_commit(oid, origin, window, cx);
+                } else if let Some(repository) = origin.read(cx).buffer().status_repository() {
+                    match origin.read(cx).buffer().status_preview_target() {
+                        Some(crate::status::StatusPreviewTarget::Commit(oid)) => {
+                            self.open_revision(
+                                Query::Revision {
+                                    repository,
+                                    oid,
+                                    environment: crate::git::ReadEnvironment::Projection,
+                                },
+                                origin,
+                                window,
+                                cx,
+                            );
+                        }
+                        Some(crate::status::StatusPreviewTarget::Rev(rev)) => {
+                            self.resolve_and_open_revision(
+                                repository,
+                                crate::git::ReadEnvironment::Projection,
+                                rev,
+                                origin,
+                                window,
+                                cx,
+                            );
+                        }
+                        _ => self.prompt_show_commit(origin, window, cx),
+                    }
                 } else {
                     self.prompt_show_commit(origin, window, cx);
                 }
+            }
+            Command::MagitDiffShowOrScrollUp | Command::MagitDiffShowOrScrollDown => {
+                self.magit_show_or_scroll(
+                    command == Command::MagitDiffShowOrScrollUp,
+                    origin,
+                    window,
+                    cx,
+                );
             }
             Command::MagitVisitThing
             | Command::MagitDiffVisit
@@ -251,11 +285,25 @@ impl AppShell {
         }
     }
 
-    fn resolve_and_open_revision(
+    pub(super) fn resolve_and_open_revision(
         &mut self,
         repository: Repository,
         environment: crate::git::ReadEnvironment,
         rev: String,
+        origin: &Entity<BufferView>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.resolve_and_open_revision_with(repository, environment, rev, true, origin, window, cx);
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn resolve_and_open_revision_with(
+        &mut self,
+        repository: Repository,
+        environment: crate::git::ReadEnvironment,
+        rev: String,
+        select: bool,
         origin: &Entity<BufferView>,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -315,7 +363,7 @@ impl AppShell {
                             if shell
                                 .install_history_result(index, &query, request, data, rendered, cx)
                             {
-                                shell.display_temporary(index, window, cx);
+                                shell.display_temporary_with(index, select, window, cx);
                             }
                         }
                         Err(error) => shell.show_message(&origin, error, cx),
@@ -328,6 +376,94 @@ impl AppShell {
             cancelled,
             _task: task,
         }));
+    }
+
+    fn magit_show_or_scroll(
+        &mut self,
+        forward: bool,
+        origin: &Entity<BufferView>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let preview = {
+            let buffer = origin.read(cx).buffer();
+            if let Some(repository) = buffer.status_repository() {
+                match buffer.status_preview_target() {
+                    Some(crate::status::StatusPreviewTarget::Commit(oid)) => Some((
+                        repository,
+                        crate::git::ReadEnvironment::Projection,
+                        Some(oid),
+                        None,
+                    )),
+                    Some(crate::status::StatusPreviewTarget::Rev(rev)) => Some((
+                        repository,
+                        crate::git::ReadEnvironment::Projection,
+                        None,
+                        Some(rev),
+                    )),
+                    _ => None,
+                }
+            } else if let (Some(query), Some(oid)) =
+                (buffer.history_query(), buffer.history_commit_at_point())
+            {
+                Some((
+                    query.repository().clone(),
+                    query.environment(),
+                    Some(oid),
+                    None,
+                ))
+            } else {
+                None
+            }
+        };
+        let Some((repository, environment, oid, rev)) = preview else {
+            self.prompt_show_commit(origin, window, cx);
+            return;
+        };
+        if let Some(oid) = oid {
+            let source_pane = *self.panes.selected();
+            let displayed_view = self.panes.ordinary_leaves().into_iter().find_map(|pane| {
+                if pane == source_pane {
+                    return None;
+                }
+                let view = self.body_panes[&pane].active_view();
+                let query = view.read(cx).buffer().history_query()?;
+                matches!(
+                    &query,
+                    Query::Revision {
+                        repository: r,
+                        oid: current_oid,
+                        environment: env,
+                    } if r == &repository && current_oid == &oid && *env == environment
+                )
+                .then(|| view.clone())
+            });
+            if let Some(view) = displayed_view {
+                view.update(cx, |view, cx| view.scroll_preview(forward, window, cx));
+                return;
+            }
+            self.open_revision_with(
+                Query::Revision {
+                    repository,
+                    oid,
+                    environment,
+                },
+                false,
+                origin,
+                window,
+                cx,
+            );
+        } else if let Some(rev) = rev {
+            self.resolve_and_open_revision_with(
+                repository,
+                environment,
+                rev,
+                false,
+                origin,
+                window,
+                cx,
+            );
+        }
     }
 
     pub(super) fn open_log(
@@ -398,9 +534,20 @@ impl AppShell {
             && origin.read(cx).git_open_ready()
     }
 
-    fn open_revision(
+    pub(super) fn open_revision(
         &mut self,
         query: Query,
+        origin: &Entity<BufferView>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.open_revision_with(query, true, origin, window, cx);
+    }
+
+    fn open_revision_with(
+        &mut self,
+        query: Query,
+        select: bool,
         origin: &Entity<BufferView>,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -411,7 +558,7 @@ impl AppShell {
         {
             return;
         }
-        self.open_history_query(query, origin, Purpose::Browse, window, cx);
+        self.open_history_query_with(query, origin, Purpose::Browse, select, window, cx);
     }
 
     fn open_history_query(
@@ -419,6 +566,18 @@ impl AppShell {
         query: Query,
         origin: &Entity<BufferView>,
         purpose: Purpose,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.open_history_query_with(query, origin, purpose, true, window, cx);
+    }
+
+    fn open_history_query_with(
+        &mut self,
+        query: Query,
+        origin: &Entity<BufferView>,
+        purpose: Purpose,
+        select: bool,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -476,7 +635,7 @@ impl AppShell {
                             {
                                 return;
                             }
-                            shell.display_temporary(index, window, cx);
+                            shell.display_temporary_with(index, select, window, cx);
                             #[cfg(unix)]
                             if let Purpose::Select(selection) = purpose {
                                 let initial = selection.initial.clone();

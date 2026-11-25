@@ -41,6 +41,32 @@ impl DiffNavigation {
         });
         diff.visit(location.file, location.old, location.new, column)
     }
+
+    pub fn visit_worktree(&self, diff: &Diff, point: ByteOffset) -> Result<Visit, String> {
+        let index = self
+            .locations
+            .partition_point(|location| location.range.end <= point);
+        let location = self
+            .locations
+            .get(index)
+            .filter(|location| location.range.contains(&point))
+            .ok_or("No file at point")?;
+        let column = location.prefix.map_or(0, |prefix| {
+            point.0.saturating_sub(location.range.start.0 + prefix)
+        });
+        diff.visit_worktree(location.file, location.old, location.new, column)
+    }
+
+    pub fn copy_value(&self, diff: &Diff, point: ByteOffset) -> Option<String> {
+        let index = self
+            .locations
+            .partition_point(|location| location.range.end <= point);
+        let location = self
+            .locations
+            .get(index)
+            .filter(|location| location.range.contains(&point))?;
+        diff.file_path(location.file)
+    }
 }
 fn push(text: &mut String, value: &str) -> Range<ByteOffset> {
     let start = ByteOffset(text.len());

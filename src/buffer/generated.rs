@@ -102,6 +102,48 @@ impl Buffer {
         Ok(())
     }
 
+    pub(crate) fn cycle_section(&mut self) -> Result<(), String> {
+        let point = self.point();
+        let mut doc = self.document.borrow_mut();
+        let sections = doc.sections.as_mut().ok_or("No sections in this buffer")?;
+        Arc::make_mut(sections).cycle(point);
+        let sections = doc.sections.as_ref().unwrap().clone();
+        for point in doc.points.iter().filter_map(|point| point.upgrade()) {
+            point.set(sections.collapse_point(ByteOffset(point.get())).0);
+        }
+        doc.touch();
+        Ok(())
+    }
+
+    pub(crate) fn cycle_sections_diffs(&mut self, status_mode: bool) -> Result<(), String> {
+        let mut doc = self.document.borrow_mut();
+        let sections = doc.sections.as_mut().ok_or("No sections in this buffer")?;
+        Arc::make_mut(sections).cycle_diffs(status_mode);
+        let sections = doc.sections.as_ref().unwrap().clone();
+        for point in doc.points.iter().filter_map(|point| point.upgrade()) {
+            point.set(sections.collapse_point(ByteOffset(point.get())).0);
+        }
+        doc.touch();
+        Ok(())
+    }
+
+    pub(crate) fn show_section_level(&mut self, level: usize, all: bool) -> Result<ByteOffset, String> {
+        let point = self.point();
+        let mut doc = self.document.borrow_mut();
+        let sections = doc.sections.as_mut().ok_or("No sections in this buffer")?;
+        let target = if all {
+            Arc::make_mut(sections).show_level_all(point, level)
+        } else {
+            Arc::make_mut(sections).show_level(point, level)
+        };
+        let sections = doc.sections.as_ref().unwrap().clone();
+        for point in doc.points.iter().filter_map(|point| point.upgrade()) {
+            point.set(sections.collapse_point(ByteOffset(point.get())).0);
+        }
+        doc.touch();
+        Ok(target)
+    }
+
     pub(crate) fn reveal_section(&mut self, point: ByteOffset) {
         let mut doc = self.document.borrow_mut();
         if let Some(sections) = &mut doc.sections {

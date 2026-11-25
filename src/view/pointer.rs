@@ -73,6 +73,27 @@ impl BufferView {
             cx.notify();
             return;
         }
+        if event.click_count == 2
+            && !event.modifiers.control
+            && !event.modifiers.shift
+            && !event.modifiers.alt
+            && !event.modifiers.platform
+            && self
+                .buffer()
+                .sections()
+                .is_some_and(|sections| sections.foldable_heading_at(offset).is_some())
+        {
+            self.pointer_drag = None;
+            self.invalidate_input_registration();
+            self.scroll_anchor = None;
+            self.pending_scroll = None;
+            self.target.show_point(offset);
+            cx.emit(Feedback::ToggleSection);
+            window.focus(&self.focus, cx);
+            window.notify_text_selection_changed(&self.focus);
+            cx.notify();
+            return;
+        }
         if let Err(error) = self.target.press_pointer(self.target.token(), offset) {
             self.set_message(error.to_string(), cx);
             return;

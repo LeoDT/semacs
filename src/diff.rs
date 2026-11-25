@@ -427,6 +427,28 @@ impl Diff {
             self.comparison.environment,
         )
     }
+
+    pub(crate) fn visit_worktree(
+        &self,
+        file: usize,
+        old_line: Option<usize>,
+        new_line: Option<usize>,
+        column: usize,
+    ) -> Result<Visit, String> {
+        let item = self.files.get(file).ok_or("No file here")?;
+        let line = new_line.or(old_line).unwrap_or(1).max(1);
+        Ok(Visit::Worktree {
+            path: self.comparison.repository.root.join(&item.new_path),
+            line,
+            column,
+        })
+    }
+
+    pub(crate) fn file_path(&self, file: usize) -> Option<String> {
+        self.files
+            .get(file)
+            .map(|item| item.new_path.to_string_lossy().into_owned())
+    }
 }
 
 impl FileDiff {

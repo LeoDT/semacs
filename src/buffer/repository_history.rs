@@ -152,6 +152,57 @@ impl Buffer {
         }
     }
 
+    pub(crate) fn history_visit_worktree(&self) -> Result<crate::diff::Visit, String> {
+        let doc = self.document.borrow();
+        let session = doc
+            .repository_history
+            .as_ref()
+            .ok_or("Not a history buffer")?;
+        let point = self.point();
+        let index = session
+            .locations
+            .partition_point(|location| location.range.end <= point);
+        session
+            .locations
+            .get(index)
+            .filter(|location| location.range.contains(&point))
+            .ok_or("No file at point")?
+            .worktree_at(
+                session.data.as_deref().ok_or("History is not ready")?,
+                &session.query,
+                point,
+            )
+    }
+
+    pub(crate) fn history_copy_value(&self) -> Option<String> {
+        let doc = self.document.borrow();
+        let session = doc.repository_history.as_ref()?;
+        let data = session.data.as_deref()?;
+        let sections = doc.sections.as_ref()?;
+        let point = sections.collapse_point(self.point());
+        let lookup = |pos: crate::text::ByteOffset| -> Option<String> {
+            let idx = session
+                .locations
+                .partition_point(|location| location.range.end <= pos);
+            session
+                .locations
+                .get(idx)
+                .filter(|location| location.range.contains(&pos))
+                .and_then(|location| location.copy_value(data))
+        };
+        if let Some(value) = lookup(point) {
+            return Some(value);
+        }
+        let mut idx = sections.current(point);
+        while idx != 0 {
+            if let Some(value) = lookup(sections.nodes()[idx].range.start) {
+                return Some(value);
+            }
+            idx = sections.nodes()[idx].parent?;
+        }
+        None
+    }
+
     /// Mirrors upstream `magit-region-values '(commit) t` + `magit-diff--region-range`:
     /// when the active region starts and ends in headings of two distinct sibling
     /// commit sections in a log buffer, returns `(older_oid, newer_oid)`.

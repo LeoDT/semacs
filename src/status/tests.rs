@@ -48,14 +48,8 @@ fn clean_unborn_detached_and_sha256_headers() {
         }
     );
     let rendered = clean.render().unwrap();
-    assert_eq!(
-        rendered.text,
-        format!(
-            "Status: /fixture/worktree\nBranch: main\nHEAD: {}\nUntracked files (0)\nUnstaged changes (0)\nStaged changes (0)\nUnmerged paths (0)\n",
-            "1".repeat(40)
-        )
-    );
-    assert_eq!(rendered.sections.nodes().len(), 5);
+    assert_eq!(rendered.text, "Head:     main\n");
+    assert_eq!(rendered.sections.nodes().len(), 2);
     let unborn = Status::parse(
         repository(),
         b"# branch.oid (initial)\0# branch.head main\0",
@@ -67,7 +61,13 @@ fn clean_unborn_detached_and_sha256_headers() {
             name: b"main".to_vec()
         }
     );
-    assert!(unborn.render().unwrap().text.contains("HEAD: (unborn)"));
+    assert!(
+        unborn
+            .render()
+            .unwrap()
+            .text
+            .contains("In the beginning there was darkness")
+    );
     let mut bytes = format!(
         "# branch.head (detached)\0# branch.oid {}\0",
         "a".repeat(64)
@@ -86,7 +86,7 @@ fn clean_unborn_detached_and_sha256_headers() {
             .render()
             .unwrap()
             .text
-            .contains("Branch: (detached)")
+            .contains(&format!("Head:     {}\n", "a".repeat(7)))
     );
 }
 
@@ -107,16 +107,18 @@ fn semantic_styles_separate_labels_counts_branches_and_hashes() {
         .collect();
     assert!(spans.contains(&("main", StyleRole::MagitBranch)));
     assert!(spans.contains(&("Unstaged changes", StyleRole::SectionHeading)));
-    assert!(
-        spans
-            .iter()
-            .any(|(text, role)| text.len() == 40 && *role == StyleRole::MagitHash)
-    );
-    assert!(
-        spans
-            .iter()
-            .all(|(text, _)| !text.contains("(1)") && !text.contains("文件.txt"))
-    );
+    assert!(spans.contains(&("modified   文件.txt\n", StyleRole::DiffFile)));
+    assert!(spans.iter().all(|(text, role)| !(*role == StyleRole::SectionHeading && text.contains("(1)"))));
+    let detached = Status::parse(
+        repository(),
+        format!("# branch.head (detached)\0# branch.oid {}\0", "a".repeat(40)).as_bytes(),
+    )
+    .unwrap()
+    .render()
+    .unwrap();
+    assert!(detached.styles.iter().any(|(range, role)| {
+        &detached.text[range.start.0..range.end.0] == "aaaaaaa" && *role == StyleRole::MagitHash
+    }));
     assert!(
         rendered
             .styles
@@ -156,9 +158,13 @@ fn groups_preserve_record_order_and_do_not_count_conflicts_twice() {
     assert!(
         rendered
             .text
-            .contains("Untracked files (2)\n ?? directory/\n ?? -leading file\n")
+            .contains("Untracked files (2)\ndirectory/\n-leading file\n")
     );
-    assert!(rendered.text.contains("Unmerged paths (1)\n UU conflict\n"));
+    assert!(
+        rendered
+            .text
+            .contains("Unmerged paths (1)\nunmerged   conflict\n")
+    );
     for (group, expected) in [
         (Group::Untracked, 2),
         (Group::Unstaged, 2),
@@ -245,7 +251,7 @@ fn real_git_covers_unborn_two_sides_deletion_rename_and_recreated_path() {
             .render()
             .unwrap()
             .text
-            .contains("rename old → rename new")
+            .contains("rename old -> rename new")
     );
     repo.git(&["checkout", "-q", "--detach"]);
     assert!(matches!(
@@ -460,7 +466,7 @@ fn copy_and_submodule_protocol_fields_are_preserved_without_queries() {
             .render()
             .unwrap()
             .text
-            .contains("submodule [submodule CMU]")
+            .contains("submodule (new commits, modified content, untracked content)")
     );
 }
 
@@ -490,7 +496,7 @@ fn section_leaves_are_noop_and_restore_uses_group_and_raw_path() {
     rendered.sections.toggle(parent).unwrap();
     assert_eq!(rendered.sections.collapse_point(point), heading);
     assert!(rendered.location(point).is_none());
-    let mut next = Status::parse(repository(), &protocol(b"? unrelated\0"))
+    let mut next = Status::parse(repository(), &protocol(ordinary("MM", "unrelated").as_bytes()))
         .unwrap()
         .render()
         .unwrap();
@@ -621,7 +627,7 @@ fn limits_fail_instead_of_returning_partial_models_or_projections() {
     assert_eq!(status.entries().len(), MAX_RECORDS);
     assert_eq!(
         status.render().unwrap().sections.nodes().len(),
-        MAX_RECORDS + 5
+        MAX_RECORDS + 3
     );
     bytes.extend_from_slice(b"? too-many\0");
     assert!(
@@ -663,4 +669,98 @@ fn repository_discovery_pins_canonical_worktree_and_gitdir_and_rejects_bare() {
     repo.git(&["init", "--bare", "-q", bare.to_str().unwrap()]);
     assert!(crate::git::discover(&bare, &cancelled).is_err());
     assert!(crate::git::discover(&repo.0, &AtomicBool::new(true)).is_err());
+}
+
+#[test]
+fn real_git_loads_upstream_push_tags_stashes_commit_sections_and_merging() {
+    let remote = Fixture::new();
+    remote.write("base.txt", "v1\n");
+    remote.commit();
+    let current_branch = String::from_utf8(remote.git(&["branch", "--show-current"]))
+        .unwrap()
+        .trim()
+        .to_owned();
+    remote.git(&["tag", "-a", "v1.0", "-m", "release"]);
+    remote.git(&["checkout", "-qb", "side"]);
+    remote.write("remote.txt", "from remote\n");
+    remote.commit();
+    remote.git(&["checkout", "-q", &current_branch]);
+    remote.git(&["config", "receive.denyCurrentBranch", "ignore"]);
+
+    let local = Fixture::new();
+    let remote_url = remote.0.to_str().unwrap().to_owned();
+    local.git(&["remote", "add", "origin", &remote_url]);
+    local.git(&["remote", "add", "fork", &remote_url]);
+    local.git(&["fetch", "-q", "origin"]);
+    local.git(&["fetch", "-q", "fork"]);
+    local.git(&[
+        "checkout",
+        "-qb",
+        &current_branch,
+        &format!("origin/{current_branch}"),
+    ]);
+    local.git(&[
+        "branch",
+        "--set-upstream-to",
+        &format!("origin/{current_branch}"),
+    ]);
+    local.git(&["config", &format!("branch.{current_branch}.pushRemote"), "fork"]);
+    local.git(&["config", &format!("branch.{current_branch}.rebase"), "true"]);
+
+    // Advance remote branch for Unpulled, create a local commit for Unpushed, tag v2.0, and stash work.
+    remote.git(&["checkout", "-q", &current_branch]);
+    remote.write("upstream.txt", "pulled\n");
+    remote.commit();
+    local.git(&["fetch", "-q", "origin"]);
+
+    local.write("local.txt", "pushed\n");
+    local.commit();
+    local.git(&["tag", "v2.0"]);
+    local.write("stash.txt", "wip\n");
+    local.git(&["add", "stash.txt"]);
+    local.git(&["stash", "push", "-q", "-m", "wip stash"]);
+    local.write("dirty.txt", "unstaged\n");
+
+    let status = fixture_status(&local);
+    let rendered = status.render().unwrap();
+    assert!(rendered.text.contains("Head:     "));
+    assert!(rendered.text.contains("Rebase:   "));
+    assert!(rendered.text.contains("Push:     "));
+    assert!(rendered.text.contains("Tag:      v2.0"));
+    assert!(rendered.text.contains("Untracked files (1)\ndirty.txt\n"));
+    assert!(rendered.text.contains("Stashes (1)\nstash@{0}"));
+    assert!(rendered.text.contains("Unpushed to fork/"));
+    assert!(rendered.text.contains("Unmerged into origin/"));
+    assert!(rendered.text.contains("Unpulled from origin/"));
+    assert!(!rendered.text.contains("Unstaged changes"));
+    assert!(!rendered.text.contains("Staged changes"));
+    assert!(rendered.text.contains("\n\nUntracked files (1)"));
+    assert!(rendered.initial_point > ByteOffset(0));
+    assert_eq!(
+        rendered.text[rendered.initial_point.0..]
+            .lines()
+            .next()
+            .unwrap(),
+        "Untracked files (1)"
+    );
+
+    // Merging section during an active merge conflict.
+    let merge_repo = Fixture::new();
+    merge_repo.write("conflict.txt", "base\n");
+    merge_repo.commit();
+    merge_repo.git(&["checkout", "-qb", "branch-a"]);
+    merge_repo.write("conflict.txt", "ours\n");
+    merge_repo.commit();
+    merge_repo.git(&["checkout", "-q", "-"]);
+    merge_repo.write("conflict.txt", "theirs\n");
+    merge_repo.commit();
+    let merge_out = std::process::Command::new("git")
+        .args(["merge", "branch-a"])
+        .current_dir(&merge_repo.0)
+        .output()
+        .unwrap();
+    assert!(!merge_out.status.success());
+    let merge_rendered = fixture_status(&merge_repo).render().unwrap();
+    assert!(merge_rendered.text.contains("Merging branch-a (1)"));
+    assert!(merge_rendered.text.contains("Unmerged paths (1)\nunmerged   conflict.txt"));
 }

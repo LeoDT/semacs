@@ -390,6 +390,9 @@ impl AppShell {
                         if self.answer_diff_menu(stroke, window, cx) {
                             return true;
                         }
+                        if self.answer_status_jump_menu(stroke, window, cx) {
+                            return true;
+                        }
                         #[cfg(unix)]
                         if self.answer_commit_choice(stroke, window, cx) {
                             return true;
@@ -422,6 +425,15 @@ impl AppShell {
                 self.begin_read(ReadKind::Command, origin, "", window, cx);
             }
             Command::MagitStatus => self.open_status(origin, window, cx),
+            Command::MagitStatusJump => {
+                self.begin_read(
+                    ReadKind::StatusJumpMenu { prefix: None },
+                    origin,
+                    "",
+                    window,
+                    cx,
+                );
+            }
             Command::Treemacs => self.toggle_tree(origin, window, cx),
             Command::TreemacsSelectWindow => self.select_tree_window(origin, window, cx),
             Command::TreemacsFindFile => self.find_tree_file(origin, window, cx),
@@ -535,6 +547,8 @@ impl AppShell {
             | Command::MagitShowCommit
             | Command::MagitLogMore
             | Command::MagitLogLess
+            | Command::MagitDiffShowOrScrollUp
+            | Command::MagitDiffShowOrScrollDown
             | Command::MagitVisitFileVersion => self.history_command(command, origin, window, cx),
             #[cfg(unix)]
             Command::MagitProcessBuffer => self.view_commit_process(origin, window, cx),
@@ -558,14 +572,28 @@ impl AppShell {
             | Command::MagitDiffStaged
             | Command::MagitDiffUnstaged
             | Command::SectionToggle
+            | Command::SectionCycle
+            | Command::SectionCycleDiffs
             | Command::SectionCycleGlobal
             | Command::SectionForward
             | Command::SectionBackward
+            | Command::SectionForwardSibling
+            | Command::SectionBackwardSibling
             | Command::SectionUp
+            | Command::SectionShowLevel1
+            | Command::SectionShowLevel2
+            | Command::SectionShowLevel3
+            | Command::SectionShowLevel4
+            | Command::SectionShowLevel1All
+            | Command::SectionShowLevel2All
+            | Command::SectionShowLevel3All
+            | Command::SectionShowLevel4All
             | Command::MagitDiffJump
             | Command::MagitRefresh
             | Command::MagitDiffVisit
             | Command::MagitDiffVisitOtherWindow
+            | Command::MagitDiffVisitWorktree
+            | Command::MagitCopySectionValue
             | Command::ScrollLeft
             | Command::ScrollRight => self.diff_command(command, origin, window, cx),
             Command::MagitModeBuryBuffer => self.quit_temporary(window, cx),

@@ -151,6 +151,85 @@ impl Location {
             _ => Err("File location does not belong to this revision".into()),
         }
     }
+
+    pub fn worktree_at(
+        &self,
+        data: &Data,
+        query: &Query,
+        point: ByteOffset,
+    ) -> Result<Visit, String> {
+        let column = self.prefix.map_or(0, |prefix| {
+            point.0.saturating_sub(self.range.start.0 + prefix)
+        });
+        let repository = query.repository();
+        match (&self.target, data) {
+            (
+                Target::Unified { file, old, new },
+                Data::Revision(Revision {
+                    patch: Patch::Unified(files),
+                    ..
+                }),
+            ) => {
+                let file = files.get(*file).ok_or("No file here")?;
+                let line = new.or(*old).unwrap_or(1).max(1);
+                Ok(Visit::Worktree {
+                    path: repository.root.join(&file.new_path),
+                    line,
+                    column,
+                })
+            }
+            (
+                Target::Combined { file, hunk, line },
+                Data::Revision(Revision {
+                    patch: Patch::Combined(files),
+                    ..
+                }),
+            ) => {
+                let file = files.get(*file).ok_or("No file here")?;
+                let target_line = if let Some(hunk) = hunk {
+                    let hunk = file.hunks().get(*hunk).ok_or("No hunk here")?;
+                    if let Some(line) = line {
+                        hunk.lines.get(*line).ok_or("No line here")?.result
+                    } else {
+                        hunk.result
+                    }
+                } else {
+                    1
+                };
+                Ok(Visit::Worktree {
+                    path: repository.root.join(&file.result.path),
+                    line: target_line.max(1),
+                    column,
+                })
+            }
+            _ => Err("No file at point".into()),
+        }
+    }
+
+    pub fn copy_value(&self, data: &Data) -> Option<String> {
+        match (&self.target, data) {
+            (Target::Commit(oid), _) => Some(oid[..12.min(oid.len())].to_owned()),
+            (
+                Target::Unified { file, .. },
+                Data::Revision(Revision {
+                    patch: Patch::Unified(files),
+                    ..
+                }),
+            ) => files
+                .get(*file)
+                .map(|f| f.new_path.to_string_lossy().into_owned()),
+            (
+                Target::Combined { file, .. },
+                Data::Revision(Revision {
+                    patch: Patch::Combined(files),
+                    ..
+                }),
+            ) => files
+                .get(*file)
+                .map(|f| f.result.path.to_string_lossy().into_owned()),
+            _ => None,
+        }
+    }
 }
 
 pub(crate) struct RenderedHistory {

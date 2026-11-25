@@ -22,8 +22,17 @@ pub struct Section {
 }
 
 #[derive(Clone, Debug)]
+struct AnchorStep {
+    key: String,
+    next_siblings: Vec<String>,
+    prev_siblings: Vec<String>,
+    sibling_index: usize,
+    hunk: bool,
+}
+
+#[derive(Clone, Debug)]
 pub struct SectionAnchor {
-    ancestry: Vec<String>,
+    steps: Vec<AnchorStep>,
     row: u32,
     column: u32,
 }
@@ -371,48 +380,346 @@ impl Sections {
             .reduce(|a, b| if forward { a.min(b) } else { a.max(b) })
     }
 
+    /// Mirrors `magit-section-forward-sibling` / `magit-section-backward-sibling`:
+    /// moves to the next/previous visible sibling section, falling back to
+    /// `navigate` when there is no sibling in that direction or at root.
+    pub fn navigate_sibling(&self, point: ByteOffset, forward: bool) -> Option<ByteOffset> {
+        let current = self.current(point);
+        if current == 0 {
+            return self.navigate(point, forward);
+        }
+        let parent = self.nodes[current].parent;
+        let current_start = self.nodes[current].range.start;
+        let sibling = self
+            .nodes
+            .iter()
+            .skip(1)
+            .filter(|node| {
+                node.parent == parent && self.collapse_point(node.range.start) == node.range.start
+            })
+            .map(|node| node.range.start)
+            .filter(|start| {
+                if forward {
+                    *start > current_start
+                } else {
+                    *start < current_start
+                }
+            })
+            .reduce(|a, b| if forward { a.min(b) } else { a.max(b) });
+        sibling.or_else(|| {
+            if forward {
+                let current_end = self.nodes[current].range.end;
+                self.nodes
+                    .iter()
+                    .skip(1)
+                    .filter(|node| self.collapse_point(node.range.start) == node.range.start)
+                    .map(|node| node.range.start)
+                    .filter(|start| *start >= current_end)
+                    .reduce(|a, b| a.min(b))
+            } else {
+                self.navigate(point, false)
+            }
+        })
+    }
+
+    pub fn find_key(&self, key: &str) -> Option<ByteOffset> {
+        self.nodes
+            .iter()
+            .find(|node| node.key == key)
+            .map(|node| self.collapse_point(node.range.start))
+    }
+
+    pub fn foldable_heading_at(&self, point: ByteOffset) -> Option<usize> {
+        let index = self.current(point);
+        let node = self.nodes.get(index)?;
+        (index > 0
+            && node.body < node.range.end
+            && point >= node.range.start
+            && point < node.body
+            && self.collapse_point(point) == point)
+            .then_some(index)
+    }
+
+    fn depth(&self, mut index: usize) -> usize {
+        let mut depth = 0;
+        while let Some(parent) = self.nodes[index].parent {
+            depth += 1;
+            index = parent;
+        }
+        depth
+    }
+
+    fn set_collapsed(&mut self, index: usize, collapsed: bool) {
+        let node = &mut self.nodes[index];
+        if node.collapsed != collapsed {
+            node.collapsed = collapsed;
+            self.remembered.insert(node.key.clone(), collapsed);
+        }
+    }
+
+    fn show_children_1(&mut self, index: usize, depth: Option<usize>, children: &[Vec<usize>]) {
+        for &child in &children[index] {
+            self.set_collapsed(child, false);
+            match depth {
+                Some(0) => {
+                    if self.nodes[child].body < self.nodes[child].range.end {
+                        self.set_collapsed(child, true);
+                    }
+                }
+                Some(d) => self.show_children_1(child, Some(d - 1), children),
+                None => self.show_children_1(child, None, children),
+            }
+        }
+    }
+
+    fn show_headings_1(&mut self, index: usize, children: &[Vec<usize>]) {
+        for &child in &children[index] {
+            self.set_collapsed(child, false);
+            if !children[child].is_empty() || self.nodes[child].body == self.nodes[child].range.end
+            {
+                self.show_headings_1(child, children);
+            }
+        }
+    }
+
+    fn hide_children(&mut self, index: usize, children: &[Vec<usize>]) {
+        for &child in &children[index] {
+            if self.nodes[child].body < self.nodes[child].range.end {
+                self.set_collapsed(child, true);
+            }
+        }
+    }
+
+    /// Mirrors `magit-section-show-level` (1..=4).
+    pub fn show_level(&mut self, point: ByteOffset, level: usize) -> ByteOffset {
+        let children = self.child_indices();
+        let mut s = self.current(point);
+        let mut i = self.depth(s);
+        while i > level {
+            if let Some(parent) = self.nodes[s].parent {
+                s = parent;
+                i -= 1;
+            } else {
+                break;
+            }
+        }
+        if i < level {
+            if s != 0 {
+                self.set_collapsed(s, false);
+            }
+            self.show_children_1(s, Some(level - i - 1), &children);
+        } else if s != 0 && self.nodes[s].body < self.nodes[s].range.end {
+            self.set_collapsed(s, true);
+        }
+        self.rebuild();
+        self.collapse_point(self.nodes[s].range.start)
+    }
+
+    /// Mirrors `magit-section-show-level` with negative arg (`M-1`..`M-4`).
+    pub fn show_level_all(&mut self, point: ByteOffset, level: usize) -> ByteOffset {
+        let children = self.child_indices();
+        let mut s = self.current(point);
+        while self.depth(s) > level {
+            let Some(parent) = self.nodes[s].parent else {
+                break;
+            };
+            s = parent;
+        }
+        self.show_children_1(0, Some(level.saturating_sub(1)), &children);
+        self.rebuild();
+        self.collapse_point(self.nodes[s].range.start)
+    }
+
+    /// Mirrors `magit-section-cycle` (`C-c TAB` / `C-<tab>`).
+    pub fn cycle(&mut self, point: ByteOffset) {
+        let current = self.current(point);
+        if current == 0 {
+            self.cycle_global();
+            return;
+        }
+        let children = self.child_indices();
+        if self.nodes[current].collapsed {
+            self.set_collapsed(current, false);
+            self.hide_children(current, &children);
+        } else {
+            let ch = &children[current];
+            if ch.iter().any(|&c| self.nodes[c].collapsed)
+                && ch.iter().any(|&c| !children[c].is_empty())
+            {
+                self.set_collapsed(current, false);
+                self.show_headings_1(current, &children);
+            } else if ch.iter().any(|&c| self.hidden_body(c, &children)) {
+                self.set_collapsed(current, false);
+                self.show_children_1(current, None, &children);
+            } else if self.nodes[current].body < self.nodes[current].range.end {
+                self.set_collapsed(current, true);
+            }
+        }
+        self.rebuild();
+    }
+
+    /// Mirrors `magit-section-cycle-diffs` (`M-<tab>`).
+    pub fn cycle_diffs(&mut self, status_mode: bool) {
+        let children = self.child_indices();
+        let sections: Vec<usize> = if status_mode {
+            let mut list = Vec::new();
+            for key in ["staged", "unstaged"] {
+                if let Some(group) = self.nodes.iter().position(|node| node.key == key) {
+                    if self.nodes[group].collapsed {
+                        self.set_collapsed(group, false);
+                    }
+                    list.extend_from_slice(&children[group]);
+                }
+            }
+            list
+        } else {
+            children[0]
+                .iter()
+                .copied()
+                .filter(|&index| self.nodes[index].key.starts_with("file/"))
+                .collect()
+        };
+        if sections.is_empty() {
+            self.rebuild();
+            return;
+        }
+        if sections.iter().any(|&s| self.nodes[s].collapsed) {
+            for &s in &sections {
+                self.set_collapsed(s, false);
+                self.hide_children(s, &children);
+            }
+        } else {
+            let grandchildren: Vec<usize> = sections
+                .iter()
+                .flat_map(|&s| children[s].iter().copied())
+                .collect();
+            if grandchildren.iter().any(|&c| self.nodes[c].collapsed)
+                && grandchildren.iter().any(|&c| !children[c].is_empty())
+            {
+                for &s in &sections {
+                    self.set_collapsed(s, false);
+                    self.show_headings_1(s, &children);
+                }
+            } else if grandchildren.iter().any(|&c| self.hidden_body(c, &children)) {
+                for &s in &sections {
+                    self.set_collapsed(s, false);
+                    self.show_children_1(s, None, &children);
+                }
+            } else {
+                for &s in &sections {
+                    if self.nodes[s].body < self.nodes[s].range.end {
+                        self.set_collapsed(s, true);
+                    }
+                }
+            }
+        }
+        self.rebuild();
+    }
+
     pub fn anchor(&self, text: &Rope, point: ByteOffset) -> SectionAnchor {
+        let children = self.child_indices();
         let mut index = self.current(point);
         let position = text.offset_to_point(point.0);
         let start = text.offset_to_point(self.nodes[index].range.start.0);
-        let mut ancestry = Vec::new();
+        let mut steps = Vec::new();
         loop {
             let node = &self.nodes[index];
-            ancestry.push(node.key.clone());
+            let (prev_siblings, next_siblings, sibling_index) = match node.parent {
+                Some(parent) => {
+                    let siblings = &children[parent];
+                    let pos = siblings
+                        .iter()
+                        .position(|&child| child == index)
+                        .unwrap_or(0);
+                    let prev = siblings[..pos]
+                        .iter()
+                        .rev()
+                        .map(|&child| self.nodes[child].key.clone())
+                        .collect();
+                    let next = siblings[pos + 1..]
+                        .iter()
+                        .map(|&child| self.nodes[child].key.clone())
+                        .collect();
+                    (prev, next, pos)
+                }
+                None => (Vec::new(), Vec::new(), 0),
+            };
+            steps.push(AnchorStep {
+                key: node.key.clone(),
+                next_siblings,
+                prev_siblings,
+                sibling_index,
+                hunk: node.hunk,
+            });
             let Some(parent) = node.parent else {
                 break;
             };
             index = parent;
         }
         SectionAnchor {
-            ancestry,
+            steps,
             row: position.row - start.row,
             column: position.column,
         }
     }
 
     pub fn resolve(&self, text: &Rope, anchor: &SectionAnchor) -> ByteOffset {
-        let Some(node) = self
-            .nodes
-            .iter()
-            .find(|node| Some(&node.key) == anchor.ancestry.first())
-        else {
-            return anchor
-                .ancestry
-                .iter()
-                .skip(1)
-                .find_map(|key| self.nodes.iter().find(|node| &node.key == key))
-                .map_or(ByteOffset(0), |node| self.collapse_point(node.range.start));
-        };
-        let start = text.offset_to_point(node.range.start.0).row;
-        let last = text.offset_to_point(node.range.end.0.saturating_sub(1)).row;
-        let row = start.saturating_add(anchor.row).min(last);
-        let mut offset =
-            text.point_to_offset(Point::new(row, anchor.column.min(text.line_len(row))));
-        while !text.is_char_boundary(offset) {
-            offset = offset.saturating_sub(1);
+        let find_node = |key: &str| self.nodes.iter().position(|node| node.key == key);
+        if let Some(first) = anchor.steps.first()
+            && let Some(index) = find_node(&first.key)
+        {
+            let node = &self.nodes[index];
+            let start = text.offset_to_point(node.range.start.0).row;
+            let last = text.offset_to_point(node.range.end.0.saturating_sub(1)).row;
+            let row = start.saturating_add(anchor.row).min(last);
+            let mut offset =
+                text.point_to_offset(Point::new(row, anchor.column.min(text.line_len(row))));
+            while !text.is_char_boundary(offset) {
+                offset = offset.saturating_sub(1);
+            }
+            return self.collapse_point(ByteOffset(offset));
         }
-        self.collapse_point(ByteOffset(offset))
+        if let Some(first) = anchor.steps.first()
+            && first.hunk
+            && let Some(parent_step) = anchor.steps.get(1)
+            && let Some(parent_idx) = find_node(&parent_step.key)
+        {
+            let children = self.child_indices();
+            if let Some(&child) = children[parent_idx]
+                .get(first.sibling_index)
+                .or_else(|| children[parent_idx].last())
+            {
+                return self.collapse_point(self.nodes[child].range.start);
+            }
+        }
+        for (i, step) in anchor.steps.iter().enumerate() {
+            let paired = match step.key.as_str() {
+                "staged" => Some("unstaged"),
+                "unstaged" => Some("staged"),
+                "unpushed-upstream" => Some("unpulled-upstream"),
+                "unpulled-upstream" => Some("unpushed-upstream"),
+                "unpushed-pushremote" => Some("unpulled-pushremote"),
+                "unpulled-pushremote" => Some("unpushed-pushremote"),
+                _ => None,
+            };
+            if let Some(paired_idx) = paired.and_then(find_node) {
+                return self.collapse_point(self.nodes[paired_idx].range.start);
+            }
+            if let Some(next_idx) = step.next_siblings.iter().find_map(|key| find_node(key)) {
+                return self.collapse_point(self.nodes[next_idx].range.start);
+            }
+            if let Some(prev_idx) = step.prev_siblings.iter().find_map(|key| find_node(key)) {
+                return self.collapse_point(self.nodes[prev_idx].range.start);
+            }
+            if let Some(parent_idx) = anchor
+                .steps
+                .get(i + 1)
+                .and_then(|parent| find_node(&parent.key))
+            {
+                return self.collapse_point(self.nodes[parent_idx].range.start);
+            }
+        }
+        ByteOffset(0)
     }
 
     fn rebuild(&mut self) {

@@ -33,6 +33,31 @@ impl AppShell {
                 self.refresh_isearch_viewport_range(source.entity_id(), range.clone(), cx);
                 return;
             }
+            Feedback::ToggleSection => {
+                let mut buffer = source.read(cx).buffer().new_view();
+                let id = buffer.snapshot_id().buffer;
+                let anchors: Vec<_> = self
+                    .all_views()
+                    .into_iter()
+                    .filter(|view| view.read(cx).buffer().snapshot_id().buffer == id)
+                    .map(|view| {
+                        let anchor = view.read(cx).section_scroll_anchor();
+                        (view, anchor)
+                    })
+                    .collect();
+                match buffer.toggle_section() {
+                    Ok(()) => {
+                        self.refresh_buffer(id, cx);
+                        for (view, anchor) in anchors {
+                            view.update(cx, |view, cx| view.restore_section_scroll(anchor, cx));
+                        }
+                        let point = source.read(cx).buffer().point();
+                        source.update(cx, |view, cx| view.show_isearch_point(point, None, cx));
+                    }
+                    Err(error) => self.show_message(&source, error, cx),
+                }
+                return;
+            }
             _ => {}
         }
         if let Feedback::Message(text) = feedback {

@@ -10,6 +10,7 @@ pub(crate) enum Feedback {
     IsearchPreedit(SharedString),
     IsearchCommit(SharedString),
     IsearchViewport(std::ops::Range<usize>),
+    ToggleSection,
 }
 
 impl Feedback {
@@ -20,7 +21,8 @@ impl Feedback {
             | Self::PointerDown
             | Self::IsearchPreedit(_)
             | Self::IsearchCommit(_)
-            | Self::IsearchViewport(_) => None,
+            | Self::IsearchViewport(_)
+            | Self::ToggleSection => None,
         }
     }
 }

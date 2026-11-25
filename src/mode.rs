@@ -269,17 +269,47 @@ const MODE_BINDINGS: &[(ModeId, &str, crate::command::Command)] = &[
     (
         ModeId::MAGIT_STATUS,
         "space",
-        crate::command::Command::ScrollUp,
+        crate::command::Command::MagitDiffShowOrScrollUp,
     ),
     (
         ModeId::MAGIT_STATUS,
         "backspace",
-        crate::command::Command::ScrollDown,
+        crate::command::Command::MagitDiffShowOrScrollDown,
     ),
     (
         ModeId::MAGIT_STATUS,
         "shift-space",
-        crate::command::Command::ScrollDown,
+        crate::command::Command::MagitDiffShowOrScrollDown,
+    ),
+    (
+        ModeId::MAGIT_LOG,
+        "space",
+        crate::command::Command::MagitDiffShowOrScrollUp,
+    ),
+    (
+        ModeId::MAGIT_LOG,
+        "backspace",
+        crate::command::Command::MagitDiffShowOrScrollDown,
+    ),
+    (
+        ModeId::MAGIT_LOG,
+        "shift-space",
+        crate::command::Command::MagitDiffShowOrScrollDown,
+    ),
+    (
+        ModeId::MAGIT_LOG_SELECT,
+        "space",
+        crate::command::Command::MagitDiffShowOrScrollUp,
+    ),
+    (
+        ModeId::MAGIT_LOG_SELECT,
+        "backspace",
+        crate::command::Command::MagitDiffShowOrScrollDown,
+    ),
+    (
+        ModeId::MAGIT_LOG_SELECT,
+        "shift-space",
+        crate::command::Command::MagitDiffShowOrScrollDown,
     ),
     (
         ModeId::MAGIT_DIFF,

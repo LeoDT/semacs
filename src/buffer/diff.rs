@@ -126,6 +126,39 @@ impl Buffer {
         )
     }
 
+    pub(crate) fn diff_visit_worktree(&self) -> Result<Visit, String> {
+        let doc = self.document.borrow();
+        let session = doc.diff.as_ref().ok_or("Not a diff buffer")?;
+        session
+            .rendered
+            .as_ref()
+            .ok_or("Diff is not ready")?
+            .visit_worktree(
+                session.data.as_ref().ok_or("Diff is not ready")?,
+                self.point(),
+            )
+    }
+
+    pub(crate) fn diff_copy_value(&self) -> Option<String> {
+        let doc = self.document.borrow();
+        let session = doc.diff.as_ref()?;
+        let rendered = session.rendered.as_ref()?;
+        let data = session.data.as_ref()?;
+        let sections = doc.sections.as_ref()?;
+        let point = sections.collapse_point(self.point());
+        if let Some(value) = rendered.copy_value(data, point) {
+            return Some(value);
+        }
+        let mut idx = sections.current(point);
+        while idx != 0 {
+            if let Some(value) = rendered.copy_value(data, sections.nodes()[idx].range.start) {
+                return Some(value);
+            }
+            idx = sections.nodes()[idx].parent?;
+        }
+        None
+    }
+
     pub(crate) fn diff_peer(&self) -> Result<ByteOffset, String> {
         let doc = self.document.borrow();
         let rendered = doc

@@ -75,6 +75,10 @@ impl KillRing {
         self.0.borrow_mut().last_was_kill = false;
     }
 
+    pub(crate) fn copy(&self, text: &str, clipboard: Option<&dyn SystemClipboard>) {
+        self.record(Rope::from(text), false, false, false, clipboard);
+    }
+
     pub(super) fn record(
         &self,
         mut text: Rope,

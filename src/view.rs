@@ -2054,6 +2054,57 @@ impl BufferView {
         }
     }
 
+    pub(crate) fn scroll_preview(
+        &mut self,
+        forward: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let display = self.display_snapshot().id();
+        let Some(viewport) = motion::Viewport::for_view(
+            self.index.as_ref(),
+            self.content_bounds,
+            self.scroll,
+            &self.settings,
+            display,
+        ) else {
+            return;
+        };
+        let before_point = self.buffer().point();
+        match viewport.page(before_point, forward) {
+            Ok(motion) => {
+                if self.target.scroll_point(motion.point, self.selected).is_ok() {
+                    self.scroll_anchor = None;
+                    self.pending_scroll = None;
+                    let y = self.settings.line_height * motion.first_row as f32;
+                    self.scroll_by(point(px(0.), y - self.scroll.y), cx);
+                    self.reveal_caret = true;
+                    window.notify_text_selection_changed(&self.focus);
+                    cx.notify();
+                }
+            }
+            Err(RouteError::EndOfBuffer) => {
+                self.target.show_point(ByteOffset(0));
+                self.scroll_anchor = None;
+                self.pending_scroll = None;
+                self.scroll_by(point(px(0.), -self.scroll.y), cx);
+                self.reveal_caret = true;
+                window.notify_text_selection_changed(&self.focus);
+                cx.notify();
+            }
+            Err(RouteError::BeginningOfBuffer) => {
+                let end = ByteOffset(self.buffer().text().len());
+                self.target.show_point(end);
+                self.scroll_anchor = None;
+                self.pending_scroll = Some(PendingScroll::RecenterFromBottom(3));
+                self.reveal_caret = true;
+                window.notify_text_selection_changed(&self.focus);
+                cx.notify();
+            }
+            Err(_) => {}
+        }
+    }
+
     pub(crate) fn show_end(&mut self, cx: &mut Context<Self>) {
         let end = ByteOffset(self.buffer().text().len());
         self.scroll_anchor = None;
@@ -2286,7 +2337,7 @@ impl Element for TextCanvas {
                 view.buffer().text(),
             )
         };
-        let (named_styles, current_section, collapsed_headings, isearch_current, isearch_lazy) = {
+        let (named_styles, current_section, foldable_headings, isearch_current, isearch_lazy) = {
             let view = self.view.read(cx);
             let sections = view.buffer().sections();
             let current = view.current_section();
@@ -2296,8 +2347,9 @@ impl Element for TextCanvas {
                     sections
                         .nodes()
                         .iter()
-                        .filter(|node| node.collapsed)
-                        .map(|node| node.range.start)
+                        .enumerate()
+                        .filter(|&(index, node)| index > 0 && node.body < node.range.end)
+                        .map(|(_, node)| (node.range.start, node.collapsed))
                 })
                 .collect();
             let (isearch_current, isearch_lazy) = match &view.isearch_highlight {
@@ -2357,16 +2409,33 @@ impl Element for TextCanvas {
                 }
                 for row in &layout.rows {
                     let origin = layout.origin(row);
-                    if collapsed_headings.contains(&row.source.start) {
-                        window.paint_quad(fill(
-                            Bounds::new(
-                                point(layout.bounds.left(), origin.y),
-                                size(px(3.), layout.key.settings.line_height),
-                            ),
-                            ThemeSettings::global(cx)
-                                .style(StyleRole::DiffHunk)
-                                .foreground,
-                        ));
+                    if let Some(&(_, collapsed)) = foldable_headings
+                        .iter()
+                        .find(|&&(start, _)| start == row.source.start)
+                    {
+                        let line_height = layout.key.settings.line_height;
+                        if collapsed {
+                            window.paint_quad(fill(
+                                Bounds::new(
+                                    point(layout.bounds.left(), origin.y),
+                                    size(px(3.), line_height),
+                                ),
+                                ThemeSettings::global(cx)
+                                    .style(StyleRole::DiffHunk)
+                                    .foreground,
+                            ));
+                        } else {
+                            let inset = line_height * 0.2;
+                            window.paint_quad(fill(
+                                Bounds::new(
+                                    point(layout.bounds.left(), origin.y + inset),
+                                    size(px(2.), (line_height - inset * 2.).max(px(1.))),
+                                ),
+                                ThemeSettings::global(cx)
+                                    .style(StyleRole::Separator)
+                                    .foreground,
+                            ));
+                        }
                     }
                     for part in &row.parts {
                         part.paint_background(

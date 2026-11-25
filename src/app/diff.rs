@@ -112,15 +112,29 @@ impl AppShell {
                 window,
                 cx,
             ),
+            Command::MagitDiffVisitWorktree => self.visit_diff_worktree(origin, window, cx),
+            Command::MagitCopySectionValue => self.copy_section_value(origin, cx),
             Command::ScrollLeft | Command::ScrollRight => origin.update(cx, |view, cx| {
                 view.scroll_horizontal(command == Command::ScrollLeft, cx)
             }),
             _ => {
                 let mut buffer = origin.read(cx).buffer().new_view();
-                let anchors: Vec<_> = if matches!(
+                let is_visibility_change = matches!(
                     command,
-                    Command::SectionToggle | Command::SectionCycleGlobal
-                ) {
+                    Command::SectionToggle
+                        | Command::SectionCycle
+                        | Command::SectionCycleDiffs
+                        | Command::SectionCycleGlobal
+                        | Command::SectionShowLevel1
+                        | Command::SectionShowLevel2
+                        | Command::SectionShowLevel3
+                        | Command::SectionShowLevel4
+                        | Command::SectionShowLevel1All
+                        | Command::SectionShowLevel2All
+                        | Command::SectionShowLevel3All
+                        | Command::SectionShowLevel4All
+                );
+                let anchors: Vec<_> = if is_visibility_change {
                     let id = buffer.snapshot_id().buffer;
                     self.all_views()
                         .into_iter()
@@ -133,28 +147,69 @@ impl AppShell {
                 } else {
                     Vec::new()
                 };
-                let result = if command == Command::SectionToggle {
-                    buffer.toggle_section().map(|_| None)
-                } else if command == Command::SectionCycleGlobal {
-                    buffer.cycle_sections_global().map(|_| None)
-                } else if command == Command::MagitDiffJump {
-                    buffer.diff_peer().map(Some)
-                } else {
-                    buffer
+                let status_mode = buffer.mode() == crate::mode::ModeId::MAGIT_STATUS;
+                let result = match command {
+                    Command::SectionToggle => buffer.toggle_section().map(|_| None),
+                    Command::SectionCycle => buffer.cycle_section().map(|_| None),
+                    Command::SectionCycleDiffs => buffer.cycle_sections_diffs(status_mode).map(|_| None),
+                    Command::SectionCycleGlobal => buffer.cycle_sections_global().map(|_| None),
+                    Command::SectionShowLevel1
+                    | Command::SectionShowLevel2
+                    | Command::SectionShowLevel3
+                    | Command::SectionShowLevel4
+                    | Command::SectionShowLevel1All
+                    | Command::SectionShowLevel2All
+                    | Command::SectionShowLevel3All
+                    | Command::SectionShowLevel4All => {
+                        let (level, all) = match command {
+                            Command::SectionShowLevel1 => (1, false),
+                            Command::SectionShowLevel2 => (2, false),
+                            Command::SectionShowLevel3 => (3, false),
+                            Command::SectionShowLevel4 => (4, false),
+                            Command::SectionShowLevel1All => (1, true),
+                            Command::SectionShowLevel2All => (2, true),
+                            Command::SectionShowLevel3All => (3, true),
+                            _ => (4, true),
+                        };
+                        buffer.show_section_level(level, all).map(Some)
+                    }
+                    Command::MagitDiffJump => buffer.diff_peer().map(Some),
+                    _ => buffer
                         .sections()
                         .ok_or("No sections in this buffer".to_owned())
                         .and_then(|sections| {
                             let point = buffer.point();
-                            let target = match command {
-                                Command::SectionForward => sections.navigate(point, true),
-                                Command::SectionBackward => sections.navigate(point, false),
-                                Command::SectionUp => sections.nodes()[sections.current(point)]
-                                    .parent
-                                    .map(|parent| sections.nodes()[parent].range.start),
-                                _ => None,
+                            let (target, err) = match command {
+                                Command::SectionForward => {
+                                    (sections.navigate(point, true), "No next section")
+                                }
+                                Command::SectionBackward => {
+                                    (sections.navigate(point, false), "No previous section")
+                                }
+                                Command::SectionForwardSibling => (
+                                    sections.navigate_sibling(point, true),
+                                    "No next section",
+                                ),
+                                Command::SectionBackwardSibling => (
+                                    sections.navigate_sibling(point, false),
+                                    "No previous section",
+                                ),
+                                Command::SectionUp => {
+                                    let current = sections.current(point);
+                                    let parent = sections.nodes()[current]
+                                        .parent
+                                        .filter(|&p| {
+                                            !(p == 0
+                                                && sections.nodes()[current].range.start
+                                                    == crate::text::ByteOffset(0))
+                                        })
+                                        .map(|parent| sections.nodes()[parent].range.start);
+                                    (parent, "No parent section")
+                                }
+                                _ => (None, "No further section"),
                             };
-                            target.map(Some).ok_or("No further section".into())
-                        })
+                            target.map(Some).ok_or_else(|| err.into())
+                        }),
                 };
                 match result {
                     Ok(point) => {
@@ -173,7 +228,11 @@ impl AppShell {
                         // hunk heading can follow `magit-hunk-set-window-start`.
                         let hunk = if matches!(
                             command,
-                            Command::SectionForward | Command::SectionBackward | Command::SectionUp
+                            Command::SectionForward
+                                | Command::SectionBackward
+                                | Command::SectionForwardSibling
+                                | Command::SectionBackwardSibling
+                                | Command::SectionUp
                         ) {
                             origin
                                 .read(cx)
@@ -284,7 +343,7 @@ impl AppShell {
                 }
             }
         }
-        if origin.read(cx).buffer().status_repository().is_some() {
+        if let Some(repository) = origin.read(cx).buffer().status_repository() {
             match origin.read(cx).buffer().status_group_at_point() {
                 Some(crate::status::Group::Unstaged) => {
                     self.open_diff(DiffKind::Unstaged, origin, window, cx);
@@ -295,6 +354,42 @@ impl AppShell {
                     return;
                 }
                 _ => {}
+            }
+            match origin.read(cx).buffer().status_preview_target() {
+                Some(crate::status::StatusPreviewTarget::Range(spec)) => {
+                    self.open_diff_range(
+                        repository,
+                        ReadEnvironment::Projection,
+                        spec,
+                        origin,
+                        window,
+                        cx,
+                    );
+                    return;
+                }
+                Some(crate::status::StatusPreviewTarget::Commit(oid)) => {
+                    self.open_diff_range(
+                        repository,
+                        ReadEnvironment::Projection,
+                        format!("{oid}^..{oid}"),
+                        origin,
+                        window,
+                        cx,
+                    );
+                    return;
+                }
+                Some(crate::status::StatusPreviewTarget::Rev(rev)) => {
+                    self.open_diff_range(
+                        repository,
+                        ReadEnvironment::Projection,
+                        rev,
+                        origin,
+                        window,
+                        cx,
+                    );
+                    return;
+                }
+                None => {}
             }
         }
         if origin.read(cx).buffer().comparison().is_some() {
@@ -452,7 +547,7 @@ impl AppShell {
         }
     }
 
-    fn open_diff_range(
+    pub(super) fn open_diff_range(
         &mut self,
         repository: Repository,
         environment: ReadEnvironment,
@@ -809,6 +904,50 @@ impl AppShell {
             }
         };
         self.visit_git_location(visit, other_window, origin, window, cx);
+    }
+
+    fn visit_diff_worktree(
+        &mut self,
+        origin: &Entity<BufferView>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let buffer = origin.read(cx).buffer();
+        if buffer.status_repository().is_some() {
+            self.visit_status_worktree(origin, window, cx);
+            return;
+        }
+        let visit = if buffer.history_query().is_some() {
+            buffer.history_visit_worktree()
+        } else {
+            buffer.diff_visit_worktree()
+        };
+        match visit {
+            Ok(visit) => self.visit_git_location(visit, false, origin, window, cx),
+            Err(error) => self.show_message(origin, error, cx),
+        }
+    }
+
+    fn copy_section_value(&mut self, origin: &Entity<BufferView>, cx: &mut Context<Self>) {
+        let value = {
+            let buffer = origin.read(cx).buffer();
+            buffer
+                .status_copy_value()
+                .or_else(|| buffer.diff_copy_value())
+                .or_else(|| buffer.history_copy_value())
+        };
+        let Some(value) = value else {
+            self.show_message(
+                origin,
+                "There is no thing at point that we know how to copy",
+                cx,
+            );
+            return;
+        };
+        let ring = cx.default_global::<crate::editing::KillRing>().clone();
+        let clipboard = crate::platform::GpuiClipboard::new(cx);
+        ring.copy(&value, Some(&clipboard));
+        self.show_message(origin, value, cx);
     }
 
     pub(super) fn visit_git_location(

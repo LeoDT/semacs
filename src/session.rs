@@ -43,6 +43,9 @@ pub enum ReadKind {
     CommitMenu,
     DiffMenu,
     DiffRefreshMenu,
+    StatusJumpMenu {
+        prefix: Option<char>,
+    },
     MagitDiffRange {
         repository: crate::git::Repository,
         environment: crate::git::ReadEnvironment,
@@ -289,6 +292,7 @@ impl ReadKind {
                 | Self::CommitMenu
                 | Self::DiffMenu
                 | Self::DiffRefreshMenu
+                | Self::StatusJumpMenu { .. }
                 | Self::ProjectSwitchMenu { .. }
         ) || match self {
             #[cfg(unix)]
@@ -307,6 +311,8 @@ impl ReadKind {
             Self::PushMenu { .. } => "Choose p, u, e; C-g cancels",
             Self::DiffMenu => "Choose d, r, u, s, w, c; C-g cancels",
             Self::DiffRefreshMenu => "Choose r, f, g; C-g cancels",
+            Self::StatusJumpMenu { prefix: None } => "Choose n, u, s, m, z, p, f; C-g cancels",
+            Self::StatusJumpMenu { prefix: Some(_) } => "Choose u, p; C-g cancels",
             Self::ProjectSwitchMenu { .. } => {
                 "Unrecognized input; choose f, g, b, v, t; C-g cancels"
             }
@@ -352,6 +358,9 @@ impl ReadKind {
             ),
             ReadKind::DiffMenu => "Diff: [d] dwim  [r] range  [u] unstaged  [s] staged  [w] worktree  [c] show commit; C-g cancels: ".into(),
             ReadKind::DiffRefreshMenu => "Diff refresh: [r] switch range type  [f] flip revisions  [g] refresh; C-g cancels: ".into(),
+            ReadKind::StatusJumpMenu { prefix: None } => "Jump to [n] untracked  [u] unstaged  [s] staged  [m] unmerged  [z] stashes  [p] unpushed/recent  [f] unpulled; C-g cancels: ".into(),
+            ReadKind::StatusJumpMenu { prefix: Some('p') } => "Jump to unpushed: [u] upstream/recent  [p] pushremote; C-g cancels: ".into(),
+            ReadKind::StatusJumpMenu { prefix: Some(_) } => "Jump to unpulled: [u] upstream  [p] pushremote; C-g cancels: ".into(),
             ReadKind::MagitDiffRange { default, .. } => match default {
                 Some(name) => format!("Diff for range (default {name}): "),
                 None => "Diff for range: ".to_owned(),
@@ -470,6 +479,8 @@ impl ReadSession {
                 ReadKind::PushMenu { .. } => &["p", "u", "e"],
                 ReadKind::DiffMenu => &["d", "r", "u", "s", "w", "c"],
                 ReadKind::DiffRefreshMenu => &["r", "f", "g"],
+                ReadKind::StatusJumpMenu { prefix: None } => &["n", "u", "s", "m", "z", "p", "f"],
+                ReadKind::StatusJumpMenu { prefix: Some(_) } => &["u", "p"],
                 ReadKind::ProjectSwitchMenu { .. } => &["f", "g", "b", "v", "t"],
                 #[cfg(unix)]
                 ReadKind::CommitTargetMerges { .. } => &["c", "s", "a"],
@@ -488,6 +499,7 @@ impl ReadSession {
                 ReadKind::CommitMenu
                 | ReadKind::DiffMenu
                 | ReadKind::DiffRefreshMenu
+                | ReadKind::StatusJumpMenu { .. }
                 | ReadKind::ProjectSwitchMenu { .. } => &[],
                 #[cfg(unix)]
                 ReadKind::CommitTargetMerges { .. } | ReadKind::PushMenu { .. } => &[],

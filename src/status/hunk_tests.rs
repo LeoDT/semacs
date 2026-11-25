@@ -498,7 +498,7 @@ fn status_files_start_collapsed_restore_hunks_and_fall_back_to_the_surviving_fil
     let rope = Rope::from(next.text.as_str());
     assert_eq!(
         next.sections.resolve(&rope, &anchor),
-        next.sections.nodes()[file].range.start
+        next.sections.nodes()[file + 1].range.start
     );
     assert!(next.location(ByteOffset(next.text.len())).is_none());
 }
