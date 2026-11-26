@@ -1,10 +1,9 @@
 use crate::buffer::BufferId;
 use crate::status::{
     Entry, Group, Head, Repository,
-    index::{Operation, Outcome, Request, bounded},
+    index::{Operation, Outcome, Request, WriteTarget, bounded},
 };
 use std::collections::VecDeque;
-use std::path::PathBuf;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum GitWritePhase {
@@ -18,11 +17,11 @@ pub enum GitWritePhase {
 pub struct GitWriteRecord {
     pub id: u64,
     pub repository: Repository,
-    pub path: PathBuf,
+    pub target: WriteTarget,
     pub operation: Operation,
     pub group: Group,
     pub expected_head: Head,
-    pub expected_entry: Entry,
+    pub expected_entries: Vec<Entry>,
     pub buffer: BufferId,
     pub request: u64,
     pub phase: GitWritePhase,
@@ -47,11 +46,11 @@ impl WriteRecords {
         self.entries.push_back(GitWriteRecord {
             id,
             repository: target.repository().clone(),
-            path: target.path().to_owned(),
+            target: target.target(),
             operation: target.operation(),
             group: target.group(),
             expected_head: target.expected_head().clone(),
-            expected_entry: target.expected_entry().clone(),
+            expected_entries: target.expected_entries(),
             buffer,
             request,
             phase: GitWritePhase::Accepted,
@@ -121,11 +120,18 @@ impl GitWriteRecord {
         } else {
             ""
         };
+        let target_label = match &self.target {
+            WriteTarget::File(path) => format!("{path:?}"),
+            WriteTarget::Group { group, count } => format!(
+                "{} ({count} {})",
+                group.name(),
+                if *count == 1 { "item" } else { "items" }
+            ),
+        };
         bounded(format!(
-            "Git #{} {:?}: {outcome}{verification}\nTarget {:?}{}{}{truncated}",
+            "Git #{} {:?}: {outcome}{verification}\nTarget {target_label}{}{}{truncated}",
             self.id,
             self.operation,
-            self.path,
             if diagnostic.is_empty() { "" } else { "\n" },
             diagnostic
         ))

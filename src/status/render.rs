@@ -9,11 +9,17 @@ use crate::text::{ByteOffset, Rope};
 use crate::theme::StyleRole;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+pub enum StatusTarget {
+    Group,
+    File { entry: usize },
+    Hunk { entry: usize, hunk: usize },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct StatusLocation {
     pub range: Range<ByteOffset>,
     pub group: Group,
-    pub entry: usize,
-    pub hunk: Option<usize>,
+    pub target: StatusTarget,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -199,7 +205,9 @@ impl Status {
         point: ByteOffset,
     ) -> Option<StatusPreviewTarget> {
         let index = visits.partition_point(|span| span.range.end <= point);
-        let span = visits.get(index).filter(|span| span.range.contains(&point))?;
+        let span = visits
+            .get(index)
+            .filter(|span| span.range.contains(&point))?;
         match &span.kind {
             StatusVisitKind::Commit(oid) => Some(StatusPreviewTarget::Commit(oid.clone())),
             StatusVisitKind::Rev(rev) => Some(StatusPreviewTarget::Rev(rev.clone())),
@@ -836,6 +844,11 @@ pub(super) fn render(status: &Status) -> Result<RenderedStatus, String> {
             collapsed: false,
             hunk: false,
         });
+        locations.push(StatusLocation {
+            range: heading.clone(),
+            group,
+            target: StatusTarget::Group,
+        });
         for (index, entry) in status.group(group) {
             let start = ByteOffset(text.len());
             match group {
@@ -890,8 +903,7 @@ pub(super) fn render(status: &Status) -> Result<RenderedStatus, String> {
             locations.push(StatusLocation {
                 range: range.clone(),
                 group,
-                entry: index,
-                hunk: None,
+                target: StatusTarget::File { entry: index },
             });
             visits.push(StatusVisitSpan {
                 range: range.clone(),
@@ -973,8 +985,10 @@ pub(super) fn render(status: &Status) -> Result<RenderedStatus, String> {
                     locations.push(StatusLocation {
                         range,
                         group,
-                        entry: index,
-                        hunk: Some(hunk_index),
+                        target: StatusTarget::Hunk {
+                            entry: index,
+                            hunk: hunk_index,
+                        },
                     });
                 }
             }
@@ -990,7 +1004,10 @@ pub(super) fn render(status: &Status) -> Result<RenderedStatus, String> {
         has_previous_block = true;
         let start = ByteOffset(text.len());
         initial_point.get_or_insert(start);
-        append(&mut text, &format!("Stashes ({})\n", status.meta.stashes.len()))?;
+        append(
+            &mut text,
+            &format!("Stashes ({})\n", status.meta.stashes.len()),
+        )?;
         let heading = start..ByteOffset(text.len());
         styles.push((
             start..ByteOffset(start.0 + "Stashes".len()),

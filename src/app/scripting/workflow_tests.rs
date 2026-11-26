@@ -241,11 +241,22 @@ fn custom_requests_cannot_bypass_heading_region_stale_or_diff_targets(cx: &mut T
                 wait(&mut visual, &shell);
             }
             4 => {
-                std::fs::create_dir(repo.0.join("dir")).unwrap();
-                repo.write("dir/file", "untracked\n");
+                std::fs::create_dir_all(repo.0.join("nested/.git")).unwrap();
+                repo.write("nested/file", "nested repo\n");
                 command(&mut visual, &shell, Command::MagitRefresh);
                 wait(&mut visual, &shell);
-                select(&mut visual, &shell, Group::Untracked);
+                visual.update(|window, cx| {
+                    let view = shell.read(cx).active_view().clone();
+                    let sections = view.read(cx).buffer().sections().unwrap();
+                    let point = sections
+                        .nodes()
+                        .iter()
+                        .find(|node| node.key == "untracked/file/6e6573746564")
+                        .unwrap()
+                        .range
+                        .start;
+                    view.update(cx, |view, cx| view.show_location(point, window, cx));
+                });
             }
             _ => unreachable!(),
         }
@@ -559,4 +570,80 @@ fn custom_read_requests_open_fixed_comparisons_and_refresh_only_status(cx: &mut 
             ModeId::MAGIT_STATUS
         )
     });
+}
+
+fn select_group_heading(visual: &mut VisualTestContext, shell: &Entity<AppShell>, key: &str) {
+    visual.update(|window, cx| {
+        let view = shell.read(cx).active_view().clone();
+        let sections = view.read(cx).buffer().sections().unwrap();
+        let point = sections
+            .nodes()
+            .iter()
+            .find(|node| node.key == key)
+            .unwrap()
+            .range
+            .start;
+        view.update(cx, |view, cx| view.show_location(point, window, cx));
+    });
+}
+
+#[gpui::test]
+fn group_headings_stage_and_unstage_entire_sections_both_expanded_and_collapsed(
+    cx: &mut TestAppContext,
+) {
+    let repo = Fixture::new();
+    repo.write("a", "disk base\n");
+    repo.write("b", "b base\n");
+    repo.commit();
+    repo.write("a", "a changed\n");
+    repo.write("b", "b changed\n");
+    repo.write("u1", "untracked 1\n");
+    std::fs::create_dir(repo.0.join("udir")).unwrap();
+    repo.write("udir/u2", "untracked 2\n");
+
+    let (mut visual, shell) = open(&repo, cx);
+    command(&mut visual, &shell, Command::MagitStatus);
+    wait(&mut visual, &shell);
+
+    // Press `s` on `Head:` heading: rejected without write.
+    select_group_heading(&mut visual, &shell, "header/head");
+    visual.simulate_keystrokes("s");
+    settled(&mut visual, &shell);
+    visual.read(|cx| assert_eq!(shell.read(cx).git_write_records().count(), 0));
+
+    // Press `s` on collapsed `Unstaged changes` heading: stages a & b, leaves untracked untouched, moves cursor to `staged`.
+    select_group_heading(&mut visual, &shell, "unstaged");
+    visual.simulate_keystrokes("tab");
+    visual.simulate_keystrokes("s");
+    settled(&mut visual, &shell);
+    assert_eq!(repo.git(&["show", ":a"]), b"a changed\n");
+    assert_eq!(repo.git(&["show", ":b"]), b"b changed\n");
+    assert!(repo.git(&["ls-files", "--", "u1"]).is_empty());
+    visual.read(|cx| {
+        let buffer = shell.read(cx).active_view().read(cx).buffer();
+        let sections = buffer.sections().unwrap();
+        let current = &sections.nodes()[sections.current(buffer.point())];
+        assert_eq!(current.key, "staged");
+    });
+
+    // Press `s` on `Staged changes` heading: rejected.
+    visual.simulate_keystrokes("s");
+    settled(&mut visual, &shell);
+    visual.read(|cx| assert_eq!(shell.read(cx).git_write_records().count(), 1));
+
+    // Press `s` on expanded `Untracked files` heading: stages u1 & udir/u2.
+    select_group_heading(&mut visual, &shell, "untracked");
+    visual.simulate_keystrokes("s");
+    settled(&mut visual, &shell);
+    assert_eq!(repo.git(&["show", ":u1"]), b"untracked 1\n");
+    assert_eq!(repo.git(&["show", ":udir/u2"]), b"untracked 2\n");
+
+    // Press `u` on `Staged changes` heading: unstages all staged entries.
+    select_group_heading(&mut visual, &shell, "staged");
+    visual.simulate_keystrokes("u");
+    settled(&mut visual, &shell);
+    assert_eq!(repo.git(&["show", ":a"]), b"disk base\n");
+    assert_eq!(repo.git(&["show", ":b"]), b"b base\n");
+    assert!(repo.git(&["ls-files", "--", "u1"]).is_empty());
+    assert!(repo.git(&["ls-files", "--", "udir/u2"]).is_empty());
 }

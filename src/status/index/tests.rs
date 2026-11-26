@@ -299,7 +299,10 @@ fn malformed_and_magic_paths_are_rejected_before_any_write() {
         ":(top)unrelated",
     ] {
         let mut request = request(&repo, "new", Group::Untracked, Operation::Stage);
-        request.entry.path = path.into();
+        match &mut request.target {
+            RequestTarget::File(entry) => entry.path = path.into(),
+            _ => unreachable!(),
+        }
         let before = std::fs::read(repo.0.join(".git/index")).unwrap();
         refused(request.execute(), &repo, &before);
     }
@@ -389,15 +392,21 @@ fn intent_to_add_replacing_an_identical_empty_index_blob_is_still_rejected() {
 }
 
 #[test]
-fn directories_renames_conflicts_and_wrong_groups_cannot_be_selected() {
+fn nested_git_dirs_renames_conflicts_and_wrong_groups_cannot_be_selected_as_single_entries() {
     let repo = fixture();
-    std::fs::create_dir(repo.0.join("dir")).unwrap();
-    repo.write("dir/file", "directory\n");
+    let nested = Fixture::new();
+    nested.write("inside", "nested\n");
+    nested.commit();
+    std::fs::create_dir(repo.0.join("nested_repo")).unwrap();
+    let nested_git = repo.0.join("nested_repo/.git");
+    std::fs::create_dir(&nested_git).unwrap();
+    repo.write("nested_repo/inside", "nested\n");
+
     repo.git(&["mv", "a", "renamed"]);
     repo.write("a", "rename source reappeared\n");
     let status = load(&repo);
     for (index, entry) in status.entries().iter().enumerate() {
-        if ["dir", "a", "renamed"]
+        if ["nested_repo", "a", "renamed"]
             .iter()
             .any(|name| entry.path == Path::new(name))
         {
@@ -669,4 +678,201 @@ fn environment_overrides_are_refused_not_silently_sanitized_for_writes() {
         );
     }
     assert_eq!(std::fs::read(decoy.0.join(".git/index")).unwrap(), before);
+}
+
+#[test]
+fn group_stage_and_unstage_operate_on_exact_group_and_support_untracked_dirs_and_renames() {
+    let repo = fixture();
+    repo.write("b", "b base\n");
+    repo.write("c", "c base\n");
+    repo.commit();
+
+    repo.write("a", "a modified\n");
+    std::fs::remove_file(repo.0.join("b")).unwrap();
+    repo.write("new_file", "new untracked\n");
+    std::fs::create_dir(repo.0.join("dir")).unwrap();
+    repo.write("dir/inside", "dir file\n");
+    repo.write("dir/ignored.log", "ignored\n");
+    repo.write(".gitignore", "*.log\n");
+    repo.git(&["add", "--", ".gitignore"]);
+    repo.git(&["commit", "-qm", "gitignore"]);
+
+    // 1. Stage Untracked group: stages new_file and dir/inside (respecting .gitignore), leaves Unstaged untouched.
+    let status = load(&repo);
+    let req = status
+        .index_request_group(Group::Untracked, Operation::Stage)
+        .unwrap();
+    success(req.execute());
+    assert_eq!(staged(&repo, "new_file"), b"new untracked\n");
+    assert_eq!(staged(&repo, "dir/inside"), b"dir file\n");
+    assert!(repo.git(&["ls-files", "--", "dir/ignored.log"]).is_empty());
+    assert_eq!(staged(&repo, "a"), b"head\n");
+    assert_eq!(staged(&repo, "b"), b"b base\n");
+
+    // 2. Stage Unstaged group: stages modified a and deleted b.
+    let status = load(&repo);
+    let req = status
+        .index_request_group(Group::Unstaged, Operation::Stage)
+        .unwrap();
+    success(req.execute());
+    assert_eq!(staged(&repo, "a"), b"a modified\n");
+    assert!(repo.git(&["ls-files", "--", "b"]).is_empty());
+
+    // 3. Stage a staged rename too, then unstage entire Staged group at once.
+    repo.git(&["mv", "c", "c_renamed"]);
+    let status = load(&repo);
+    assert!(
+        status
+            .index_request_group(Group::Staged, Operation::Stage)
+            .is_err()
+    );
+    let req = status
+        .index_request_group(Group::Staged, Operation::Unstage)
+        .unwrap();
+    success(req.execute());
+    assert_eq!(staged(&repo, "a"), b"head\n");
+    assert_eq!(staged(&repo, "b"), b"b base\n");
+    assert_eq!(staged(&repo, "c"), b"c base\n");
+    assert!(repo.git(&["ls-files", "--", "c_renamed"]).is_empty());
+    assert!(repo.git(&["ls-files", "--", "new_file"]).is_empty());
+    assert!(repo.git(&["ls-files", "--", "dir/inside"]).is_empty());
+    // Worktree files remain untouched.
+    assert_eq!(std::fs::read(repo.0.join("a")).unwrap(), b"a modified\n");
+    assert!(!repo.0.join("b").exists());
+    assert_eq!(
+        std::fs::read(repo.0.join("c_renamed")).unwrap(),
+        b"c base\n"
+    );
+}
+
+#[test]
+fn group_unstage_works_on_unborn_repository() {
+    let repo = Fixture::new();
+    repo.write("one", "1\n");
+    repo.write("two", "2\n");
+    repo.write("keep_untracked", "3\n");
+    repo.git(&["add", "--", "one", "two"]);
+
+    let status = load(&repo);
+    assert!(
+        status
+            .index_request_group(Group::Staged, Operation::Unstage)
+            .is_ok()
+    );
+    assert!(
+        status
+            .index_request_group(Group::Untracked, Operation::Unstage)
+            .is_err()
+    );
+    success(
+        status
+            .index_request_group(Group::Staged, Operation::Unstage)
+            .unwrap()
+            .execute(),
+    );
+    assert!(repo.git(&["ls-files", "--stage"]).is_empty());
+    assert_eq!(std::fs::read(repo.0.join("one")).unwrap(), b"1\n");
+    assert_eq!(std::fs::read(repo.0.join("two")).unwrap(), b"2\n");
+}
+
+#[test]
+fn single_untracked_directory_stage_succeeds_and_screens_filters_and_nested_repos() {
+    // Ordinary untracked directory stages all non-ignored files inside.
+    let repo = fixture();
+    std::fs::create_dir(repo.0.join("dir")).unwrap();
+    repo.write("dir/a", "dir a\n");
+    repo.write("dir/b", "dir b\n");
+    repo.write("other", "untouched\n");
+    success(request(&repo, "dir", Group::Untracked, Operation::Stage).execute());
+    assert_eq!(staged(&repo, "dir/a"), b"dir a\n");
+    assert_eq!(staged(&repo, "dir/b"), b"dir b\n");
+    assert!(repo.git(&["ls-files", "--", "other"]).is_empty());
+
+    // External filter inside untracked directory is refused without running filter.
+    let repo = fixture();
+    std::fs::create_dir(repo.0.join("dir")).unwrap();
+    repo.write("dir/evil", "filtered\n");
+    repo.write(".gitattributes", "dir/evil filter=evil\n");
+    repo.git(&["config", "filter.evil.clean", "touch SHOULD_NOT_EXIST; cat"]);
+    let req = request(&repo, "dir", Group::Untracked, Operation::Stage);
+    let before = std::fs::read(repo.0.join(".git/index")).unwrap();
+    let error = refused(req.execute(), &repo, &before);
+    assert!(error.contains("external clean/process filter"), "{error}");
+    assert!(!repo.0.join("SHOULD_NOT_EXIST").exists());
+
+    // Nested git repository inside an untracked directory (sub/nested/.git) is refused at prepare/capture.
+    let repo = fixture();
+    std::fs::create_dir_all(repo.0.join("sub/nested")).unwrap();
+    let init = std::process::Command::new("git")
+        .args(["init", "-q"])
+        .current_dir(repo.0.join("sub/nested"))
+        .status()
+        .unwrap();
+    assert!(init.success());
+    repo.write("sub/nested/file", "x\n");
+    let status = load(&repo);
+    assert!(
+        status
+            .index_request_group(Group::Untracked, Operation::Stage)
+            .is_err()
+            || refused(
+                status
+                    .index_request_group(Group::Untracked, Operation::Stage)
+                    .unwrap()
+                    .execute(),
+                &repo,
+                &std::fs::read(repo.0.join(".git/index")).unwrap()
+            )
+            .contains("Nested Git")
+    );
+}
+
+#[test]
+fn group_requests_reject_submodules_and_unmerged_conflicts() {
+    let source = fixture();
+    let repo = fixture();
+    repo.git(&[
+        "-c",
+        "protocol.file.allow=always",
+        "submodule",
+        "add",
+        "-q",
+        "--",
+        source.0.to_str().unwrap(),
+        "module",
+    ]);
+    let status = load(&repo);
+    assert!(
+        status
+            .index_request_group(Group::Staged, Operation::Unstage)
+            .is_err()
+    );
+
+    let repo = fixture();
+    repo.git(&["checkout", "-qb", "other"]);
+    repo.write("a", "other\n");
+    repo.commit();
+    repo.git(&["checkout", "-qb", "main-fixture", "HEAD~1"]);
+    repo.write("a", "main\n");
+    repo.commit();
+    assert!(
+        !repo
+            .command()
+            .args(["merge", "other"])
+            .output()
+            .unwrap()
+            .status
+            .success()
+    );
+    let status = load(&repo);
+    assert!(
+        status
+            .index_request_group(Group::Unmerged, Operation::Stage)
+            .is_err()
+    );
+    assert!(
+        status
+            .index_request_group(Group::Unmerged, Operation::Unstage)
+            .is_err()
+    );
 }

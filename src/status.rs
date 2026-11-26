@@ -16,7 +16,7 @@ mod render;
 #[cfg(test)]
 mod tests;
 
-pub use render::{RenderedStatus, StatusLocation};
+pub use render::{RenderedStatus, StatusLocation, StatusTarget};
 pub(crate) use render::{StatusAction, StatusPreviewTarget, StatusVisitSpan};
 
 pub const MAX_RECORDS: usize = 4096;

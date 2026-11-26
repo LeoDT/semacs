@@ -108,10 +108,18 @@ fn semantic_styles_separate_labels_counts_branches_and_hashes() {
     assert!(spans.contains(&("main", StyleRole::MagitBranch)));
     assert!(spans.contains(&("Unstaged changes", StyleRole::SectionHeading)));
     assert!(spans.contains(&("modified   文件.txt\n", StyleRole::DiffFile)));
-    assert!(spans.iter().all(|(text, role)| !(*role == StyleRole::SectionHeading && text.contains("(1)"))));
+    assert!(
+        spans
+            .iter()
+            .all(|(text, role)| !(*role == StyleRole::SectionHeading && text.contains("(1)")))
+    );
     let detached = Status::parse(
         repository(),
-        format!("# branch.head (detached)\0# branch.oid {}\0", "a".repeat(40)).as_bytes(),
+        format!(
+            "# branch.head (detached)\0# branch.oid {}\0",
+            "a".repeat(40)
+        )
+        .as_bytes(),
     )
     .unwrap()
     .render()
@@ -482,7 +490,13 @@ fn section_leaves_are_noop_and_restore_uses_group_and_raw_path() {
         .unwrap();
     let point = rendered.sections.nodes()[leaf].range.start;
     let location = rendered.location(ByteOffset(point.0 + 2)).unwrap();
-    assert_eq!((location.group, location.entry), (Group::Unstaged, 0));
+    assert_eq!(
+        (&location.group, &location.target),
+        (
+            &Group::Unstaged,
+            &crate::status::StatusTarget::File { entry: 0 }
+        )
+    );
     let before = rendered.sections.visible_lines();
     rendered.sections.toggle(leaf).unwrap();
     assert_eq!(rendered.sections.visible_lines(), before);
@@ -496,10 +510,13 @@ fn section_leaves_are_noop_and_restore_uses_group_and_raw_path() {
     rendered.sections.toggle(parent).unwrap();
     assert_eq!(rendered.sections.collapse_point(point), heading);
     assert!(rendered.location(point).is_none());
-    let mut next = Status::parse(repository(), &protocol(ordinary("MM", "unrelated").as_bytes()))
-        .unwrap()
-        .render()
-        .unwrap();
+    let mut next = Status::parse(
+        repository(),
+        &protocol(ordinary("MM", "unrelated").as_bytes()),
+    )
+    .unwrap()
+    .render()
+    .unwrap();
     next.sections.restore(&rendered.sections);
     let parent = next
         .sections
@@ -517,10 +534,14 @@ fn section_leaves_are_noop_and_restore_uses_group_and_raw_path() {
         .sections
         .nodes()
         .iter()
-        .filter(|node| node.parent.is_none() || node.parent == Some(0))
+        .filter(|node| node.parent.is_none())
     {
         assert!(next.location(node.range.start).is_none());
     }
+    assert_eq!(
+        next.location(parent.range.start).unwrap().target,
+        crate::status::StatusTarget::Group
+    );
     assert!(next.location(ByteOffset(next.text.len())).is_none());
 }
 
@@ -704,7 +725,11 @@ fn real_git_loads_upstream_push_tags_stashes_commit_sections_and_merging() {
         "--set-upstream-to",
         &format!("origin/{current_branch}"),
     ]);
-    local.git(&["config", &format!("branch.{current_branch}.pushRemote"), "fork"]);
+    local.git(&[
+        "config",
+        &format!("branch.{current_branch}.pushRemote"),
+        "fork",
+    ]);
     local.git(&["config", &format!("branch.{current_branch}.rebase"), "true"]);
 
     // Advance remote branch for Unpulled, create a local commit for Unpushed, tag v2.0, and stash work.
@@ -762,5 +787,9 @@ fn real_git_loads_upstream_push_tags_stashes_commit_sections_and_merging() {
     assert!(!merge_out.status.success());
     let merge_rendered = fixture_status(&merge_repo).render().unwrap();
     assert!(merge_rendered.text.contains("Merging branch-a (1)"));
-    assert!(merge_rendered.text.contains("Unmerged paths (1)\nunmerged   conflict.txt"));
+    assert!(
+        merge_rendered
+            .text
+            .contains("Unmerged paths (1)\nunmerged   conflict.txt")
+    );
 }

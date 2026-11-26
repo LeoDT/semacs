@@ -33,7 +33,7 @@ fn request(
         .locations
         .iter()
         .find(|location| {
-            location.entry == entry && location.group == group && location.hunk == Some(hunk)
+            location.group == group && location.target == StatusTarget::Hunk { entry, hunk }
         })
         .unwrap();
     status.index_request_at(location, operation).unwrap()
@@ -205,7 +205,7 @@ fn text_hunk_does_not_stage_chmod_and_git_quoted_raw_paths_are_kept() {
     let location = rendered
         .locations
         .iter()
-        .find(|location| location.hunk == Some(0))
+        .find(|location| matches!(location.target, StatusTarget::Hunk { hunk: 0, .. }))
         .unwrap();
     let status = apply(status.index_request_at(location, Operation::Stage).unwrap());
     let index = repo.git(&["ls-files", "--stage", "-z"]);
@@ -223,7 +223,10 @@ fn text_hunk_does_not_stage_chmod_and_git_quoted_raw_paths_are_kept() {
         .unwrap()
         .locations
         .into_iter()
-        .find(|location| location.group == Group::Staged && location.hunk == Some(0))
+        .find(|location| {
+            location.group == Group::Staged
+                && matches!(location.target, StatusTarget::Hunk { hunk: 0, .. })
+        })
         .unwrap();
     apply(
         status
@@ -259,7 +262,7 @@ fn binary_and_non_utf8_contents_are_explicit_summaries_without_losing_file_opera
         rendered
             .locations
             .iter()
-            .all(|location| location.hunk.is_none())
+            .all(|location| !matches!(location.target, StatusTarget::Hunk { .. }))
     );
     for entry in 0..status.entries().len() {
         assert!(
@@ -476,7 +479,10 @@ fn status_files_start_collapsed_restore_hunks_and_fall_back_to_the_surviving_fil
     let point = rendered.sections.nodes()[second].body;
     assert!(rendered.location(point).is_none());
     rendered.sections.toggle(file).unwrap();
-    assert_eq!(rendered.location(point).unwrap().hunk, Some(1));
+    assert!(matches!(
+        rendered.location(point).unwrap().target,
+        StatusTarget::Hunk { hunk: 1, .. }
+    ));
     rendered.sections.toggle(first).unwrap();
     let anchor = rendered
         .sections

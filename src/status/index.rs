@@ -1,7 +1,8 @@
-//! File and hunk index requests captured from a status projection, never from script paths.
+//! File, hunk, and group index requests captured from a status projection, never from script paths.
 
-use super::{Entry, Group, Head, Record, Repository, Status};
+use super::{Entry, Group, Head, Record, Repository, Status, StatusTarget};
 use crate::git;
+use std::collections::HashSet;
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -17,6 +18,12 @@ const DIAGNOSTIC_LIMIT: usize = 64 * 1024;
 pub enum Operation {
     Stage,
     Unstage,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum WriteTarget {
+    File(PathBuf),
+    Group { group: Group, count: usize },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -58,13 +65,22 @@ impl Report {
     }
 }
 
+enum RequestTarget {
+    File(Entry),
+    Hunk {
+        entry: Entry,
+        file: std::sync::Arc<crate::diff::FileDiff>,
+        hunk: usize,
+    },
+    Group(Vec<Entry>),
+}
+
 pub struct Request {
     repository: Repository,
     head: Head,
-    entry: Entry,
     group: Group,
     operation: Operation,
-    patch: Option<(std::sync::Arc<crate::diff::FileDiff>, usize)>,
+    target: RequestTarget,
 }
 
 fn ordinary(mode: u32) -> bool {
@@ -91,7 +107,7 @@ impl Entry {
             return false;
         }
         match &self.record {
-            Record::Untracked { directory } => !directory,
+            Record::Untracked { .. } => true,
             Record::Tracked { state, rename } => {
                 rename.is_none()
                     && !self
@@ -108,26 +124,98 @@ impl Entry {
     }
 }
 
+fn has_nested_git_dir(repo: &Repository, path: &Path) -> Result<bool, String> {
+    let git_entry = repo.root.join(path).join(".git");
+    match std::fs::symlink_metadata(&git_entry) {
+        Ok(_) => Ok(true),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(format!("Cannot inspect untracked directory: {error}")),
+    }
+}
+
+fn check_group_operation(group: Group, operation: Operation) -> Result<(), String> {
+    match (group, operation) {
+        (Group::Untracked | Group::Unstaged, Operation::Stage) => Ok(()),
+        (Group::Staged, Operation::Unstage) => Ok(()),
+        (Group::Staged, Operation::Stage) => Err("Staged changes are already staged".into()),
+        (Group::Untracked | Group::Unstaged, Operation::Unstage) => {
+            Err("Only staged changes can be unstaged".into())
+        }
+        (Group::Unmerged, _) => Err("Unmerged conflict paths cannot be written as a group".into()),
+    }
+}
+
 impl Status {
     pub fn index_request_at(
         &self,
         location: &super::StatusLocation,
         operation: Operation,
     ) -> Result<Request, String> {
-        let mut request = self.index_request(location.group, location.entry, operation)?;
-        if let Some(hunk) = location.hunk {
-            let file = self
-                .file_diff(location.group, location.entry)
-                .ok_or("No diff for this status file")?;
-            if file.summary.is_some()
-                || file.hunks.get(hunk).is_none()
-                || !matches!(file.status, 'A' | 'D' | 'M')
-            {
-                return Err("This change has no supported text hunk".into());
+        match location.target {
+            StatusTarget::Group => self.index_request_group(location.group, operation),
+            StatusTarget::File { entry } => self.index_request(location.group, entry, operation),
+            StatusTarget::Hunk { entry, hunk } => {
+                let mut request = self.index_request(location.group, entry, operation)?;
+                let file = self
+                    .file_diff(location.group, entry)
+                    .ok_or("No diff for this status file")?;
+                if file.summary.is_some()
+                    || file.hunks.get(hunk).is_none()
+                    || !matches!(file.status, 'A' | 'D' | 'M')
+                {
+                    return Err("This change has no supported text hunk".into());
+                }
+                let RequestTarget::File(entry_data) = request.target else {
+                    unreachable!();
+                };
+                request.target = RequestTarget::Hunk {
+                    entry: entry_data,
+                    file: file.clone(),
+                    hunk,
+                };
+                Ok(request)
             }
-            request.patch = Some((file.clone(), hunk));
         }
-        Ok(request)
+    }
+
+    pub fn index_request_group(
+        &self,
+        group: Group,
+        operation: Operation,
+    ) -> Result<Request, String> {
+        check_group_operation(group, operation)?;
+        let entries: Vec<Entry> = self.group(group).map(|(_, entry)| entry.clone()).collect();
+        if entries.is_empty() {
+            return Err("Status section has no entries".into());
+        }
+        let unmerged_paths: HashSet<&Path> = self
+            .entries()
+            .iter()
+            .filter(|entry| matches!(entry.record, Record::Unmerged { .. }))
+            .map(|entry| entry.path.as_path())
+            .collect();
+        for entry in &entries {
+            if entry.submodule.is_submodule {
+                return Err("Submodule entries cannot be written as a group".into());
+            }
+            if matches!(entry.record, Record::Unmerged { .. })
+                || unmerged_paths.contains(entry.path.as_path())
+            {
+                return Err("Conflict paths cannot be written as a group".into());
+            }
+            if let Record::Untracked { directory: true } = entry.record
+                && has_nested_git_dir(self.repository(), &entry.path)?
+            {
+                return Err("Nested Git repositories cannot be staged directly".into());
+            }
+        }
+        Ok(Request {
+            repository: self.repository().clone(),
+            head: self.head().clone(),
+            group,
+            operation,
+            target: RequestTarget::Group(entries),
+        })
     }
 
     pub fn index_request(
@@ -142,6 +230,11 @@ impl Status {
                 "Select one supported ordinary file in the appropriate status group".into(),
             );
         }
+        if let Record::Untracked { directory: true } = entry.record
+            && has_nested_git_dir(self.repository(), &entry.path)?
+        {
+            return Err("Nested Git repositories cannot be staged directly".into());
+        }
         if self.entries().iter().any(|other| match &other.record {
             Record::Tracked {
                 rename: Some(rename),
@@ -155,10 +248,9 @@ impl Status {
         Ok(Request {
             repository: self.repository().clone(),
             head: self.head().clone(),
-            entry: entry.clone(),
             group,
             operation,
-            patch: None,
+            target: RequestTarget::File(entry.clone()),
         })
     }
 }
@@ -172,11 +264,69 @@ fn read(repo: &Repository, args: &[&OsStr]) -> Result<Vec<u8>, String> {
     )
 }
 
-fn check_path(repo: &Repository, entry: &Entry, patch: bool) -> Result<(), String> {
-    let path = git::relative_path(entry.path.as_os_str().as_encoded_bytes())?;
-    if path != entry.path || path.as_os_str().as_encoded_bytes().starts_with(b":(") {
+fn validate_relative_path(raw: &Path) -> Result<PathBuf, String> {
+    let path = git::relative_path(raw.as_os_str().as_encoded_bytes())?;
+    if path != raw || path.as_os_str().as_encoded_bytes().starts_with(b":(") {
         return Err("Invalid index target or pathspec magic".into());
     }
+    Ok(path)
+}
+
+fn check_untracked_directory(repo: &Repository, raw: &Path) -> Result<Vec<PathBuf>, String> {
+    let path = validate_relative_path(raw)?;
+    let mut absolute = repo.root.clone();
+    let count = path.components().count();
+    for (index, component) in path.components().enumerate() {
+        absolute.push(component);
+        let last = index + 1 == count;
+        match std::fs::symlink_metadata(&absolute) {
+            Ok(metadata) if metadata.is_dir() => {}
+            Err(error) => return Err(format!("Index target changed; refresh first: {error}")),
+            _ if last => {
+                return Err(
+                    "Index target is no longer an ordinary directory; refresh first".into(),
+                );
+            }
+            _ => {
+                return Err(
+                    "Index target has a symbolic-link or non-directory parent; refresh first"
+                        .into(),
+                );
+            }
+        }
+    }
+    if has_nested_git_dir(repo, &path)? {
+        return Err("Nested Git repositories cannot be staged directly".into());
+    }
+    let output = read(
+        repo,
+        &[
+            "ls-files".as_ref(),
+            "-z".as_ref(),
+            "--others".as_ref(),
+            "--exclude-standard".as_ref(),
+            "--".as_ref(),
+            path.as_os_str(),
+        ],
+    )?;
+    let mut files = Vec::new();
+    for record in output
+        .split(|byte| *byte == 0)
+        .filter(|record| !record.is_empty())
+    {
+        if record.ends_with(b"/") {
+            return Err("Nested Git repositories cannot be staged directly".into());
+        }
+        files.push(git::relative_path(record)?);
+    }
+    if files.is_empty() {
+        return Err("Untracked directory has no stageable files; refresh first".into());
+    }
+    Ok(files)
+}
+
+fn check_path(repo: &Repository, entry: &Entry, patch: bool) -> Result<(), String> {
+    let path = validate_relative_path(&entry.path)?;
     let mut absolute = repo.root.clone();
     let count = path.components().count();
     for (index, component) in path.components().enumerate() {
@@ -197,6 +347,35 @@ fn check_path(repo: &Repository, entry: &Entry, patch: bool) -> Result<(), Strin
                 "Index target is not an ordinary file or has a symbolic-link parent; refresh first"
                     .into(),
             ),
+        }
+    }
+    Ok(())
+}
+
+fn check_group_entry_path(
+    repo: &Repository,
+    raw: &Path,
+    allow_missing: bool,
+) -> Result<(), String> {
+    let path = validate_relative_path(raw)?;
+    let mut absolute = repo.root.clone();
+    let count = path.components().count();
+    for (index, component) in path.components().enumerate() {
+        absolute.push(component);
+        let last = index + 1 == count;
+        match std::fs::symlink_metadata(&absolute) {
+            Ok(metadata) if !last && metadata.is_dir() => {}
+            Ok(metadata) if last && (metadata.is_file() || metadata.file_type().is_symlink()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound && allow_missing => {
+                return Ok(());
+            }
+            Err(error) => return Err(format!("Index target changed; refresh first: {error}")),
+            _ => {
+                return Err(
+                    "Index target is not an ordinary file/symlink or has a symbolic-link parent; refresh first"
+                        .into(),
+                );
+            }
         }
     }
     Ok(())
@@ -226,7 +405,7 @@ fn check_configuration(config: &[u8]) -> Result<(), String> {
     Ok(())
 }
 
-fn check_index(repo: &Repository, entry: &Entry, match_identity: bool) -> Result<(), String> {
+fn check_sparse_index(repo: &Repository) -> Result<(), String> {
     // Inspect stored sparse entries even if sparse configuration has since been disabled.
     let index = read(
         repo,
@@ -247,6 +426,11 @@ fn check_index(repo: &Repository, entry: &Entry, match_identity: bool) -> Result
     {
         return Err("Sparse index is not supported for index writes".into());
     }
+    Ok(())
+}
+
+fn check_index(repo: &Repository, entry: &Entry, match_identity: bool) -> Result<(), String> {
+    check_sparse_index(repo)?;
     let bytes = read(
         repo,
         &[
@@ -303,18 +487,33 @@ fn check_index(repo: &Repository, entry: &Entry, match_identity: bool) -> Result
     Ok(())
 }
 
+fn push_nul_path(out: &mut Vec<u8>, path: &Path) {
+    out.extend_from_slice(path.as_os_str().as_encoded_bytes());
+    out.push(0);
+}
+
 struct Prepared {
     request: Request,
-    patch: Option<String>,
+    input: Option<Vec<u8>>,
 }
 
 impl Request {
     pub fn repository(&self) -> &Repository {
         &self.repository
     }
-    pub fn path(&self) -> &Path {
-        &self.entry.path
+
+    pub fn target(&self) -> WriteTarget {
+        match &self.target {
+            RequestTarget::File(entry) | RequestTarget::Hunk { entry, .. } => {
+                WriteTarget::File(entry.path.clone())
+            }
+            RequestTarget::Group(entries) => WriteTarget::Group {
+                group: self.group,
+                count: entries.len(),
+            },
+        }
     }
+
     pub fn operation(&self) -> Operation {
         self.operation
     }
@@ -322,65 +521,160 @@ impl Request {
     pub(crate) fn expected_head(&self) -> &Head {
         &self.head
     }
-    pub(crate) fn expected_entry(&self) -> &Entry {
-        &self.entry
+
+    pub(crate) fn expected_entries(&self) -> Vec<Entry> {
+        match &self.target {
+            RequestTarget::File(entry) | RequestTarget::Hunk { entry, .. } => vec![entry.clone()],
+            RequestTarget::Group(entries) => entries.clone(),
+        }
     }
+
     pub(crate) fn group(&self) -> Group {
         self.group
     }
 
     fn prepare(self) -> Result<Prepared, String> {
-        let patch = self.patch.is_some();
-        check_path(&self.repository, &self.entry, patch)?;
         let config = read(
             &self.repository,
             &["config".as_ref(), "--null".as_ref(), "--list".as_ref()],
         )?;
         check_configuration(&config)?;
-        let mut paths = self.entry.path.as_os_str().as_encoded_bytes().to_vec();
-        paths.push(0);
-        super::load::check_filters(
-            &self.repository,
-            &paths,
-            &super::load::external_filters(&config)?,
-            &AtomicBool::new(false),
-        )?;
-        check_index(&self.repository, &self.entry, !patch)?;
-        let current = super::load::load(self.repository.clone(), &AtomicBool::new(false))?;
-        if patch {
-            if current.entries().iter().any(|entry| {
-                (entry.path == self.entry.path && !entry.ordinary_index_file())
-                    || matches!(&entry.record, Record::Tracked { rename: Some(rename), .. } if rename.source == self.entry.path)
-            }) {
-                return Err("Special index or file types are not supported for hunk writes".into());
+        let filters = super::load::external_filters(&config)?;
+
+        match &self.target {
+            RequestTarget::Group(entries) => {
+                check_sparse_index(&self.repository)?;
+                let mut filter_paths = Vec::new();
+                let mut write_paths = Vec::new();
+                let mut seen_write_paths = HashSet::new();
+                let mut seen_filter_paths = HashSet::new();
+
+                for entry in entries {
+                    if let Record::Untracked { directory: true } = entry.record {
+                        let expanded = check_untracked_directory(&self.repository, &entry.path)?;
+                        for file_path in expanded {
+                            if seen_filter_paths.insert(file_path.clone()) {
+                                push_nul_path(&mut filter_paths, &file_path);
+                            }
+                        }
+                        if seen_write_paths.insert(entry.path.clone()) {
+                            push_nul_path(&mut write_paths, &entry.path);
+                        }
+                    } else {
+                        let allow_missing = matches!(&entry.record, Record::Tracked { .. });
+                        check_group_entry_path(&self.repository, &entry.path, allow_missing)?;
+                        if seen_filter_paths.insert(entry.path.clone()) {
+                            push_nul_path(&mut filter_paths, &entry.path);
+                        }
+                        if seen_write_paths.insert(entry.path.clone()) {
+                            push_nul_path(&mut write_paths, &entry.path);
+                        }
+                        if self.group == Group::Staged
+                            && self.operation == Operation::Unstage
+                            && let Record::Tracked {
+                                rename: Some(rename),
+                                ..
+                            } = &entry.record
+                        {
+                            check_group_entry_path(&self.repository, &rename.source, true)?;
+                            if seen_filter_paths.insert(rename.source.clone()) {
+                                push_nul_path(&mut filter_paths, &rename.source);
+                            }
+                            if seen_write_paths.insert(rename.source.clone()) {
+                                push_nul_path(&mut write_paths, &rename.source);
+                            }
+                        }
+                    }
+                }
+
+                super::load::check_filters(
+                    &self.repository,
+                    &filter_paths,
+                    &filters,
+                    &AtomicBool::new(false),
+                )?;
+
+                let current = super::load::load(self.repository.clone(), &AtomicBool::new(false))?;
+                if current.head() != &self.head {
+                    return Err("Status, HEAD or index changed; refresh before writing".into());
+                }
+                let revalidated = current.index_request_group(self.group, self.operation)?;
+                let RequestTarget::Group(current_entries) = &revalidated.target else {
+                    unreachable!();
+                };
+                if current_entries != entries {
+                    return Err("Status, HEAD or index changed; refresh before writing".into());
+                }
+
+                Ok(Prepared {
+                    request: self,
+                    input: Some(write_paths),
+                })
             }
-            let (file, hunk) = self.patch.as_ref().unwrap();
-            let patch = file.hunk_patch(*hunk)?;
-            return Ok(Prepared {
-                request: self,
-                patch: Some(patch),
-            });
+            RequestTarget::File(entry) | RequestTarget::Hunk { entry, .. } => {
+                let patch = matches!(self.target, RequestTarget::Hunk { .. });
+                let untracked_dir = matches!(entry.record, Record::Untracked { directory: true });
+                let mut filter_paths = Vec::new();
+                if untracked_dir {
+                    for file_path in check_untracked_directory(&self.repository, &entry.path)? {
+                        push_nul_path(&mut filter_paths, &file_path);
+                    }
+                } else {
+                    check_path(&self.repository, entry, patch)?;
+                    push_nul_path(&mut filter_paths, &entry.path);
+                }
+                super::load::check_filters(
+                    &self.repository,
+                    &filter_paths,
+                    &filters,
+                    &AtomicBool::new(false),
+                )?;
+                check_index(&self.repository, entry, !patch)?;
+                let current = super::load::load(self.repository.clone(), &AtomicBool::new(false))?;
+                if let RequestTarget::Hunk { file, hunk, .. } = &self.target {
+                    if current.entries().iter().any(|other| {
+                        (other.path == entry.path && !other.ordinary_index_file())
+                            || matches!(
+                                &other.record,
+                                Record::Tracked {
+                                    rename: Some(rename),
+                                    ..
+                                } if rename.source == entry.path
+                            )
+                    }) {
+                        return Err(
+                            "Special index or file types are not supported for hunk writes".into(),
+                        );
+                    }
+                    let patch_text = file.hunk_patch(*hunk)?;
+                    return Ok(Prepared {
+                        request: self,
+                        input: Some(patch_text.into_bytes()),
+                    });
+                }
+                if current.head() != &self.head
+                    || !current
+                        .entries()
+                        .iter()
+                        .any(|other| other == entry && other.in_group(self.group))
+                {
+                    return Err("Status, HEAD or index changed; refresh before writing".into());
+                }
+                let index = current
+                    .entries()
+                    .iter()
+                    .position(|other| other == entry)
+                    .unwrap();
+                current.index_request(self.group, index, self.operation)?;
+                if !untracked_dir {
+                    check_path(&self.repository, entry, false)?;
+                }
+                Ok(Prepared {
+                    request: self,
+                    input: None,
+                })
+            }
         }
-        if current.head() != &self.head
-            || !current
-                .entries()
-                .iter()
-                .any(|entry| entry == &self.entry && entry.in_group(self.group))
-        {
-            return Err("Status, HEAD or index changed; refresh before writing".into());
-        }
-        // The complete model is checked too: a rename source must not be staged as an untracked file.
-        let index = current
-            .entries()
-            .iter()
-            .position(|entry| entry == &self.entry)
-            .unwrap();
-        current.index_request(self.group, index, self.operation)?;
-        check_path(&self.repository, &self.entry, false)?;
-        Ok(Prepared {
-            request: self,
-            patch: None,
-        })
     }
 
     pub fn execute(self) -> Report {
@@ -420,31 +714,30 @@ impl Prepared {
     fn write_observed(self, started: &mut dyn FnMut()) -> Result<Executed, String> {
         let request = self.request;
         let hooks = EmptyHooks::new()?;
-        let args: Vec<&OsStr> = if request.patch.is_some() {
-            let mut args = vec![
-                "apply".as_ref(),
-                "--cached".as_ref(),
-                "-p0".as_ref(),
-                "-C3".as_ref(),
-                "--ignore-space-change".as_ref(),
-            ];
-            if request.operation == Operation::Unstage {
-                args.push("--reverse".as_ref());
+        let args: Vec<&OsStr> = match &request.target {
+            RequestTarget::Hunk { .. } => {
+                let mut args = vec![
+                    "apply".as_ref(),
+                    "--cached".as_ref(),
+                    "-p0".as_ref(),
+                    "-C3".as_ref(),
+                    "--ignore-space-change".as_ref(),
+                ];
+                if request.operation == Operation::Unstage {
+                    args.push("--reverse".as_ref());
+                }
+                args.push("-".as_ref());
+                args
             }
-            args.push("-".as_ref());
-            args
-        } else {
-            match (&request.operation, &request.head) {
-                (Operation::Stage, _) => vec![
-                    "add".as_ref(),
-                    "--".as_ref(),
-                    request.entry.path.as_os_str(),
-                ],
+            RequestTarget::File(entry) => match (&request.operation, &request.head) {
+                (Operation::Stage, _) => {
+                    vec!["add".as_ref(), "--".as_ref(), entry.path.as_os_str()]
+                }
                 (Operation::Unstage, Head::Unborn { .. }) => vec![
                     "update-index".as_ref(),
                     "--force-remove".as_ref(),
                     "--".as_ref(),
-                    request.entry.path.as_os_str(),
+                    entry.path.as_os_str(),
                 ],
                 (Operation::Unstage, Head::Branch { oid, .. } | Head::Detached { oid }) => vec![
                     "restore".as_ref(),
@@ -452,15 +745,37 @@ impl Prepared {
                     "--source".as_ref(),
                     oid.as_ref(),
                     "--".as_ref(),
-                    request.entry.path.as_os_str(),
+                    entry.path.as_os_str(),
                 ],
-            }
+            },
+            RequestTarget::Group(_) => match (&request.operation, &request.head) {
+                (Operation::Stage, _) => vec![
+                    "add".as_ref(),
+                    "--pathspec-from-file=-".as_ref(),
+                    "--pathspec-file-nul".as_ref(),
+                ],
+                (Operation::Unstage, Head::Unborn { .. }) => vec![
+                    "rm".as_ref(),
+                    "--cached".as_ref(),
+                    "--force".as_ref(),
+                    "--pathspec-from-file=-".as_ref(),
+                    "--pathspec-file-nul".as_ref(),
+                ],
+                (Operation::Unstage, Head::Branch { oid, .. } | Head::Detached { oid }) => vec![
+                    "restore".as_ref(),
+                    "--staged".as_ref(),
+                    "--source".as_ref(),
+                    oid.as_ref(),
+                    "--pathspec-from-file=-".as_ref(),
+                    "--pathspec-file-nul".as_ref(),
+                ],
+            },
         };
         let (outcome, diagnostic) = match git::execute(
             &request.repository.root,
             Some(&request.repository.git_dir),
             &args,
-            self.patch.as_deref().map(str::as_bytes),
+            self.input.as_deref(),
             git::Access::IndexWrite {
                 hooks: &hooks.0,
                 started,

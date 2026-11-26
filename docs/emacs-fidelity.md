@@ -363,7 +363,7 @@ F2 仅提供 status 与单文件整文件级 index 操作，不包含 hunk / 批
 ### 单文件写入与脚本
 
 - 随包 JS 在同一 registry / 运行时声明 `magit-stage` / `magit-unstage`，status 默认 `s` / `u`，可重新绑定或禁用，不可重名覆盖。空配置和配置失败回退均有真实 handler；运行时故障报告写入不可用，不绕过 JS，原生 status / diff / 刷新仍可用。
-- 仅操作 status 的一个可见文件叶节点，捕获组、原始路径、仓库、会话及投影版本；heading、目录、活动非空 region、批量或 diff 均拒绝。支持普通文件新增、修改（含 binary / executable bit）、删除、两侧变更及 unborn 的新增；stage 仅在 Untracked / Unstaged，unstage 仅在 Staged。rename / copy、symlink / 类型变化、submodule、冲突、sparse checkout / index、intent-to-add / skip-worktree / assume-unchanged 等特殊标记只显示且拒绝，不能用底层路径绕过。
+- 单文件、普通未跟踪目录与整组写入：捕获组、目标（文件、hunk 或组）、仓库、会话及投影版本；非 index 组标题（如 `Head:`、`Stashes`、`Recent commits`）、活动非空 region、部分行选择或 diff buffer 均拒绝。单文件叶节点支持普通文件新增、修改（含 binary / executable bit）、删除、两侧变更及 unborn 新增，以及普通未跟踪目录（自动忽略 `.gitignore`、拒绝嵌套 `.git` 仓库）；整组写入支持 `Unstaged changes` / `Untracked files` 标题（展开或折叠）的 `s` 与 `Staged changes` 标题（展开或折叠）的 `u`，组内允许普通文件、普通未跟踪目录、rename / copy 与 symlink / 类型变化。stage 仅在 Untracked / Unstaged，unstage 仅在 Staged；submodule、嵌套 `.git` 仓库、冲突（unmerged）、sparse checkout / index、单文件层面的 rename / copy / symlink / 类型变化 / intent-to-add / skip-worktree / assume-unchanged 等特殊项拒绝，不能用底层路径绕过。
 - stage 使用执行时磁盘内容和 Git 内建规范化，不自动保存 buffer，明确提示磁盘语义；unstage 只将该 index 路径恢复到预检固定的完整 HEAD OID，HEAD 无此路径 / unborn 时仅移除 index 条目，不改 worktree / HEAD / 引用。二者可能丢失仅存在于 index 的中间版本，常规操作不逐次确认，无自动 undo / 备份 / 回滚，不自动重试。
 - JS 通过同步、有界、冻结上下文返回至多一个类型化领域请求（status 打开 / 刷新、staged / unstaged diff 打开、stage、unstage），不接收任意路径、args、命令名或可伪造目标。能力布尔值不是授权；核心接受前复核命令代次、原目标、point / region、投影、会话及输入屏障，不能在返回时按新 point 选择。异常、超时、非法返回或 pending jobs 不接受任何操作；无 Promise、执行期 host-call 或完成回调。
 - 执行前复核状态记录、HEAD / index 身份与路径类型，变化则拒绝并要求刷新；XY 不保证磁盘字节未变。拒绝目录扩大、路径穿越、pathspec magic 或越界父符号链接，使用原始路径、参数数组及 literal pathspec。遵守正常 index 锁，不删锁、不强抢，不承诺与外部 Git 的跨进程事务，也不通过覆盖整个 index 回滚。
@@ -430,7 +430,7 @@ F2 仅提供 status 与单文件整文件级 index 操作，不包含 hunk / 批
   - `Untracked` / `Unmerged` 普通文件上 `RET` 在当前窗口打开 worktree 文件；submodule 与含 `.git` 的嵌套目录打开对应目录的 `magit-status`；普通未跟踪目录因无 dired 提示无法访问目录。
   - `Unstaged` 文件 / hunk / 行上 `RET` 按上游规则访问对应侧并在当前窗口打开：新增 / 上下文行及文件 / hunk 标题访问 worktree 文件（折叠或展开的文件 / hunk 标题定位至首个 hunk / 当前 hunk 的首处变更行，复用已有 buffer 并保留未保存编辑），删除行与已删除文件访问 index 只读 blob 快照。
   - `Staged` 文件 / hunk / 行上 `RET` 按上游默认（`magit-diff-visit-prefer-worktree = nil`）访问只读快照：新增 / 上下文行及标题访问 index blob，删除行与已删除文件访问 HEAD blob；`C-<return>` / `C-j` 则按工作区优先访问可读写的 worktree 文件。
-- 文件 heading 的 `s` / `u` 保留 F2 整文件行为；hunk heading 或正文的同一命令仅对当前一个普通文本 hunk 操作。仍不支持非空活动 region、部分行、多 section、组级批量或 discard；独立 diff 仍只读。
+- 文件 heading 的 `s` / `u` 保留整文件行为，普通未跟踪目录条目支持 `s`（拒绝嵌套 `.git` 仓库）；hunk heading 或正文的同一命令仅对当前一个普通文本 hunk 操作；`Unstaged changes` / `Untracked files` 分组标题（展开或折叠）的 `s` 与 `Staged changes` 分组标题（展开或折叠）的 `u` 对齐上游 Magit 整组操作且不额外弹确认。仍不支持非空活动 region、部分行、任意多 section 或 discard；独立 diff 仍只读。
 - hunk stage 将捕获的 patch 以 `git apply --cached -p0 -C3 --ignore-space-change` 应用到 index；unstage 增加 `--reverse`。保留 Git 路径引用、原始正文及无末尾换行标记，独立应用时调整新侧起始行号；普通内容 hunk 不顺带应用独立 chmod metadata。不读取未保存 buffer、不写 worktree / HEAD / refs，无额外确认、自动备份 / undo / 重试或回滚。
 - hunk patch 由 Git 按上下文匹配并报告失败，不增加 HEAD / index OID / XY 快照一致性检查，也不把整文件 stage 的执行时磁盘语义冒充 hunk 语义。现有特殊 index / sparse / 路径类型 / 外部 filter 范围限制仍适用，不通过 patch 绕过。失败保留诊断，沿用核心终态重读，不把刷新成功误报为写入成功。
 - JS 仍只返回相同 stage / unstage 领域意图；核心捕获并复核原 status 会话、投影、输入与单文件 / hunk 目标，不接收脚本路径或 patch。已接受写入复用现有 Git 操作槽、跨 reload / buffer 删除的所有权、结果记录、stale 标记、写后核对及退出等待，不另建生命周期。
@@ -689,7 +689,7 @@ F2 仅提供 status 与单文件整文件级 index 操作，不包含 hunk / 批
 
 - **默认绑定与命令**：在 Magit mode（`magit-status` / `magit-diff` / `magit-log` / `magit-log-select` / `magit-revision` / `magit-process`）中绑定 `P` → `magit-push`，打开单键菜单：`p` `magit-push-current-to-pushremote`、`u` `magit-push-current-to-upstream`、`e` `magit-push-current`（均亦可通过 `M-x` 直接调用），`C-g` 取消。
 - **目标解析与前置设置**：要求当前 HEAD 位于非 unborn 分支（detached HEAD 或无提交的 unborn 分支明确报错）。`p` 优先读取 `branch.<name>.pushRemote` 或 `remote.pushDefault`，未配置时提示选择已知 remote 写入 `branch.<name>.pushRemote` 并推送；`u` 读取 `branch.<name>.remote` 与 `branch.<name>.merge`，未配置时按 `<remote>/<branch>` 补全目标并以 `--set-upstream` 推送；`e` 读取显式 `<remote>/<branch>` 推送目标（不支持本地分支与无配置远端分支以外的复杂 transient infix 参数）。
-- **控制终端 PTY 与 SSH agent**：复用 commit 的控制终端 PTY 进程模型启动 `git push -v`，保留父进程环境变量（包括 `SSH_AUTH_SOCK`、`SSH_ASKPASS`、`DISPLAY`、`WAYLAND_DISPLAY` 等）以便复用系统 SSH key agent 或凭据助手；输出实时投影至 `$`（`magit-process`），支持 `k` 中断/强杀，终态后自动刷新所属仓库 status / log / diff 与 treemacs Git 状态。
+- **控制终端 PTY 与 SSH agent**：复用 commit 的控制终端 PTY 进程模型启动 `git push -v`，保留父进程环境变量（包括 `SSH_AUTH_SOCK`、`SSH_ASKPASS`、`DISPLAY`、`WAYLAND_DISPLAY` 等）并将 `GPG_TTY` 设为该 PTY slave 路径以便复用系统 SSH key agent、GPG pinentry 或凭据助手；当父进程未继承有效 `SSH_AUTH_SOCK`（缺失、为空或 socket 不可连，如从桌面启动器启动）时，按 `systemctl --user show-environment` → 用户运行时目录与状态文件（`$XDG_RUNTIME_DIR/{ssh-agent.socket,ssh-agent.sock,openssh_agent,gcr/ssh,keyring/ssh,gnupg/S.gpg-agent.ssh}`、`~/.keychain/<host>-{sh,fish}`、`$HOME/.ssh/agent/*` 及常见密码管理器 socket）→ 同用户私有临时目录 `ssh-*/agent.*` 的顺序探测；若上述候选均未找到已加载密钥的 agent，则仿照 Emacs `exec-path-from-shell` 启动短生命周期登录交互 `$SHELL` 读取其导出的 `SSH_AUTH_SOCK`；所有候选均校验同 UID 与 SSH agent 协议响应（优先选择已加载密钥的 agent）；输出实时投影至 `$`（`magit-process`），支持 `k` 中断/强杀，终态后自动刷新所属仓库 status / log / diff 与 treemacs Git 状态。
 
 ### 保密 passphrase / 密码 / PIN 读入
 

@@ -102,7 +102,7 @@ semacs.setStyle("syntax.comment", { italic: true });
 
 - `mode`：`"fundamental" | "treemacs" | "magit-diff" | "magit-status" | "git-commit" | "magit-process" | "magit-log" | "magit-log-select" | "magit-revision" | "rg"`。
 - `status`：非 status 为 `null`，否则为 `{ selection }`。
-- `selection`：无可见文件 / hunk 目标时为 `null`，否则含 `group: "untracked" | "unstaged" | "staged" | "unmerged"` 及布尔值 `canStage` / `canUnstage`。能力只是提示；region、过时清单或不支持的目标不授予写入权，核心仍重新校验。
+- `selection`：无可见组标题 / 文件 / hunk 目标时为 `null`，否则含 `group: "untracked" | "unstaged" | "staged" | "unmerged"` 及布尔值 `canStage` / `canUnstage`。能力只是提示；region、过时清单或不支持的目标不授予写入权，核心仍重新校验。
 
 返回 `null` 表示无请求，或返回以下一个严格对象（未知字段拒绝）：
 
@@ -111,7 +111,7 @@ semacs.setStyle("syntax.comment", { italic: true });
 | `{ operation: "magit.status.open" }` | 沿调用目标的固定仓库或目录打开 status |
 | `{ operation: "magit.status.refresh" }` | 仅刷新捕获的 status 会话；非 status 拒绝 |
 | `{ operation: "magit.diff.open", comparison: "staged" | "unstaged" }` | 打开整个比较，不按 point 过滤 |
-| `{ operation: "magit.stage" }` / `{ operation: "magit.unstage" }` | 仅操作调用时捕获的一个 status 文件或 hunk，见 [F4](emacs-fidelity.md#阶段-f4status-内嵌-diff-与单-hunk-index-操作) |
+| `{ operation: "magit.stage" }` / `{ operation: "magit.unstage" }` | 操作调用时捕获的 status 组标题（`Unstaged` / `Untracked` / `Staged`）、文件、普通未跟踪目录或 hunk，见 [F4](emacs-fidelity.md#阶段-f4status-内嵌-diff-与单-hunk-index-操作) |
 
 不接受数组、任意命令名 / payload / Git args、Promise、执行期 host-call 或完成回调。JS 异常、超时、非法返回或 pending jobs 均不启动核心操作。返回不等于 Git 完成；接受前重新验证原 view、输入会话、配置代次及目标，不在返回时重选 point。接受后的写入由核心持有，跨 reload / kill / 另存继续，终态和独立刷新结果记录在 `*Messages*`；不确定结果不自动重试。
 

@@ -14,7 +14,7 @@ use semacs::app::{AppShell, GitWritePhase};
 use semacs::buffer::Buffer;
 use semacs::files::{DecodedFile, FileFormat};
 use semacs::mode::ModeId;
-use semacs::status::index::{Operation, Outcome};
+use semacs::status::index::{Operation, Outcome, WriteTarget};
 use semacs::text::ByteOffset;
 use semacs::view::BufferView;
 
@@ -296,7 +296,10 @@ impl Workload {
                 assert_eq!(record.outcome, Some(Outcome::Succeeded));
                 assert_eq!(record.verified, Some(true));
                 assert!(record.installed);
-                assert_eq!(record.path, Path::new(TARGET));
+                assert_eq!(
+                    record.target,
+                    WriteTarget::File(Path::new(TARGET).to_path_buf())
+                );
                 assert_eq!(
                     record.operation,
                     if i == 0 {

@@ -1,7 +1,10 @@
+use std::ffi::{CStr, OsStr};
 use std::fs::File;
 use std::io;
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
+use std::os::unix::ffi::OsStrExt;
 use std::os::unix::process::CommandExt;
+use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 
 #[cfg(test)]
@@ -11,11 +14,12 @@ mod tests;
 pub(super) struct Terminal {
     pub master: File,
     slave: File,
+    slave_path: Option<PathBuf>,
 }
 
 impl Terminal {
     pub fn open() -> io::Result<Self> {
-        let (master, slave) = open_pair()?;
+        let (master, slave, slave_path) = open_pair()?;
         let mut termios = std::mem::MaybeUninit::uninit();
         if unsafe { libc::tcgetattr(slave.as_raw_fd(), termios.as_mut_ptr()) } < 0 {
             return Err(io::Error::last_os_error());
@@ -35,10 +39,14 @@ impl Terminal {
         Ok(Self {
             master: master.into(),
             slave: slave.into(),
+            slave_path,
         })
     }
 
     pub fn spawn(&self, command: &mut Command) -> io::Result<Child> {
+        if let Some(path) = &self.slave_path {
+            command.env("GPG_TTY", path);
+        }
         command
             .stdin(Stdio::from(self.slave.try_clone()?))
             .stdout(Stdio::from(self.slave.try_clone()?))
@@ -56,7 +64,7 @@ impl Terminal {
 }
 
 #[cfg(target_os = "linux")]
-fn open_pair() -> io::Result<(OwnedFd, OwnedFd)> {
+fn open_pair() -> io::Result<(OwnedFd, OwnedFd, Option<PathBuf>)> {
     let flags = libc::O_RDWR | libc::O_NOCTTY | libc::O_CLOEXEC;
     let master = unsafe { libc::posix_openpt(flags) };
     if master < 0 {
@@ -81,11 +89,18 @@ fn open_pair() -> io::Result<(OwnedFd, OwnedFd)> {
     if slave < 0 {
         return Err(io::Error::last_os_error());
     }
-    Ok((master, unsafe { OwnedFd::from_raw_fd(slave) }))
+    let slave_path = PathBuf::from(OsStr::from_bytes(
+        unsafe { CStr::from_ptr(name.as_ptr()) }.to_bytes(),
+    ));
+    Ok((
+        master,
+        unsafe { OwnedFd::from_raw_fd(slave) },
+        Some(slave_path),
+    ))
 }
 
 #[cfg(not(target_os = "linux"))]
-fn open_pair() -> io::Result<(OwnedFd, OwnedFd)> {
+fn open_pair() -> io::Result<(OwnedFd, OwnedFd, Option<PathBuf>)> {
     let mut master = -1;
     let mut slave = -1;
     if unsafe {
@@ -107,7 +122,15 @@ fn open_pair() -> io::Result<(OwnedFd, OwnedFd)> {
             return Err(io::Error::last_os_error());
         }
     }
-    Ok((master, slave))
+    let mut name = [0; libc::PATH_MAX as usize];
+    let slave_path = (unsafe { libc::ttyname_r(slave.as_raw_fd(), name.as_mut_ptr(), name.len()) }
+        == 0)
+        .then(|| {
+            PathBuf::from(OsStr::from_bytes(
+                unsafe { CStr::from_ptr(name.as_ptr()) }.to_bytes(),
+            ))
+        });
+    Ok((master, slave, slave_path))
 }
 
 pub(super) fn signal_group(child: &Child, signal: libc::c_int) -> io::Result<()> {

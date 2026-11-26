@@ -19,6 +19,7 @@ mod input;
 pub mod message;
 mod preparation;
 pub mod prompt;
+mod ssh_agent;
 mod terminal;
 
 pub use input::{Input, login_name};
@@ -323,6 +324,9 @@ impl Commit {
             }
         }
         command.env("GIT_EDITOR", bridge.editor_command(editor_executable));
+        if let Some(sock) = ssh_agent::resolve_ssh_auth_sock() {
+            command.env("SSH_AUTH_SOCK", sock);
+        }
         let child = terminal.spawn(&mut command).map_err(before_start)?;
         let control = Arc::new(Control {
             child: Mutex::new(Some(child)),
@@ -383,6 +387,9 @@ impl Commit {
             .arg("push")
             .arg("-v")
             .args(args);
+        if let Some(sock) = ssh_agent::resolve_ssh_auth_sock() {
+            command.env("SSH_AUTH_SOCK", sock);
+        }
         let child = terminal.spawn(&mut command).map_err(before_start)?;
         let control = Arc::new(Control {
             child: Mutex::new(Some(child)),

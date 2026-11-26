@@ -225,19 +225,29 @@ fn headings_regions_folded_leaves_and_diff_cannot_supply_write_targets(cx: &mut 
         assert!(shell.read(cx).capture_status_write(&view, cx).is_err());
         buffer.deactivate_mark();
         let sections = buffer.sections().unwrap();
-        buffer
-            .set_point(
-                sections
-                    .nodes()
-                    .iter()
-                    .find(|node| node.key == "unstaged")
-                    .unwrap()
-                    .range
-                    .start,
-            )
-            .unwrap();
+        let group_start = sections
+            .nodes()
+            .iter()
+            .find(|node| node.key == "unstaged")
+            .unwrap()
+            .range
+            .start;
+        let hunk_point = sections
+            .nodes()
+            .iter()
+            .find(|node| node.key.contains("/@@ "))
+            .unwrap()
+            .range
+            .start;
+        buffer.set_point(group_start).unwrap();
         buffer.toggle_section().unwrap();
-        assert!(shell.read(cx).capture_status_write(&view, cx).is_err());
+        // Collapsed group heading itself supplies a group write target.
+        let target = shell.read(cx).capture_status_write(&view, cx).unwrap();
+        assert_eq!(target.location.target, StatusTarget::Group);
+        // Collapsed descendants cannot supply a write target directly via RenderedStatus::location.
+        let rendered = buffer.status_data().unwrap().render().unwrap();
+        assert!(rendered.location(hunk_point).is_none());
+        buffer.toggle_section().unwrap();
     });
     command(&mut visual, &shell, Command::MagitDiffUnstaged);
     wait(&mut visual, &shell);
