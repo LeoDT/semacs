@@ -81,6 +81,9 @@ fn default_bindings_match_the_emacs_reference_or_approved_contracts() {
                 "C-S-c C-S-c" => Some("mc/edit-lines"),
                 // Approved Magit global status binding (external package convention).
                 "C-x g" => Some("magit-status"),
+                // Emacs 31.1 standard imenu binding and approved F12 project-imenu binding.
+                "M-g i" => Some("imenu"),
+                "C-x p i" => Some("project-imenu"),
                 "C-h e" => messages_reference.get("C-h e").copied(),
                 key if project_reference.contains_key(key) => project_reference.get(key).copied(),
                 key if search_reference.contains_key(key) => search_reference.get(key).copied(),

@@ -128,7 +128,7 @@ impl AppShell {
         if buffer.tree_root().is_some()
             && let Ok(node) = buffer.tree_node()
         {
-            return if node.directory {
+            return if node.is_directory() {
                 node.target
             } else {
                 node.target.parent().unwrap().to_path_buf()

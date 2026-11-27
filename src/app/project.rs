@@ -54,6 +54,9 @@ impl AppShell {
             Command::ProjectFindFile => {
                 self.with_current_project(ProjectAction::FindFile, origin, window, cx);
             }
+            Command::ProjectImenu => {
+                self.with_current_project(ProjectAction::Imenu, origin, window, cx);
+            }
             Command::ProjectSwitchToBuffer => {
                 self.with_current_project(ProjectAction::SwitchToBuffer, origin, window, cx);
             }
@@ -379,6 +382,9 @@ impl AppShell {
             ProjectAction::FindRegexp => {
                 self.begin_project_find_regexp(project, origin, window, cx);
             }
+            ProjectAction::Imenu => {
+                self.begin_project_imenu(project, origin, window, cx);
+            }
             ProjectAction::SwitchToBuffer => {
                 self.begin_project_switch_to_buffer(project, origin, window, cx);
             }
@@ -422,6 +428,7 @@ impl AppShell {
         let choice = match stroke.key.as_str() {
             "f" => Some('f'),
             "g" => Some('g'),
+            "i" => Some('i'),
             "b" => Some('b'),
             "v" => Some('v'),
             "t" => Some('t'),
@@ -445,6 +452,7 @@ impl AppShell {
                 );
             }
             'g' => self.begin_project_find_regexp(project, &target, window, cx),
+            'i' => self.begin_project_imenu(project, &target, window, cx),
             'b' => self.begin_project_switch_to_buffer(project, &target, window, cx),
             'v' => self.open_status_in(&target, Some(project.root), window, cx),
             't' => self.open_tree_for_project(project.root, &target, window, cx),
@@ -550,7 +558,11 @@ impl AppShell {
         }
     }
 
-    fn select_ordinary_for_visit(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    pub(super) fn select_ordinary_for_visit(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         if self.panes.side() == Some(self.panes.selected()) {
             let target = self
                 .panes

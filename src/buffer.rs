@@ -431,6 +431,16 @@ impl Buffer {
         self.document.borrow().syntax.prepare(observer, cx);
     }
 
+    pub(crate) fn syntax_language(&self) -> Option<crate::syntax::LanguageId> {
+        self.document.borrow().syntax.language()
+    }
+
+    pub(crate) fn syntax_tree(
+        &self,
+    ) -> Option<(crate::syntax::LanguageId, BufferSnapshot, tree_sitter::Tree)> {
+        self.document.borrow().syntax.current_tree()
+    }
+
     pub(crate) fn syntax_highlights(&self) -> Option<std::sync::Arc<crate::syntax::Highlights>> {
         self.document.borrow().syntax.highlights()
     }

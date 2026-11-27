@@ -87,7 +87,10 @@ fn directory_expansion_is_lazy_and_only_follows_single_child_chains() {
         .expand(&fixture.0.join("dir"), &AtomicBool::new(false))
         .unwrap();
     let rendered = tree
-        .render(None, Some((&fixture.0.join("dir"), false)))
+        .render(
+            None,
+            Some((&NodeTarget::Path(fixture.0.join("dir")), false)),
+        )
         .unwrap();
     assert!(rendered.text.contains("  - dir\n    + a\n    + b"));
     assert!(!rendered.text.contains("one.txt"));
@@ -275,6 +278,59 @@ UU src/sub/conflict.rs\0\
             true
         ),
         None
+    );
+}
+
+#[test]
+fn file_tags_render_as_nested_sections_and_preserve_trailing_eof_invariants() {
+    let fixture = Fixture::new();
+    let rs = fixture.file("z_last.rs");
+    std::fs::write(
+        &rs,
+        "struct Item;\nimpl Item {\n    fn first() {}\n    fn first_dup() {}\n}\nfn tail() {}\n",
+    )
+    .unwrap();
+    let tree = fixture
+        .tree()
+        .expand_tags(&rs, &HashMap::new(), &AtomicBool::new(false))
+        .unwrap();
+    let rendered = tree
+        .render(None, Some((&NodeTarget::Path(rs.clone()), false)))
+        .unwrap();
+    assert!(rendered.text.contains(
+        "   z_last.rs\n    · Item\n    + Item\n      · first\n      · first_dup\n    · tail"
+    ));
+    assert_eq!(rendered.sections.visible_lines().len(), 5);
+
+    // Expanding the nested `impl Item` tag group reveals its methods at depth 3.
+    let impl_target = rendered
+        .nodes
+        .iter()
+        .find(|n| {
+            matches!(
+                n.kind,
+                NodeKind::Tag {
+                    has_children: true,
+                    ..
+                }
+            )
+        })
+        .unwrap()
+        .section_target();
+    let expanded = tree
+        .render(Some(&rendered.sections), Some((&impl_target, false)))
+        .unwrap();
+    assert!(
+        expanded
+            .text
+            .contains("    - Item\n      · first\n      · first_dup\n    · tail")
+    );
+    assert_eq!(expanded.sections.visible_lines().len(), 7);
+    assert!(
+        !expanded
+            .nodes
+            .iter()
+            .any(|n| n.is_tag() && n.represents(&rs))
     );
 }
 

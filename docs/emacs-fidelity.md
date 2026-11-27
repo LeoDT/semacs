@@ -489,7 +489,7 @@ F2 仅提供 status 与单文件整文件级 index 操作，不包含 hunk / 批
 
 | 键 | 行为 |
 |---|---|
-| `TAB` | 开合当前节点；文件展开 tag 段（无 tag 时提示且不变） |
+| `TAB` | 开合当前节点；文件展开/折叠 tree-sitter tag 子树（无 tag 时回显 `No tags found for …` 且不变）；嵌套 tag 组可展开/折叠 |
 | `RET` / `l` | 目录开合；文件按访问目标打开 |
 | `h` / `H` | 已展开则收起当前节点，已折叠则到父节点；`H` 到父节点并收起它 |
 | `n` / `p` | 上 / 下一个可见行（受 wrap-around 影响） |
@@ -536,7 +536,7 @@ F2 仅提供 status 与单文件整文件级 index 操作，不包含 hunk / 批
 
 ### 已批准差异与联动
 
-- **`project-switch-project` 单键分派菜单**：上游默认菜单包含依赖 dired / eshell / vc-dir / grep 的项；菜单固定为 `[f] Find file`、`[g] Find regexp`、`[b] Switch buffer`、`[v] Magit status`、`[t] Treemacs`（接替上游 `v` 的 VCS 槽位并接入文件树与 F8 项目内搜索）。
+- **`project-switch-project` 单键分派菜单**：上游默认菜单包含依赖 dired / eshell / vc-dir / grep 的项；菜单固定为 `[f] Find file`、`[g] Find regexp`、`[i] Imenu`、`[b] Switch buffer`、`[v] Magit status`、`[t] Treemacs`（接替上游 `v` 的 VCS 槽位并接入文件树、F8 项目内搜索与 F12 项目全局 `project-imenu`）。
 - **Treemacs 联动**：通过 `C-x p p` 选择 `[t]` 时把左侧树切换到目标项目根并显示；通过 `C-x p p` 选择 `[f]` 打开另一项目的文件时保持已打开的 treemacs 树根不变。从 treemacs 侧窗触发 `project-find-file` 或 `project-switch-to-buffer` 时，切到普通 pane 打开/切换目标，不因侧窗 dedicated 失败。
 
 ### 首版不提供的上游能力
@@ -725,3 +725,32 @@ F2 仅提供 status 与单文件整文件级 index 操作，不包含 hunk / 批
 - **默认全局开启**：与上游默认关闭不同，本实现默认启用全局可见 buffer 自动 revert，仍可通过 `M-x global-auto-revert-mode` 或 `init.js` 关闭。
 - **文件 buffer 限定**：不提供 `global-auto-revert-non-file-buffers`（Magit / `*rg*` / treemacs 维持手动 `g` 及已有焦点刷新）、`auto-revert-tail-mode`、auto-save 文件恢复、`revert-without-query` 正则、远程路径以及 `before-revert-hook` / `after-revert-hook` / 逐文件 `vc-refresh-state`。
 - **编辑前不作同步 `stat` 拦截**：clean → dirty 首次编辑前不执行 Emacs 上游的 `ask-user-about-supersession-threat` 检查，外部修改保护保留在 `C-x C-s` 保存确认、可见 buffer 自动 revert 与手动 `revert-buffer`，见[实施计划](plan.md#未排期需求)。
+
+## 阶段 F12：结构导航（`imenu`、Tree Viewer Tags 与 `project-imenu`）
+
+本节定义基于内置 tree-sitter 语言的文档结构导航、treemacs 文件 tag 子树与项目全局符号跳转契约，不引入 LSP、不新建独立 outline 侧栏。
+
+### 共享 Tree-sitter Outline 引擎与语言范围
+
+- **支持语言**：复用 E2 内置 9 种宿主语言（Rust、JavaScript/JSX、TypeScript、TSX、Markdown、HTML、CSS、JSON、JSON5）；未关联或不支持语法的文件不生成结构索引。
+- **解析与隔离**：已打开且当前版本树已就绪的 buffer 直接复用其增量解析主树；否则按快照在后台仅执行宿主语言解析与 AST 提取（不重复高亮/注入查询），按 `MAX_SYMBOLS_PER_FILE`（4,096）、`MAX_OUTLINE_FILE_BYTES`（4 MiB）与名称长度上限（120 字符）有界保护并响应取消。
+- **层级与展平**：保留嵌套结构（如 Rust `impl` / `trait` / `mod` 内方法与函数、JS/TS 类内方法、Markdown `h1`–`h6` 标题树、HTML 标题与 `#id` 元素、CSS `@media` 等规则块、JSON/JSON5 嵌套对象键）；线性候选列表按文档前序展平并以 `" / "` 拼接限定路径，同时保留各自精确的 1-based 行号与 0-based UTF-8 字节列。
+
+### 单文件 `imenu`（`M-g i` / `M-x imenu`）
+
+- **入口与提示**：全局绑定 `M-g i`（`imenu`）。当前 buffer 无支持语言或提取结果为空（包括 `*scratch*`、`*Treemacs*`、`*Messages*`、Magit / `*rg*` 及普通文本）时，不打开 minibuffer 并回显 `No items suitable for an index found in this buffer`（对齐 GNU Emacs 31.1 `imenu--make-index-alist`）。
+- **默认项与候选交互**：prompt 为 `Index item: `；光标处标识符精确匹配索引项时提供 `(default <name>): ` 且默认选中该候选，空回车直接跳转到默认项。候选注释显示类型短名与行号（`<kind>  L<line>`）；空输入保持文档顺序，非空输入按现有 smart-case 模糊过滤高亮；选中候选经由内部唯一候选索引（`Candidate.id`）消歧，允许多个同名符号（如多个 `new` 或同名 Markdown 子标题）精准跳转而不受重名覆盖。
+- **跳转与 mark**：跳转到目标符号精确行列；若位置实际发生变化，先在跳转前位置以 `save_mark` 保存非活动 mark（已有活动 region 时保留）。
+- **已登记差异**：不使用上游 `imenu-use-popup-menu` 鼠标菜单、缓存变量 `imenu-auto-rescan = nil` 的手动 `*Rescan*` 条目或递归 alist 子菜单交互；始终反映当前 committed 快照（含未保存编辑），并在 minibuffer 中直接展示展平后的限定路径候选。
+
+### Tree Viewer 文件 Tags（补齐 F6）
+
+- **展开与刷新**：在支持语言的文件节点上按 `TAB` 异步提取符号（优先使用已打开 buffer 的内存快照，否则读取磁盘）并在其下方挂载嵌套 tag section 子树（有子节点的组默认折叠、前缀 `+ ` / `- `，叶子 tag 前缀 `· `，按语法角色着色）；未支持语言同步回显、支持语言但无符号异步回显 `No tags found for <path>` 并保持树不变。`g` / `r` 刷新树时仅同步刷新已展开过 tag 的文件，未展开过的文件不主动解析。
+- **导航与跳转**：tag 节点支持 `n` / `p`、`M-n` / `M-p`、`u`、`h`（已展开 tag 组或文件先收起自身，否则上移父节点）、`H`（跳到父节点并收起）；`treemacs-find-file` 与 follow 只定位文件/目录节点，不命中 tag。在 tag 上执行 `RET` / `l` / `C-u RET` / `C-u C-u RET` / `o o` / `o h` / `o v` / `o r` / `o c` 按既有访问目标打开（或复用）所属文件并定位到该符号的精确行列。
+
+### 项目全局 `project-imenu`（`C-x p i` / `M-x project-imenu`）
+
+- **入口与范围**：全局绑定 `C-x p i`（`project-imenu`），并接入 `C-x p p` 单键分派菜单 `[i] Imenu`。复用 F7 项目发现（`project-current`，非 Git 目录弹出项目选择器），prompt 为 `Imenu in <root>: `。
+- **并发扫描与缓存**：复用 F7 `list_files`（遵循 `.gitignore` 与 submodule 规则），筛选受支持语言文件（上限 10,000 文件 / 200,000 符号）；已打开 buffer 直接覆盖磁盘读取，其余文件按 `(path, FileStamp)` 内存缓存（应用内最多保留最近 8 个项目）并由 `rayon` 线程池并行解析未命中或已变更的文件；读取或解码失败的单文件静默跳过，全程支持 `C-g` 取消。
+- **候选与打开**：候选以 `<kind>  <relative_path>:<line>` 为注释、按 `Candidate.id` 消歧同名跨文件符号；超过 4,096 条结果时非空过滤在后台执行。项目内无任何符号时关闭会话并回显 `No symbols found in project`。确认后若焦点在 treemacs 侧窗先切至普通窗再打开/激活目标文件并跳转至精确行列（若目标已是当前 buffer，跳转前同样 `save_mark`）。
+- **已登记差异**：属于语法级定义索引（非 LSP 语义符号），仅覆盖内置 9 种语言；使用内存级 `FileStamp` 缓存而非磁盘索引数据库或全局文件监听。

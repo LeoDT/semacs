@@ -124,6 +124,10 @@ impl AppShell {
             completion: None,
             project_files_work: None,
             project_files: None,
+            imenu_work: None,
+            imenu_symbols: None,
+            project_imenu_work: None,
+            project_imenu_symbols: None,
             candidate_snapshot: None,
             pending_candidate_action: None,
             _subscription: subscription,
@@ -398,6 +402,15 @@ impl AppShell {
     }
 
     pub(super) fn confirm_session(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.confirm_session_with_id(None, window, cx);
+    }
+
+    pub(super) fn confirm_session_with_id(
+        &mut self,
+        accepted_id: Option<usize>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let Some(session) = &self.session else { return };
         let (id, kind) = (session.id(), session.kind().clone());
         match kind {
@@ -480,6 +493,12 @@ impl AppShell {
             | ReadKind::ProjectFindFile { .. }
             | ReadKind::ProjectSwitchToBuffer { .. } => {
                 self.confirm_project_read(kind, id, window, cx)
+            }
+            ReadKind::Imenu { default, .. } => {
+                self.confirm_imenu(id, default, accepted_id, window, cx)
+            }
+            ReadKind::ProjectImenu { .. } => {
+                self.confirm_project_imenu(id, accepted_id, window, cx)
             }
             ReadKind::SearchPattern { .. }
             | ReadKind::SearchDirectory { .. }

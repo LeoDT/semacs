@@ -335,12 +335,13 @@ impl AppShell {
                 let is_refresh = command == TreemacsRefresh;
                 let result = origin.read(cx).buffer().tree_action(is_refresh);
                 match result {
-                    Ok(action) => {
+                    Ok(Some(action)) => {
                         self.enqueue_tree(origin, action, window, cx);
                         if is_refresh {
                             self.schedule_tree_git_refresh(0, window, cx);
                         }
                     }
+                    Ok(None) => {}
                     Err(error) => self.show_message(origin, error, cx),
                 }
             }
@@ -404,7 +405,12 @@ impl AppShell {
             } else {
                 None
             };
-            let result = pending.origin.read(cx).buffer().begin_tree_action(action);
+            let open_files = self.collect_open_overlays();
+            let result = pending
+                .origin
+                .read(cx)
+                .buffer()
+                .begin_tree_action(action, open_files);
             match result {
                 Ok(request) => break (pending.origin, self.buffers[index].id(), request, locate),
                 Err(error) => self.show_message(&pending.origin, error, cx),
@@ -474,7 +480,14 @@ impl AppShell {
                                 }
                             }
                         }
-                        Err(error) => {
+                        Err(crate::tree::TreeReadError::NoTags(path)) => {
+                            shell.show_message(
+                                &origin,
+                                format!("No tags found for {}", path.display()),
+                                cx,
+                            );
+                        }
+                        Err(crate::tree::TreeReadError::Other(error)) => {
                             shell.show_message(&origin, format!("Tree unchanged: {error}"), cx)
                         }
                     }
@@ -506,17 +519,26 @@ impl AppShell {
                 return;
             }
         };
-        if node.directory {
+        if node.is_directory() {
             if matches!(
                 command,
                 TreemacsReturn | TreemacsReturnStay | TreemacsReturnClose
             ) {
-                self.enqueue_tree(origin, Action::Toggle(node.path), window, cx);
+                self.enqueue_tree(
+                    origin,
+                    Action::Toggle(crate::tree::NodeTarget::Path(node.path)),
+                    window,
+                    cx,
+                );
             } else {
                 self.show_message(origin, "Directory visits are not supported (no dired)", cx);
             }
             return;
         }
+        let location = match &node.kind {
+            crate::tree::NodeKind::Tag { line, column, .. } => Some((*line, *column)),
+            _ => None,
+        };
         let tree = origin.read(cx).buffer().snapshot_id().buffer;
         let ordinary = self.panes.ordinary_leaves();
         let existing = ordinary.iter().copied().find(|pane| {
@@ -559,6 +581,7 @@ impl AppShell {
             node.target,
             &target,
             super::documents::VisitOptions {
+                location,
                 tree: Some(Visit { tree, disposition }),
                 ..Default::default()
             },

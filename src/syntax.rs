@@ -17,7 +17,16 @@ mod engine;
 pub(crate) use display::DisplayHighlights;
 mod languages;
 use engine::{Parsed, parse};
-use languages::{LanguageId, for_path};
+pub(crate) use languages::LanguageId;
+use languages::for_path;
+
+pub(crate) fn language_for_path(path: Option<&Path>) -> Option<LanguageId> {
+    for_path(path)
+}
+
+pub(crate) fn supports_path(path: &Path) -> bool {
+    for_path(Some(path)).is_some()
+}
 
 use crate::buffer::{BufferSnapshot, SnapshotId};
 use crate::text::Rope;
@@ -199,6 +208,19 @@ impl Syntax {
                 state.pending = Some(change);
             }
         }
+    }
+
+    pub fn language(&self) -> Option<LanguageId> {
+        self.0.borrow().language
+    }
+
+    pub fn current_tree(&self) -> Option<(LanguageId, BufferSnapshot, tree_sitter::Tree)> {
+        let state = self.0.borrow();
+        let base = state.base.as_ref()?;
+        (Some(base.language) == state.language && base.snapshot.id() == state.latest.id())
+            .then(|| base.layers.first())
+            .flatten()
+            .map(|layer| (base.language, base.snapshot.clone(), layer.tree.clone()))
     }
 
     pub fn highlights(&self) -> Option<Arc<Highlights>> {

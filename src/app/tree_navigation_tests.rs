@@ -627,3 +627,153 @@ fn failed_locate_preserves_projection_and_does_not_change_the_project(cx: &mut T
         );
     });
 }
+
+#[gpui::test]
+fn file_tab_expands_nested_tags_and_navigates_and_visits_symbol_locations(cx: &mut TestAppContext) {
+    let fixture = Fixture::new();
+    let rs = fixture.file("main.rs");
+    std::fs::write(
+        &rs,
+        "struct Boxed;\nimpl Boxed {\n    fn method_one() {}\n}\nfn helper() {}\n",
+    )
+    .unwrap();
+    let empty_rs = fixture.file("empty.rs");
+    std::fs::write(&empty_rs, "// no symbols\n").unwrap();
+
+    let (mut visual, shell) = open(&fixture, cx);
+    show_tree(&mut visual, &shell);
+    let tree = tree_view(&visual, &shell);
+
+    // Empty .rs file reports `No tags found for ...` without `Tree unchanged: ` prefix.
+    point_at(&mut visual, &shell, &empty_rs);
+    visual.simulate_keystrokes("tab");
+    wait(&mut visual, &shell);
+    visual.read(|cx| {
+        let msg = tree.read(cx).message().unwrap().to_owned();
+        assert!(msg.starts_with("No tags found for "), "got: {msg}");
+    });
+
+    // Expand tags on main.rs via TAB.
+    point_at(&mut visual, &shell, &rs);
+    visual.simulate_keystrokes("tab");
+    wait(&mut visual, &shell);
+    visual.read(|cx| {
+        let buffer = tree.read(cx).buffer();
+        let text = buffer.text().to_string();
+        let visible: Vec<_> = buffer
+            .sections()
+            .unwrap()
+            .visible_lines()
+            .iter()
+            .map(|r| text[r.start.0..r.end.0].trim_end_matches('\n'))
+            .collect();
+        assert!(visible.contains(&"   main.rs"));
+        assert!(visible.contains(&"    · Boxed"));
+        assert!(visible.contains(&"    + Boxed"));
+        assert!(visible.contains(&"    · helper"));
+        assert!(!visible.contains(&"      · method_one"));
+    });
+
+    // `M-n` / `M-p` navigate sibling tags, `u` returns to parent file node.
+    visual.simulate_keystrokes("n alt-n alt-p u");
+    visual.read(|cx| {
+        assert_eq!(tree.read(cx).buffer().tree_node().unwrap().path, rs);
+        assert!(!tree.read(cx).buffer().tree_node().unwrap().is_tag());
+    });
+
+    // Navigate down to `+ Boxed` (`impl Boxed`), expand it with TAB, then step into `method_one`.
+    visual.simulate_keystrokes("n n tab");
+    wait(&mut visual, &shell);
+    visual.read(|cx| {
+        let text = tree.read(cx).buffer().text().to_string();
+        assert!(text.contains("    - Boxed\n      · method_one\n    · helper"));
+    });
+
+    // `h` on expanded tag group collapses it; expand again, visit `method_one` with `C-u RET` (stay in tree).
+    visual.simulate_keystrokes("h");
+    wait(&mut visual, &shell);
+    visual.read(|cx| {
+        assert_eq!(
+            tree.read(cx)
+                .buffer()
+                .sections()
+                .unwrap()
+                .visible_lines()
+                .len(),
+            7
+        );
+    });
+    visual.simulate_keystrokes("tab n ctrl-u enter");
+    wait(&mut visual, &shell);
+    visual.read(|cx| {
+        let shell = shell.read(cx);
+        // Focus stayed in tree (`C-u RET`), while ordinary pane opened main.rs at line 3.
+        assert_eq!(shell.panes.side(), Some(shell.panes.selected()));
+        let ordinary = shell.panes.ordinary_leaves()[0];
+        let view = shell.body_panes[&ordinary].active_view().read(cx);
+        assert_eq!(view.buffer().path().as_deref(), Some(rs.as_path()));
+        let line = view
+            .buffer()
+            .text()
+            .offset_to_point(view.buffer().point().0)
+            .row as usize
+            + 1;
+        assert_eq!(line, 3);
+    });
+
+    // Regular `RET` on `helper` moves focus to ordinary pane at line 5.
+    visual.simulate_keystrokes("n enter");
+    wait(&mut visual, &shell);
+    visual.read(|cx| {
+        let shell = shell.read(cx);
+        assert_ne!(shell.panes.side(), Some(shell.panes.selected()));
+        let active = shell.active_view().read(cx);
+        assert_eq!(active.buffer().path().as_deref(), Some(rs.as_path()));
+        let line = active
+            .buffer()
+            .text()
+            .offset_to_point(active.buffer().point().0)
+            .row as usize
+            + 1;
+        assert_eq!(line, 5);
+    });
+
+    // Edit unsaved symbol in main.rs, return to tree, refresh (`g`), and verify unsaved tag appears.
+    visual.simulate_input("\nfn added_live() {}\n");
+    visual.update(|window, cx| window.draw(cx).clear(cx));
+    command(&mut visual, &shell, Command::OtherWindow);
+    visual.simulate_keystrokes("g");
+    wait(&mut visual, &shell);
+    visual.read(|cx| {
+        let text = tree.read(cx).buffer().text().to_string();
+        assert!(
+            text.contains("added_live"),
+            "expected unsaved tag in: {text}"
+        );
+    });
+
+    // `treemacs-find-file` locates the file node, not a tag node.
+    command(&mut visual, &shell, Command::OtherWindow);
+    command(&mut visual, &shell, Command::TreemacsFindFile);
+    wait(&mut visual, &shell);
+    visual.read(|cx| {
+        let node = tree.read(cx).buffer().tree_node().unwrap();
+        assert_eq!(node.path, rs);
+        assert!(!node.is_tag());
+    });
+
+    // `h` on expanded file node collapses its tags.
+    command(&mut visual, &shell, Command::OtherWindow);
+    visual.simulate_keystrokes("h");
+    wait(&mut visual, &shell);
+    visual.read(|cx| {
+        let visible = tree
+            .read(cx)
+            .buffer()
+            .sections()
+            .unwrap()
+            .visible_lines()
+            .len();
+        assert_eq!(visible, 4);
+    });
+}

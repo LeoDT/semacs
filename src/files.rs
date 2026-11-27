@@ -78,6 +78,10 @@ pub struct FileIdentity {
 pub struct FileIdentity;
 
 impl FileStamp {
+    pub(crate) fn len(self) -> u64 {
+        self.len
+    }
+
     pub fn identity(self) -> Option<FileIdentity> {
         #[cfg(unix)]
         {
@@ -339,6 +343,7 @@ pub fn path_candidates(
                 label: "~/".into(),
                 annotation,
                 directory: true,
+                id: None,
             }],
             query: "~".into(),
             typed_directory: String::new(),
@@ -398,6 +403,7 @@ pub fn path_candidates(
             label,
             annotation,
             directory,
+            id: None,
         });
     }
     result
@@ -906,6 +912,7 @@ mod tests {
                     label: (*label).into(),
                     annotation: String::new(),
                     directory: label.ends_with('/'),
+                    id: None,
                 },
                 highlights: Vec::new(),
             })

@@ -5,7 +5,7 @@ use tree_sitter::{Language, Query};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[repr(usize)]
-pub(super) enum LanguageId {
+pub(crate) enum LanguageId {
     Rust,
     JavaScript,
     TypeScript,
@@ -50,7 +50,7 @@ impl Definition {
         }
     }
 
-    pub fn grammar(&self) -> Language {
+    pub(crate) fn grammar(&self) -> Language {
         (self.grammar)()
     }
 
@@ -216,12 +216,16 @@ pub(super) static LANGUAGES: [Definition; 10] = [
 ];
 
 impl LanguageId {
-    pub fn definition(self) -> &'static Definition {
+    pub(super) fn definition(self) -> &'static Definition {
         &LANGUAGES[self as usize]
+    }
+
+    pub(crate) fn grammar(self) -> Language {
+        self.definition().grammar()
     }
 }
 
-pub(super) fn for_path(path: Option<&Path>) -> Option<LanguageId> {
+pub(crate) fn for_path(path: Option<&Path>) -> Option<LanguageId> {
     let extension = path?.extension()?.to_str()?;
     LANGUAGES
         .iter()

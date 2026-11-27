@@ -13,8 +13,8 @@ use crate::files;
 use crate::session::ReadKind;
 
 pub(super) struct CompletionWork {
-    cancelled: Arc<AtomicBool>,
-    _task: Task<()>,
+    pub(super) cancelled: Arc<AtomicBool>,
+    pub(super) _task: Task<()>,
 }
 
 impl Drop for CompletionWork {
@@ -207,6 +207,31 @@ impl AppShell {
             });
             return;
         }
+        if let ReadKind::Imenu { ready, .. } = &kind {
+            self.refresh_imenu_candidates(
+                id,
+                kind.candidate_default(),
+                *ready,
+                &origin,
+                &input,
+                snapshot,
+                window,
+                cx,
+            );
+            return;
+        }
+        if let ReadKind::ProjectImenu { project } = &kind {
+            self.refresh_project_imenu_candidates(
+                id,
+                project.clone(),
+                &origin,
+                &input,
+                snapshot,
+                window,
+                cx,
+            );
+            return;
+        }
         if matches!(
             kind,
             ReadKind::FindFile
@@ -334,6 +359,7 @@ impl AppShell {
                         label: name.clone(),
                         annotation: String::new(),
                         directory: false,
+                        id: None,
                     })
                     .collect();
                 let items = if query.is_empty() {
@@ -492,7 +518,7 @@ impl AppShell {
         }
     }
 
-    fn publish_candidates(&self, cx: &mut Context<Self>) {
+    pub(super) fn publish_candidates(&self, cx: &mut Context<Self>) {
         if let (Some(mount), Some(list)) = (
             &self.minibuffer,
             self.session
@@ -545,11 +571,21 @@ impl AppShell {
                 }
                 self.refresh_candidates(window, cx);
             }
-            CandidateResolution::Accept(text) => {
-                if text != input {
-                    self.replace_session_input(id, &text, window, cx);
+            CandidateResolution::Accept {
+                value,
+                id: accepted_id,
+            } => {
+                if matches!(
+                    session.kind(),
+                    ReadKind::Imenu { .. } | ReadKind::ProjectImenu { .. }
+                ) {
+                    self.confirm_session_with_id(accepted_id, window, cx);
+                } else {
+                    if value != input {
+                        self.replace_session_input(id, &value, window, cx);
+                    }
+                    self.confirm_session(window, cx);
                 }
-                self.confirm_session(window, cx);
             }
             CandidateResolution::NoMatch => self.message_minibuffer("No match", cx),
         }

@@ -138,12 +138,14 @@ commands! {
     ProjectSwitchProject => "project-switch-project", Application, ["ctrl-x p p" => "C-x p p"];
     ProjectFindFile => "project-find-file", Application, ["ctrl-x p f" => "C-x p f"];
     ProjectFindRegexp => "project-find-regexp", Application, ["ctrl-x p g" => "C-x p g"];
+    ProjectImenu => "project-imenu", Application, ["ctrl-x p i" => "C-x p i"];
     ProjectSwitchToBuffer => "project-switch-to-buffer", Application, ["ctrl-x p b" => "C-x p b"];
     ProjectKillBuffers => "project-kill-buffers", Application, ["ctrl-x p k" => "C-x p k"];
     ProjectRememberProject => "project-remember-project", Application, [];
     ProjectForgetProject => "project-forget-project", Application, [];
     ProjectForgetZombieProjects => "project-forget-zombie-projects", Application, [];
     ProjectRememberProjectsUnder => "project-remember-projects-under", Application, [];
+    Imenu => "imenu", Application, ["alt-g i" => "M-g i"];
     Rg => "rg", Application, [];
     RgProject => "rg-project", Application, [];
     IsearchForward => "isearch-forward", Application, ["ctrl-s" => "C-s"];

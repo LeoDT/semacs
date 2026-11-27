@@ -24,6 +24,7 @@ pub mod keymap;
 mod messages;
 pub mod minibuffer;
 pub mod mode;
+pub mod outline;
 pub(crate) mod panes;
 pub mod persisted;
 mod platform;

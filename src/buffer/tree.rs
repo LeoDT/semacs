@@ -1,10 +1,12 @@
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
 use super::Buffer;
+use crate::outline::OpenFileOverlay;
 use crate::section::Sections;
-use crate::tree::{Node, RenderedTree, Tree, TreeGitStatus};
+use crate::tree::{Node, NodeKind, NodeTarget, RenderedTree, Tree, TreeGitStatus, TreeReadError};
 
 #[cfg(test)]
 #[path = "tree_tests.rs"]
@@ -26,8 +28,8 @@ pub(super) struct TreeSession {
 #[derive(Clone)]
 pub(crate) enum Action {
     Refresh,
-    Toggle(PathBuf),
-    Fold(PathBuf, bool),
+    Toggle(NodeTarget),
+    Fold(NodeTarget, bool),
     Hidden,
     Locate(PathBuf),
 }
@@ -39,6 +41,7 @@ pub(crate) struct Request {
     previous: Option<Arc<Sections>>,
     git: Option<Arc<TreeGitStatus>>,
     pub git_version: u64,
+    open_files: HashMap<PathBuf, OpenFileOverlay>,
     action: ReadAction,
 }
 
@@ -50,7 +53,7 @@ enum ReadAction {
 }
 
 impl Request {
-    pub fn read(self, cancelled: &AtomicBool) -> Result<(Arc<Tree>, RenderedTree), String> {
+    pub fn read(self, cancelled: &AtomicBool) -> Result<(Arc<Tree>, RenderedTree), TreeReadError> {
         let data = match &self.action {
             ReadAction::Locate(path) => {
                 Arc::new(self.data.as_ref().clone().locate(path, cancelled)?)
@@ -60,25 +63,35 @@ impl Request {
                 if matches!(self.action, ReadAction::Hidden) {
                     data.show_hidden = !data.show_hidden;
                 }
-                Arc::new(data.refresh(cancelled)?)
+                Arc::new(data.refresh_with_overlays(&self.open_files, cancelled)?)
             }
-            ReadAction::Fold(node, false) if !self.data.is_loaded(&node.target) => {
+            ReadAction::Fold(node, false)
+                if node.is_directory() && !self.data.is_loaded(&node.target) =>
+            {
                 Arc::new(self.data.as_ref().clone().expand(&node.target, cancelled)?)
+            }
+            ReadAction::Fold(node, false) if !node.is_directory() && !node.is_tag() => {
+                Arc::new(self.data.as_ref().clone().expand_tags(
+                    &node.target,
+                    &self.open_files,
+                    cancelled,
+                )?)
             }
             ReadAction::Fold(..) => self.data,
         };
+        let fold_target = match &self.action {
+            ReadAction::Fold(node, collapsed) => Some((node.section_target(), *collapsed)),
+            _ => None,
+        };
         let mut rendered = data.render_with_git(
             self.previous.as_deref(),
-            match &self.action {
-                ReadAction::Fold(node, collapsed) => Some((node.path.as_path(), *collapsed)),
-                _ => None,
-            },
+            fold_target.as_ref().map(|(target, c)| (target, *c)),
             self.git.as_deref(),
         )?;
         if let ReadAction::Locate(path) = self.action {
             let heading = rendered
                 .node_for(&path)
-                .ok_or("Tree node no longer exists")?
+                .ok_or_else(|| TreeReadError::Other("Tree node no longer exists".into()))?
                 .heading;
             rendered.sections.reveal(heading);
             rendered = data.render_with_git(Some(&rendered.sections), None, self.git.as_deref())?;
@@ -184,38 +197,72 @@ impl Buffer {
                 .ok_or("No neighbour in this direction")?
             }
             TreemacsCollapse
-                if session.nodes[current - 1].directory && !nodes[current].collapsed =>
+                if (session.nodes[current - 1].is_directory()
+                    || matches!(
+                        session.nodes[current - 1].kind,
+                        NodeKind::Tag {
+                            has_children: true,
+                            ..
+                        }
+                    )
+                    || (!session.nodes[current - 1].is_tag()
+                        && nodes[current].body < nodes[current].range.end))
+                    && !nodes[current].collapsed =>
             {
                 return Ok((
                     nodes[current].range.start,
-                    Some(Action::Fold(session.nodes[current - 1].path.clone(), true)),
+                    Some(Action::Fold(
+                        session.nodes[current - 1].section_target(),
+                        true,
+                    )),
                 ));
             }
             TreemacsCollapse | TreemacsParent | TreemacsCollapseParent => parent()?,
             _ => return Err("Not a tree navigation command".into()),
         };
         let fold = (command == TreemacsCollapseParent)
-            .then(|| Action::Fold(session.nodes[target - 1].path.clone(), true));
+            .then(|| Action::Fold(session.nodes[target - 1].section_target(), true));
         Ok((nodes[target].range.start, fold))
     }
 
-    pub(crate) fn tree_action(&self, refresh: bool) -> Result<Action, String> {
+    pub(crate) fn tree_action(&self, refresh: bool) -> Result<Option<Action>, String> {
         if refresh {
-            return Ok(Action::Refresh);
+            return Ok(Some(Action::Refresh));
         }
         let node = self.tree_node()?;
-        if !node.directory {
-            return Err(format!("No tags found for {}", node.path.display()));
+        match &node.kind {
+            NodeKind::Directory => Ok(Some(Action::Toggle(NodeTarget::Path(node.path)))),
+            NodeKind::File => {
+                if !crate::syntax::supports_path(&node.target) {
+                    return Err(format!("No tags found for {}", node.path.display()));
+                }
+                Ok(Some(Action::Toggle(NodeTarget::Path(node.path))))
+            }
+            NodeKind::Tag {
+                key, has_children, ..
+            } => {
+                if *has_children {
+                    Ok(Some(Action::Toggle(NodeTarget::Tag(key.clone()))))
+                } else {
+                    Ok(None)
+                }
+            }
         }
-        Ok(Action::Toggle(node.path.clone()))
     }
 
     #[cfg(test)]
     fn begin_tree_request(&self, refresh: bool) -> Result<Request, String> {
-        self.begin_tree_action(self.tree_action(refresh)?)
+        let action = self
+            .tree_action(refresh)?
+            .ok_or_else(|| "Nothing to toggle".to_owned())?;
+        self.begin_tree_action(action, HashMap::new())
     }
 
-    pub(crate) fn begin_tree_action(&self, action: Action) -> Result<Request, String> {
+    pub(crate) fn begin_tree_action(
+        &self,
+        action: Action,
+        open_files: HashMap<PathBuf, OpenFileOverlay>,
+    ) -> Result<Request, String> {
         let mut doc = self.document.borrow_mut();
         if doc.path.is_some() {
             return Err("Tree buffer was saved as a file".into());
@@ -226,13 +273,13 @@ impl Buffer {
             Action::Refresh => ReadAction::Refresh,
             Action::Hidden => ReadAction::Hidden,
             Action::Locate(path) => ReadAction::Locate(path),
-            Action::Toggle(ref path) | Action::Fold(ref path, _) => {
+            Action::Toggle(ref target) | Action::Fold(ref target, _) => {
                 let sections = previous.as_ref().ok_or("Tree is not ready")?;
                 let (index, node) = session
                     .nodes
                     .iter()
                     .enumerate()
-                    .find(|(_, node)| &node.path == path)
+                    .find(|(_, node)| node.section_target() == *target)
                     .ok_or("Tree node no longer exists")?;
                 let collapsed = if let Action::Fold(_, collapsed) = action {
                     collapsed
@@ -253,6 +300,7 @@ impl Buffer {
             previous,
             git: session.git.clone(),
             git_version: session.git_version,
+            open_files,
             action,
         })
     }

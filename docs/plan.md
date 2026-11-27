@@ -2,22 +2,21 @@
 
 本文是当前工作和跨会话待办的唯一入口；维护与归档规则见 [文档说明](README.md#维护规则)。范围与当前方向见 [需求](requirements.md#当前方向v1-后)，行为见 [保真度契约](emacs-fidelity.md)。里程碑按可验收行为划分，不按工期估算。
 
-## 当前状态：R0–F11 已完成并归档，待确认 F12 方向
+## 当前状态：R0–F12 已完成，待确认 F13 方向
 
-R0–F11（含基础编辑、主题与多语言语法、Magit diff / status / commit / log / range、文件夹 tree viewer、基础 project、ripgrep 项目与文件夹搜索、isearch 增量搜索、多光标同步编辑）及阶段间小增强均已完成，交付结论与当时未测边界统一见 [已完成阶段归档索引](archive/README.md)，固定版本验收与诊断证据见 [冻结记录索引](records/README.md)。
+R0–F12（含基础编辑、主题与多语言语法、Magit diff / status / commit / log / range、文件夹 tree viewer 含 file tags、基础 project、ripgrep 项目与文件夹搜索、isearch 增量搜索、多光标同步编辑、tree-sitter `imenu` / `project-imenu` 结构导航）及阶段间小增强均已完成，R0–F11 交付结论与当时未测边界统一见 [已完成阶段归档索引](archive/README.md)，固定版本验收与诊断证据见 [冻结记录索引](records/README.md)。
 
 没有已知阻塞性遗留；已接受的性能观察、字体 / 中文输入差异和未测边界保持原结论，不因功能收尾或方向调整视为预算通过。
 
 产品重心已确认以「使用 Emacs 操作逻辑的代码查看工具」为主线：基础编辑保留，已交付的 Git 写入保持可用但不继续扩展为完整 Magit / Git 客户端；主要精力放在代码查看、结构导航与浏览体验增强。长期边界见 [D29](decisions.md#d29-代码查看优先) 与 [需求与范围](requirements.md#当前方向v1-后)。阶段收尾后停下汇报，不自动进入下一阶段。
 
-## 后续候选方向（尚未排期，待确认 F12）
+## 后续候选方向（尚未排期，待确认 F13）
 
 以下方向已确认但尚未排期，仍不是已批准的实施顺序：
 
 ### 结构导航与阅读辅助（tree-sitter，不引入 LSP）
 
-- **imenu / tree-sitter outline**：按函数 / 类 / Markdown 标题列出并跳转；复用现有语言查询，不引入 LSP。
-- **面包屑 / 当前符号**：在 mode line 或 header 显示路径与 tree-sitter 外层结构；不依赖 LSP。
+- **面包屑 / 当前符号**：在 mode line 或 header 显示路径与 tree-sitter 外层结构；可复用 F12 的 `outline` 能力，不依赖 LSP。
 - **更多语言 / 符号导航**：按实际代码库补 grammar 与 outline 查询，不预建语言平台。
 
 ### tree viewer 集成

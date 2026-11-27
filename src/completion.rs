@@ -19,6 +19,7 @@ pub struct Candidate {
     pub label: String,
     pub annotation: String,
     pub directory: bool,
+    pub id: Option<usize>,
 }
 
 impl Candidate {
@@ -28,7 +29,13 @@ impl Candidate {
             label: name,
             annotation,
             directory: false,
+            id: None,
         }
+    }
+
+    pub fn with_id(mut self, id: usize) -> Self {
+        self.id = Some(id);
+        self
     }
 }
 
@@ -49,7 +56,7 @@ pub(crate) enum CandidateAction {
 pub(crate) enum CandidateResolution {
     Pending,
     Insert(String),
-    Accept(String),
+    Accept { value: String, id: Option<usize> },
     NoMatch,
 }
 
@@ -124,7 +131,10 @@ impl CandidateList {
             return if candidate.directory || matches!(action, CandidateAction::Insert) {
                 Insert(candidate.value.clone())
             } else {
-                Accept(candidate.value.clone())
+                Accept {
+                    value: candidate.value.clone(),
+                    id: candidate.id,
+                }
             };
         }
         if matches!(action, CandidateAction::Insert) {
@@ -140,9 +150,15 @@ impl CandidateList {
             // The confirm step owns what a directory answer means: a directory
             // keeps `find-file` open and appends the buffer name for
             // `write-file`.
-            return Accept(input.to_owned());
+            return Accept {
+                value: input.to_owned(),
+                id: None,
+            };
         }
-        Accept(input.to_owned())
+        Accept {
+            value: input.to_owned(),
+            id: None,
+        }
     }
 
     pub fn navigate(&mut self, forward: bool) {
@@ -373,16 +389,25 @@ mod tests {
         let mut list = CandidateList::ready(matches(&["alpha.txt"], "al"), "al", None, false);
         assert_eq!(
             list.resolve(Action::Accept, "al"),
-            Resolution::Accept("alpha.txt".into())
+            Resolution::Accept {
+                value: "alpha.txt".into(),
+                id: None,
+            }
         );
         assert_eq!(
             list.resolve(Action::Raw, "al"),
-            Resolution::Accept("al".into())
+            Resolution::Accept {
+                value: "al".into(),
+                id: None,
+            }
         );
         list.navigate(false);
         assert_eq!(
             list.resolve(Action::Accept, "al"),
-            Resolution::Accept("al".into())
+            Resolution::Accept {
+                value: "al".into(),
+                id: None,
+            }
         );
         assert_eq!(
             list.resolve(Action::Insert, "al"),
@@ -393,11 +418,17 @@ mod tests {
         let list = CandidateList::ready(Vec::new(), "dir/", None, true);
         assert_eq!(
             list.resolve(Action::Accept, "dir/"),
-            Resolution::Accept("dir/".into())
+            Resolution::Accept {
+                value: "dir/".into(),
+                id: None,
+            }
         );
         assert_eq!(
             list.resolve(Action::Raw, "dir/"),
-            Resolution::Accept("dir/".into())
+            Resolution::Accept {
+                value: "dir/".into(),
+                id: None,
+            }
         );
         assert_eq!(list.resolve(Action::Insert, "dir/"), Resolution::NoMatch);
         let mut list = CandidateList::ready(Vec::new(), "dir", None, false);
@@ -409,7 +440,10 @@ mod tests {
         let list = CandidateList::ready(Vec::new(), "new", None, false);
         assert_eq!(
             list.resolve(Action::Accept, "new"),
-            Resolution::Accept("new".into())
+            Resolution::Accept {
+                value: "new".into(),
+                id: None,
+            }
         );
     }
 

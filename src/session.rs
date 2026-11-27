@@ -18,6 +18,7 @@ pub enum ProjectAction {
     SwitchMenu,
     FindFile,
     FindRegexp,
+    Imenu,
     SwitchToBuffer,
     KillBuffers,
     Remember,
@@ -73,6 +74,13 @@ pub enum ReadKind {
     },
     ProjectFindFile {
         project: crate::project::Project,
+    },
+    ProjectImenu {
+        project: crate::project::Project,
+    },
+    Imenu {
+        default: Option<String>,
+        ready: bool,
     },
     ProjectSwitchToBuffer {
         project: crate::project::Project,
@@ -245,6 +253,8 @@ impl ReadKind {
                 | Self::ProjectDirectory { .. }
                 | Self::ProjectScanDirectory
                 | Self::ProjectFindFile { .. }
+                | Self::ProjectImenu { .. }
+                | Self::Imenu { .. }
                 | Self::ProjectSwitchToBuffer { .. }
                 | Self::SearchDirectory { .. }
                 | Self::FindFile
@@ -264,6 +274,7 @@ impl ReadKind {
 
     pub fn candidate_default(&self) -> Option<&str> {
         match self {
+            Self::Imenu { default, .. } => default.as_deref(),
             Self::SwitchToBuffer { default }
             | Self::ProjectSwitchToBuffer { default, .. }
             | Self::ProjectSelect { default, .. }
@@ -319,7 +330,7 @@ impl ReadKind {
             Self::StatusJumpMenu { prefix: None } => "Choose n, u, s, m, z, p, f; C-g cancels",
             Self::StatusJumpMenu { prefix: Some(_) } => "Choose u, p; C-g cancels",
             Self::ProjectSwitchMenu { .. } => {
-                "Unrecognized input; choose f, g, b, v, t; C-g cancels"
+                "Unrecognized input; choose f, g, i, b, v, t; C-g cancels"
             }
             #[cfg(unix)]
             Self::CommitTargetMerges { .. } => "Choose c (continue), s (select other), a (abort)",
@@ -378,13 +389,21 @@ impl ReadKind {
             ReadKind::ProjectDirectory { .. } => "Select directory: ".to_owned(),
             ReadKind::ProjectScanDirectory => "Directory: ".to_owned(),
             ReadKind::ProjectSwitchMenu { project } => format!(
-                "Command in `{}': [f] Find file  [g] Find regexp  [b] Switch buffer  [v] Magit status  [t] Treemacs ",
+                "Command in `{}': [f] Find file  [g] Find regexp  [i] Imenu  [b] Switch buffer  [v] Magit status  [t] Treemacs ",
                 crate::files::directory_input(&project.root)
             ),
             ReadKind::ProjectFindFile { project } => format!(
                 "Find file in {}: ",
                 crate::files::directory_input(&project.root)
             ),
+            ReadKind::ProjectImenu { project } => format!(
+                "Imenu in {}: ",
+                crate::files::directory_input(&project.root)
+            ),
+            ReadKind::Imenu { default, .. } => match default {
+                Some(name) => format!("Index item (default {name}): "),
+                None => "Index item: ".to_owned(),
+            },
             ReadKind::ProjectSwitchToBuffer { default, .. } => match default {
                 Some(name) => format!("Switch to buffer (default {name}): "),
                 None => "Switch to buffer: ".to_owned(),
@@ -496,7 +515,7 @@ impl ReadSession {
                 ReadKind::DiffRefreshMenu => &["r", "f", "g"],
                 ReadKind::StatusJumpMenu { prefix: None } => &["n", "u", "s", "m", "z", "p", "f"],
                 ReadKind::StatusJumpMenu { prefix: Some(_) } => &["u", "p"],
-                ReadKind::ProjectSwitchMenu { .. } => &["f", "g", "b", "v", "t"],
+                ReadKind::ProjectSwitchMenu { .. } => &["f", "g", "i", "b", "v", "t"],
                 #[cfg(unix)]
                 ReadKind::CommitTargetMerges { .. } => &["c", "s", "a"],
                 _ => &["y", "shift-y", "n", "shift-n", "enter", "ctrl-m"],
@@ -596,5 +615,12 @@ impl ReadSession {
 
     pub(crate) fn keymap(&self) -> &Keymap {
         &self.keymap
+    }
+
+    pub(crate) fn set_imenu_default(&mut self, value: Option<String>) {
+        if let ReadKind::Imenu { default, ready } = &mut self.kind {
+            *default = value;
+            *ready = true;
+        }
     }
 }

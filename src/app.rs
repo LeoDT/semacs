@@ -42,6 +42,7 @@ mod git;
 #[cfg(test)]
 mod git_test_support;
 mod history;
+mod imenu;
 mod index_write;
 mod isearch;
 #[cfg(unix)]
@@ -72,6 +73,7 @@ pub fn init(cx: &mut App) {
     cx.default_global::<crate::file_history::FileHistory>();
     cx.default_global::<crate::project::ProjectList>();
     cx.default_global::<crate::isearch::IsearchRing>();
+    cx.default_global::<crate::outline::ProjectOutlineCache>();
 }
 
 struct MinibufferMount {
@@ -79,6 +81,10 @@ struct MinibufferMount {
     completion: Option<candidates::CompletionWork>,
     project_files_work: Option<candidates::CompletionWork>,
     project_files: Option<std::sync::Arc<Vec<String>>>,
+    imenu_work: Option<candidates::CompletionWork>,
+    imenu_symbols: Option<std::sync::Arc<Vec<crate::outline::FlatSymbol>>>,
+    project_imenu_work: Option<candidates::CompletionWork>,
+    project_imenu_symbols: Option<std::sync::Arc<Vec<crate::outline::ProjectSymbol>>>,
     candidate_snapshot: Option<crate::input::DisplayId>,
     pending_candidate_action: Option<crate::completion::CandidateAction>,
     _subscription: Subscription,
@@ -141,6 +147,8 @@ pub struct AppShell {
     tree_read_gate: Option<futures_channel::oneshot::Receiver<()>>,
     #[cfg(test)]
     project_files_gate: Option<futures_channel::oneshot::Receiver<()>>,
+    #[cfg(test)]
+    project_imenu_gate: Option<futures_channel::oneshot::Receiver<()>>,
     #[cfg(test)]
     revert_read_gate: Option<futures_channel::oneshot::Receiver<()>>,
     auto_revert: crate::revert::AutoRevertSettings,
@@ -282,6 +290,8 @@ impl AppShell {
             tree_read_gate: None,
             #[cfg(test)]
             project_files_gate: None,
+            #[cfg(test)]
+            project_imenu_gate: None,
             #[cfg(test)]
             revert_read_gate: None,
             auto_revert,
@@ -464,6 +474,7 @@ impl AppShell {
             Command::TreemacsFindFile => self.find_tree_file(origin, window, cx),
             Command::ProjectSwitchProject
             | Command::ProjectFindFile
+            | Command::ProjectImenu
             | Command::ProjectSwitchToBuffer
             | Command::ProjectKillBuffers
             | Command::ProjectRememberProject
@@ -471,6 +482,9 @@ impl AppShell {
             | Command::ProjectForgetZombieProjects
             | Command::ProjectRememberProjectsUnder => {
                 self.project_command(command, origin, window, cx);
+            }
+            Command::Imenu => {
+                self.imenu_command(origin, window, cx);
             }
             Command::IsearchForward
             | Command::IsearchBackward

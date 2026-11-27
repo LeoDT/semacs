@@ -4,7 +4,7 @@ use crate::text::ByteOffset;
 use crate::tree::tests::Fixture;
 
 fn apply(buffer: &mut Buffer, action: Action) {
-    let request = buffer.begin_tree_action(action).unwrap();
+    let request = buffer.begin_tree_action(action, HashMap::new()).unwrap();
     let serial = request.serial;
     let git_version = request.git_version;
     let root = request.root.clone();
@@ -36,7 +36,10 @@ fn tree_navigation_wraps_visible_rows_but_neighbours_stop_at_the_parent() {
     assert_eq!(buffer.point(), ByteOffset(0));
     navigate(&mut buffer, Command::TreemacsNext).unwrap();
     assert_eq!(buffer.tree_node().unwrap().path, fixture.0.join("a"));
-    apply(&mut buffer, Action::Toggle(fixture.0.join("a")));
+    apply(
+        &mut buffer,
+        Action::Toggle(NodeTarget::Path(fixture.0.join("a"))),
+    );
     navigate(&mut buffer, Command::TreemacsNextNeighbour).unwrap();
     assert_eq!(buffer.tree_node().unwrap().path, fixture.0.join("b"));
     navigate(&mut buffer, Command::TreemacsPreviousNeighbour).unwrap();
@@ -85,7 +88,10 @@ fn locate_only_loads_ancestors_and_reveals_them_without_opening_other_branches()
     fixture.file("other/child/file");
     let mut buffer = Buffer::tree(fixture.0.clone());
     apply(&mut buffer, Action::Refresh);
-    apply(&mut buffer, Action::Fold(fixture.0.clone(), true));
+    apply(
+        &mut buffer,
+        Action::Fold(NodeTarget::Path(fixture.0.clone()), true),
+    );
     apply(&mut buffer, Action::Locate(file.clone()));
     let heading = buffer.tree_heading(&file).unwrap();
     let sections = buffer.sections().unwrap();
@@ -115,7 +121,9 @@ fn hidden_toggle_preserves_loaded_folds_and_failed_locate_does_not_install() {
         fixture.0.join("missing"),
         fixture.0.parent().unwrap().join("outside"),
     ] {
-        let request = buffer.begin_tree_action(Action::Locate(path)).unwrap();
+        let request = buffer
+            .begin_tree_action(Action::Locate(path), HashMap::new())
+            .unwrap();
         assert!(request.read(&AtomicBool::new(false)).is_err());
         assert_eq!(buffer.text().to_string(), text);
     }
