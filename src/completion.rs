@@ -163,11 +163,31 @@ impl CandidateList {
     }
 
     pub fn visible_range(&self, rows: usize) -> Range<usize> {
-        let end = self
-            .items
-            .len()
-            .min(self.selected.unwrap_or(0).saturating_add(1).max(rows));
-        end.saturating_sub(rows)..end
+        self.visible_range_from(0, rows)
+    }
+
+    pub fn visible_range_from(&self, scroll: usize, rows: usize) -> Range<usize> {
+        let total = self.items.len();
+        if rows == 0 || total == 0 {
+            return 0..0;
+        }
+        let max_start = total.saturating_sub(rows);
+        let start = match self.selected {
+            Some(index) => {
+                let index = index.min(total - 1);
+                let start = scroll.min(max_start);
+                if index < start {
+                    index
+                } else if index >= start.saturating_add(rows) {
+                    index.saturating_add(1).saturating_sub(rows)
+                } else {
+                    start
+                }
+            }
+            None => 0,
+        };
+        let end = start.saturating_add(rows).min(total);
+        start..end
     }
 }
 
@@ -411,6 +431,80 @@ mod tests {
         empty.navigate(true);
         empty.navigate(false);
         assert!(empty.selected.is_none());
+    }
+
+    #[test]
+    fn visible_range_from_scrolls_only_when_selection_leaves_viewport() {
+        let items = matches(
+            &[
+                "00", "01", "02", "03", "04", "05", "06", "07", "08", "09", "10", "11",
+            ],
+            "",
+        );
+        let mut list = CandidateList::ready(items, "", None, true);
+        let mut scroll = 0;
+
+        // Selecting the input row (`None`) shows from the top.
+        let range = list.visible_range_from(5, 8);
+        assert_eq!(range, 0..8);
+
+        // Moving down across the first page keeps scroll at 0.
+        for expected in 0..8 {
+            list.navigate(true);
+            assert_eq!(list.selected, Some(expected));
+            let range = list.visible_range_from(scroll, 8);
+            assert_eq!(range, 0..8);
+            scroll = range.start;
+        }
+
+        // Moving down past the bottom of the page scrolls 1 row at a time.
+        for (expected, expected_start) in [(8, 1), (9, 2), (10, 3)] {
+            list.navigate(true);
+            assert_eq!(list.selected, Some(expected));
+            let range = list.visible_range_from(scroll, 8);
+            assert_eq!(range, expected_start..expected_start + 8);
+            scroll = range.start;
+        }
+
+        // Moving back up keeps the viewport fixed until reaching the top visible row.
+        for expected in (3..10).rev() {
+            list.navigate(false);
+            assert_eq!(list.selected, Some(expected));
+            let range = list.visible_range_from(scroll, 8);
+            assert_eq!(range, 3..11);
+            scroll = range.start;
+        }
+
+        // Moving up past the top visible row scrolls 1 row at a time.
+        for (expected, expected_start) in [(2, 2), (1, 1), (0, 0)] {
+            list.navigate(false);
+            assert_eq!(list.selected, Some(expected));
+            let range = list.visible_range_from(scroll, 8);
+            assert_eq!(range, expected_start..expected_start + 8);
+            scroll = range.start;
+        }
+
+        // Moving down again keeps the viewport fixed until hitting the bottom edge.
+        for expected in 1..8 {
+            list.navigate(true);
+            assert_eq!(list.selected, Some(expected));
+            let range = list.visible_range_from(scroll, 8);
+            assert_eq!(range, 0..8);
+            scroll = range.start;
+        }
+        list.navigate(true);
+        assert_eq!(list.selected, Some(8));
+        assert_eq!(list.visible_range_from(scroll, 8), 1..9);
+
+        // Shrinking or growing `rows` clamps `scroll` so no trailing blanks appear
+        // and keeps the selection visible.
+        list.selected = Some(11);
+        let range = list.visible_range_from(9, 4);
+        assert_eq!(range, 8..12);
+        let grown = list.visible_range_from(range.start, 8);
+        assert_eq!(grown, 4..12);
+        list.selected = Some(2);
+        assert_eq!(list.visible_range_from(8, 4), 2..6);
     }
 
     #[test]

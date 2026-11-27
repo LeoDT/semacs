@@ -13,6 +13,8 @@ pub struct Minibuffer {
     editor: Entity<BufferView>,
     candidates: Option<CandidateList>,
     peak_candidate_rows: usize,
+    candidate_scroll: usize,
+    candidate_rows: Option<usize>,
     _editor_subscription: Subscription,
 }
 
@@ -54,11 +56,25 @@ impl Minibuffer {
             editor,
             candidates: None,
             peak_candidate_rows: 0,
+            candidate_scroll: 0,
+            candidate_rows: None,
             _editor_subscription: subscription,
         }
     }
 
     pub(crate) fn set_candidates(&mut self, candidates: CandidateList, cx: &mut Context<Self>) {
+        let same_items = self
+            .candidates
+            .as_ref()
+            .is_some_and(|previous| std::sync::Arc::ptr_eq(&previous.items, &candidates.items));
+        if !same_items {
+            self.candidate_scroll = 0;
+        }
+        if let Some(rows) = self.candidate_rows {
+            self.candidate_scroll = candidates
+                .visible_range_from(self.candidate_scroll, rows)
+                .start;
+        }
         self.candidates = Some(candidates);
         cx.notify();
     }
@@ -124,7 +140,11 @@ impl Render for Minibuffer {
                     list.items.len()
                 )
             };
-            let visible = list.visible_range(row_limit);
+            let visible = list.visible_range_from(self.candidate_scroll, row_limit);
+            if row_limit > 0 {
+                self.candidate_rows = Some(row_limit);
+                self.candidate_scroll = visible.start;
+            }
             self.peak_candidate_rows = self.peak_candidate_rows.max(visible.len());
             let reserved_rows = self.peak_candidate_rows.min(row_limit);
             let count_height = px(24.);

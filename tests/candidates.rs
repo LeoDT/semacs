@@ -627,3 +627,66 @@ fn ret_on_the_prefilled_directory_keeps_the_find_file_session(cx: &mut TestAppCo
     redraw(&mut visual);
     visual.read(|cx| assert!(shell.read(cx).session().is_none()));
 }
+
+#[gpui::test]
+fn navigating_up_from_a_scrolled_page_moves_selection_before_scrolling(cx: &mut TestAppContext) {
+    let dir = TempDir::new("candidate-scroll-up");
+    let source = dir.path().join("source.txt");
+    fs::write(&source, b"source").unwrap();
+    for index in 0..12 {
+        fs::write(dir.path().join(format!("f{index:02}.txt")), b"x").unwrap();
+    }
+    let (mut visual, shell, _) = open(buffer_at(&source, "source"), cx);
+    visual.simulate_resize(gpui_kit::size(gpui_kit::px(400.), gpui_kit::px(400.)));
+    visual.simulate_keystrokes("ctrl-x ctrl-f");
+    clear_input(&mut visual);
+    redraw(&mut visual);
+
+    assert_eq!(candidates(&visual, &shell).selected, None);
+    assert!(visual.debug_bounds("candidate-row-0").is_some());
+    assert!(visual.debug_bounds("candidate-row-7").is_some());
+    assert!(visual.debug_bounds("candidate-row-8").is_none());
+
+    for _ in 0..11 {
+        visual.simulate_keystrokes("down");
+    }
+    redraw(&mut visual);
+    assert_eq!(candidates(&visual, &shell).selected, Some(10));
+    assert!(visual.debug_bounds("candidate-row-2").is_none());
+    assert!(visual.debug_bounds("candidate-row-3").is_some());
+    assert!(visual.debug_bounds("candidate-row-10").is_some());
+    assert!(visual.debug_bounds("candidate-row-11").is_none());
+
+    // Moving up inside the current page keeps the viewport at 3..11.
+    visual.simulate_keystrokes("up");
+    redraw(&mut visual);
+    assert_eq!(candidates(&visual, &shell).selected, Some(9));
+    assert!(visual.debug_bounds("candidate-row-2").is_none());
+    assert!(visual.debug_bounds("candidate-row-3").is_some());
+    assert!(visual.debug_bounds("candidate-row-10").is_some());
+
+    for _ in 0..6 {
+        visual.simulate_keystrokes("up");
+    }
+    redraw(&mut visual);
+    assert_eq!(candidates(&visual, &shell).selected, Some(3));
+    assert!(visual.debug_bounds("candidate-row-2").is_none());
+    assert!(visual.debug_bounds("candidate-row-3").is_some());
+    assert!(visual.debug_bounds("candidate-row-10").is_some());
+
+    // Moving past the top visible row scrolls the viewport up one row.
+    visual.simulate_keystrokes("up");
+    redraw(&mut visual);
+    assert_eq!(candidates(&visual, &shell).selected, Some(2));
+    assert!(visual.debug_bounds("candidate-row-2").is_some());
+    assert!(visual.debug_bounds("candidate-row-9").is_some());
+    assert!(visual.debug_bounds("candidate-row-10").is_none());
+
+    // Updating the query resets the scroll offset back to the top.
+    visual.simulate_input("f0");
+    redraw(&mut visual);
+    assert_eq!(candidates(&visual, &shell).selected, Some(0));
+    assert!(visual.debug_bounds("candidate-row-0").is_some());
+
+    visual.simulate_keystrokes("ctrl-g");
+}
